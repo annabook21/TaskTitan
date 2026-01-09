@@ -96,13 +96,15 @@ export class Webapp extends Construct {
     handler.connections.allowToDefaultPort(database);
     asyncJob.handler.grantInvoke(handler);
 
-    // Grant Bedrock permissions for AI component generation (Claude 3.5 Sonnet v2)
+    // Grant Bedrock permissions for AI component generation (Claude Sonnet 4.5 via inference profile)
     handler.addToRolePolicy(
       new PolicyStatement({
         actions: ['bedrock:InvokeModel'],
         resources: [
-          // Claude 3.5 Sonnet v2 - supports direct invocation without inference profile
-          `arn:aws:bedrock:${Stack.of(this).region}::foundation-model/anthropic.claude-3-5-sonnet-*`,
+          // Claude Sonnet 4.5 inference profile (cross-region)
+          `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/us.anthropic.claude-sonnet-4-5-*`,
+          // Also allow the underlying foundation model
+          'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-*',
         ],
       }),
     );

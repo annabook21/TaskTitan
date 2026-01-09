@@ -77,9 +77,10 @@ Analyze this project and suggest 5-12 components that would be needed to build i
 - "summary": a brief summary of the overall architecture approach (2-3 sentences)`;
 
   try {
-    // Use Claude 3.5 Sonnet v2 on Bedrock (direct invocation supported)
+    // Use Claude Sonnet 4.5 via inference profile (cross-region)
+    // Inference profiles use "us." prefix for cross-region routing
     const command = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
