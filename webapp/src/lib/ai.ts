@@ -1,25 +1,22 @@
 /**
  * AI Service for TaskTitan
  *
- * Uses OpenAI's GPT-4o to generate component suggestions based on project descriptions.
- * This helps teams quickly break down their projects into manageable pieces.
+ * Uses Amazon Bedrock with Claude to generate component suggestions based on project descriptions.
+ * This keeps everything within AWS - no external API keys needed!
  */
 
-import OpenAI from 'openai';
+import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 
-// Lazy-initialize OpenAI client to avoid crashes when API key is not set
-let openaiClient: OpenAI | null = null;
+// Lazy-initialize Bedrock client
+let bedrockClient: BedrockRuntimeClient | null = null;
 
-function getOpenAIClient(): OpenAI {
-  if (!openaiClient) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is not set. AI features are disabled.');
-    }
-    openaiClient = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+function getBedrockClient(): BedrockRuntimeClient {
+  if (!bedrockClient) {
+    bedrockClient = new BedrockRuntimeClient({
+      region: process.env.AWS_REGION || 'us-west-2',
     });
   }
-  return openaiClient;
+  return bedrockClient;
 }
 
 export interface GeneratedComponent {
@@ -47,12 +44,7 @@ export async function generateComponents(
   projectDescription: string,
   existingComponents: string[] = [],
 ): Promise<AIGenerationResult> {
-  // Check if AI is configured first
-  if (!isAIConfigured()) {
-    throw new Error('AI features are not available. OPENAI_API_KEY is not configured.');
-  }
-
-  const openai = getOpenAIClient();
+  const client = getBedrockClient();
 
   const systemPrompt = `You are an expert software architect helping teams break down projects into components.
 Your job is to analyze a project description and suggest logical components that can be developed independently.
@@ -71,7 +63,7 @@ Consider:
 - Integration components (third-party services, auth)
 - Infrastructure components (deployment, monitoring)
 
-Respond in JSON format only.`;
+Respond with ONLY valid JSON, no other text.`;
 
   const userPrompt = `Project Name: ${projectName}
 
@@ -85,23 +77,43 @@ Analyze this project and suggest 5-12 components that would be needed to build i
 - "summary": a brief summary of the overall architecture approach (2-3 sentences)`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.7,
-      max_tokens: 2000,
+    // Use Claude 3.5 Sonnet on Bedrock
+    const command = new InvokeModelCommand({
+      modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: userPrompt,
+          },
+        ],
+        temperature: 0.7,
+      }),
     });
 
-    const content = response.choices[0]?.message?.content;
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    // Extract text content from Claude's response
+    const content = responseBody.content?.[0]?.text;
     if (!content) {
       throw new Error('No response from AI');
     }
 
-    const result = JSON.parse(content) as AIGenerationResult;
+    // Parse the JSON from Claude's response
+    // Claude might wrap JSON in markdown code blocks, so we need to extract it
+    let jsonContent = content;
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[1];
+    }
+
+    const result = JSON.parse(jsonContent) as AIGenerationResult;
 
     // Validate and sanitize the response
     if (!result.components || !Array.isArray(result.components)) {
@@ -122,13 +134,28 @@ Analyze this project and suggest 5-12 components that would be needed to build i
     return result;
   } catch (error) {
     console.error('AI generation error:', error);
-    throw new Error(error instanceof Error ? `AI generation failed: ${error.message}` : 'AI generation failed');
+    if (error instanceof Error) {
+      // Check for common Bedrock errors
+      if (error.name === 'AccessDeniedException') {
+        throw new Error(
+          'AI features require Bedrock model access. Please enable Claude in the AWS Bedrock console.',
+        );
+      }
+      if (error.name === 'ValidationException') {
+        throw new Error('AI request validation failed. Please try again with a shorter description.');
+      }
+      throw new Error(`AI generation failed: ${error.message}`);
+    }
+    throw new Error('AI generation failed');
   }
 }
 
 /**
- * Checks if the OpenAI API key is configured
+ * Checks if AI is available (Bedrock is always available if we have AWS credentials)
+ * In Lambda, we always have credentials via the execution role
  */
 export function isAIConfigured(): boolean {
-  return !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 0;
+  // In Lambda, we always have AWS credentials
+  // The real check is whether we have Bedrock model access (handled at runtime)
+  return true;
 }

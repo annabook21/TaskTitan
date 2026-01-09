@@ -26,15 +26,6 @@ interface EnvironmentProps {
    * @default false
    */
   useNatInstance?: boolean;
-
-  /**
-   * SSM Parameter Store path containing the OpenAI API key.
-   * Create this before deploying:
-   *   aws ssm put-parameter --name "/tasktitan/openai-api-key" --value "sk-..." --type SecureString
-   *
-   * @default AI features disabled
-   */
-  openAiApiKeySsmPath?: string;
 }
 
 const props: EnvironmentProps = {
@@ -42,8 +33,6 @@ const props: EnvironmentProps = {
   // Uncomment and set your domain name if you have a Route53 hosted zone
   // domainName: 'tasktitan.example.com',
   useNatInstance: false, // Use NAT Gateway for production (best practice)
-  // Uncomment to enable AI component generation (requires OpenAI API key in SSM)
-  // openAiApiKeySsmPath: '/tasktitan/openai-api-key',
 };
 
 const virginia = new UsEast1Stack(app, 'TaskTitanUsEast1Stack', {
@@ -65,7 +54,6 @@ new MainStack(app, 'TaskTitanStack', {
   domainName: props.domainName,
   useNatInstance: props.useNatInstance,
   signPayloadHandler: virginia.signPayloadHandler,
-  openAiApiKeySsmPath: props.openAiApiKeySsmPath,
 });
 
 // Uncomment to enable CDK Nag security checks

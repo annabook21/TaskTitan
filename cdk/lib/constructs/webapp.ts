@@ -17,6 +17,7 @@ import { AsyncJob } from './async-job';
 import { Trigger } from 'aws-cdk-lib/triggers';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
 export interface WebappProps {
   database: Database;
@@ -44,13 +45,6 @@ export interface WebappProps {
    * @default Use root domain
    */
   subDomain?: string;
-  /**
-   * OpenAI API key for AI component generation features.
-   * Can be passed directly or retrieved from SSM Parameter Store.
-   *
-   * @default AI features will be disabled
-   */
-  openAiApiKey?: string;
 }
 
 export class Webapp extends Construct {
@@ -79,27 +73,19 @@ export class Webapp extends Construct {
       },
     });
 
-    // Build environment variables, conditionally including OpenAI API key
-    const handlerEnvironment: Record<string, string> = {
-      ...database.getLambdaEnvironment('main'),
-      COGNITO_DOMAIN: auth.domainName,
-      USER_POOL_ID: auth.userPool.userPoolId,
-      USER_POOL_CLIENT_ID: auth.client.userPoolClientId,
-      ASYNC_JOB_HANDLER_ARN: asyncJob.handler.functionArn,
-      // AWS Powertools configuration for structured logging
-      POWERTOOLS_SERVICE_NAME: 'TaskTitanWebapp',
-      LOG_LEVEL: 'INFO',
-    };
-
-    // Add OpenAI API key if provided (enables AI component generation)
-    if (props.openAiApiKey) {
-      handlerEnvironment.OPENAI_API_KEY = props.openAiApiKey;
-    }
-
     const handler = new DockerImageFunction(this, 'Handler', {
       code: image.toLambdaDockerImageCode(),
       timeout: Duration.minutes(3),
-      environment: handlerEnvironment,
+      environment: {
+        ...database.getLambdaEnvironment('main'),
+        COGNITO_DOMAIN: auth.domainName,
+        USER_POOL_ID: auth.userPool.userPoolId,
+        USER_POOL_CLIENT_ID: auth.client.userPoolClientId,
+        ASYNC_JOB_HANDLER_ARN: asyncJob.handler.functionArn,
+        // AWS Powertools configuration for structured logging
+        POWERTOOLS_SERVICE_NAME: 'TaskTitanWebapp',
+        LOG_LEVEL: 'INFO',
+      },
       vpc: database.cluster.vpc,
       memorySize: 512,
       architecture: Architecture.ARM_64,
@@ -109,6 +95,17 @@ export class Webapp extends Construct {
     this.handler = handler;
     handler.connections.allowToDefaultPort(database);
     asyncJob.handler.grantInvoke(handler);
+
+    // Grant Bedrock permissions for AI component generation (using Claude)
+    handler.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['bedrock:InvokeModel'],
+        resources: [
+          // Allow Claude 3.5 Sonnet models
+          `arn:aws:bedrock:${Stack.of(this).region}::foundation-model/anthropic.claude-3-5-sonnet-*`,
+        ],
+      }),
+    );
 
     const service = new CloudFrontLambdaFunctionUrlService(this, 'Resource', {
       subDomain,
