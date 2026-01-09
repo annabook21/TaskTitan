@@ -96,13 +96,13 @@ export class Webapp extends Construct {
     handler.connections.allowToDefaultPort(database);
     asyncJob.handler.grantInvoke(handler);
 
-    // Grant Bedrock permissions for AI component generation (using Claude)
+    // Grant Bedrock permissions for AI component generation (using Claude Sonnet 4.5)
     handler.addToRolePolicy(
       new PolicyStatement({
         actions: ['bedrock:InvokeModel'],
         resources: [
-          // Allow Claude 3.5 Sonnet models
-          `arn:aws:bedrock:${Stack.of(this).region}::foundation-model/anthropic.claude-3-5-sonnet-*`,
+          // Allow Claude Sonnet 4.5 (latest as of Jan 2026)
+          `arn:aws:bedrock:${Stack.of(this).region}::foundation-model/anthropic.claude-sonnet-4-5-*`,
         ],
       }),
     );
