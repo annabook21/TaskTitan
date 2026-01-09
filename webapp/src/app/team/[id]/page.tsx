@@ -16,6 +16,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import InviteButton from './InviteButton';
+import SeedDemoButton from './SeedDemoButton';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -174,7 +175,7 @@ export default async function TeamDetailPage({ params }: Props) {
 
               <div className="component-card">
                 <div className="space-y-4">
-                  {team.Membership.map(({ User: member, role, joinedAt }) => {
+                  {team.Membership.map(({ User: member, role }) => {
                     const RoleIcon = roleIcons[role];
                     return (
                       <div key={member.id} className="flex items-center gap-3">
@@ -202,8 +203,14 @@ export default async function TeamDetailPage({ params }: Props) {
                     );
                   })}
                 </div>
-
               </div>
+
+              {/* Demo seed button - only for owner */}
+              {currentUserMembership?.role === 'OWNER' && (
+                <div className="mt-6">
+                  <SeedDemoButton teamId={team.id} />
+                </div>
+              )}
             </div>
           </div>
         </div>
