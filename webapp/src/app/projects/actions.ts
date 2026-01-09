@@ -6,25 +6,25 @@ import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { generateComponents, isAIConfigured } from '@/lib/ai';
 
-// Schemas
+// Schemas - Use cuid() validation since Prisma generates CUIDs, not UUIDs
 const createProjectSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   description: z.string().max(1000).optional(),
-  teamId: z.string().uuid('Invalid team ID'),
+  teamId: z.string().cuid('Invalid team ID'),
 });
 
 const updateProjectSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().cuid(),
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(1000).optional(),
 });
 
 const deleteProjectSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().cuid(),
 });
 
 const createComponentSchema = z.object({
-  projectId: z.string().uuid(),
+  projectId: z.string().cuid(),
   name: z.string().min(1, 'Name is required').max(100),
   description: z.string().max(2000).optional(),
   priority: z.number().int().min(0).max(100).optional(),
@@ -33,7 +33,7 @@ const createComponentSchema = z.object({
 });
 
 const updateComponentSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().cuid(),
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(2000).optional(),
   status: z.enum(['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED']).optional(),
@@ -43,8 +43,8 @@ const updateComponentSchema = z.object({
 });
 
 const addDependencySchema = z.object({
-  dependentComponentId: z.string().uuid(),
-  requiredComponentId: z.string().uuid(),
+  dependentComponentId: z.string().cuid(),
+  requiredComponentId: z.string().cuid(),
   description: z.string().max(500).optional(),
 });
 
@@ -282,7 +282,7 @@ export const addDependency = authActionClient.schema(addDependencySchema).action
 });
 
 export const removeDependency = authActionClient
-  .schema(z.object({ id: z.string().uuid() }))
+  .schema(z.object({ id: z.string().cuid() }))
   .action(async ({ parsedInput, ctx }) => {
     const { id } = parsedInput;
     const { userId } = ctx;
@@ -325,7 +325,7 @@ export const removeDependency = authActionClient
 export const assignComponent = authActionClient
   .schema(
     z.object({
-      componentId: z.string().uuid(),
+      componentId: z.string().cuid(),
       assigneeId: z.string(),
     }),
   )
@@ -370,7 +370,7 @@ export const assignComponent = authActionClient
 export const unassignComponent = authActionClient
   .schema(
     z.object({
-      componentId: z.string().uuid(),
+      componentId: z.string().cuid(),
       assigneeId: z.string(),
     }),
   )
@@ -412,7 +412,7 @@ export const unassignComponent = authActionClient
 
 // AI Component Generation
 const generateComponentsSchema = z.object({
-  projectId: z.string().uuid(),
+  projectId: z.string().cuid(),
 });
 
 export const generateAIComponents = authActionClient
@@ -459,7 +459,7 @@ export const generateAIComponents = authActionClient
   });
 
 const applyAIComponentsSchema = z.object({
-  projectId: z.string().uuid(),
+  projectId: z.string().cuid(),
   components: z.array(
     z.object({
       name: z.string(),
