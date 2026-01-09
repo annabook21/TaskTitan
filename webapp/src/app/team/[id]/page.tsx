@@ -15,6 +15,7 @@ import {
   Mail,
   Calendar,
 } from 'lucide-react';
+import InviteButton from './InviteButton';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -168,11 +169,7 @@ export default async function TeamDetailPage({ params }: Props) {
                   <Users className="w-5 h-5 text-violet-400" />
                   Members
                 </h2>
-                {isOwnerOrAdmin && (
-                  <button className="text-sm text-cyan-400 hover:text-cyan-300" disabled>
-                    + Invite
-                  </button>
-                )}
+                {isOwnerOrAdmin && <InviteButton teamId={team.id} />}
               </div>
 
               <div className="component-card">
@@ -206,13 +203,6 @@ export default async function TeamDetailPage({ params }: Props) {
                   })}
                 </div>
 
-                {isOwnerOrAdmin && (
-                  <div className="mt-6 pt-4 border-t border-slate-700">
-                    <p className="text-xs text-slate-500 text-center">
-                      Invite functionality coming soon
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
           </div>
