@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import { CfnOutput, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { AsyncJob } from './constructs/async-job';
@@ -18,6 +18,7 @@ import { Webapp } from './constructs/webapp';
 import { EdgeFunction } from './constructs/cf-lambda-furl-service/edge-function';
 import { EventBus } from './constructs/event-bus/';
 import { Monitoring } from './constructs/monitoring';
+import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 
 interface MainStackProps extends StackProps {
   readonly signPayloadHandler: EdgeFunction;
@@ -51,6 +52,15 @@ interface MainStackProps extends StackProps {
    * @default 7
    */
   readonly backupRetentionDays?: number;
+
+  /**
+   * SSM Parameter name containing the OpenAI API key for AI component generation.
+   * Create this parameter manually before deploying:
+   *   aws ssm put-parameter --name "/tasktitan/openai-api-key" --value "sk-..." --type SecureString
+   *
+   * @default AI features disabled
+   */
+  readonly openAiApiKeySsmPath?: string;
 }
 
 export class MainStack extends Stack {
@@ -62,7 +72,13 @@ export class MainStack extends Stack {
 
     // NAT Gateway is production best practice (managed, HA, auto-scaling)
     // Set useNatInstance=true for dev/test environments to save costs
-    const { useNatInstance = false, backupRetentionDays = 7 } = props;
+    const { useNatInstance = false, backupRetentionDays = 7, openAiApiKeySsmPath } = props;
+
+    // Optionally load OpenAI API key from SSM Parameter Store
+    let openAiApiKey: string | undefined;
+    if (openAiApiKeySsmPath) {
+      openAiApiKey = StringParameter.valueForStringParameter(this, openAiApiKeySsmPath);
+    }
 
     const hostedZone = props.domainName
       ? HostedZone.fromLookup(this, 'HostedZone', {
@@ -138,6 +154,7 @@ export class MainStack extends Stack {
       eventBus,
       asyncJob,
       subDomain: 'web',
+      openAiApiKey, // Enable AI component generation if key is provided
     });
 
     // CloudWatch Monitoring Dashboard

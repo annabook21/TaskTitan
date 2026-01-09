@@ -44,6 +44,13 @@ export interface WebappProps {
    * @default Use root domain
    */
   subDomain?: string;
+  /**
+   * OpenAI API key for AI component generation features.
+   * Can be passed directly or retrieved from SSM Parameter Store.
+   *
+   * @default AI features will be disabled
+   */
+  openAiApiKey?: string;
 }
 
 export class Webapp extends Construct {
@@ -72,19 +79,27 @@ export class Webapp extends Construct {
       },
     });
 
+    // Build environment variables, conditionally including OpenAI API key
+    const handlerEnvironment: Record<string, string> = {
+      ...database.getLambdaEnvironment('main'),
+      COGNITO_DOMAIN: auth.domainName,
+      USER_POOL_ID: auth.userPool.userPoolId,
+      USER_POOL_CLIENT_ID: auth.client.userPoolClientId,
+      ASYNC_JOB_HANDLER_ARN: asyncJob.handler.functionArn,
+      // AWS Powertools configuration for structured logging
+      POWERTOOLS_SERVICE_NAME: 'TaskTitanWebapp',
+      LOG_LEVEL: 'INFO',
+    };
+
+    // Add OpenAI API key if provided (enables AI component generation)
+    if (props.openAiApiKey) {
+      handlerEnvironment.OPENAI_API_KEY = props.openAiApiKey;
+    }
+
     const handler = new DockerImageFunction(this, 'Handler', {
       code: image.toLambdaDockerImageCode(),
       timeout: Duration.minutes(3),
-      environment: {
-        ...database.getLambdaEnvironment('main'),
-        COGNITO_DOMAIN: auth.domainName,
-        USER_POOL_ID: auth.userPool.userPoolId,
-        USER_POOL_CLIENT_ID: auth.client.userPoolClientId,
-        ASYNC_JOB_HANDLER_ARN: asyncJob.handler.functionArn,
-        // AWS Powertools configuration for structured logging
-        POWERTOOLS_SERVICE_NAME: 'TaskTitanWebapp',
-        LOG_LEVEL: 'INFO',
-      },
+      environment: handlerEnvironment,
       vpc: database.cluster.vpc,
       memorySize: 512,
       architecture: Architecture.ARM_64,
