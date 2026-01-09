@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+generator zod {
+  provider         = "zod-prisma-types"
+  output           = "../src/lib/generated/prisma/zod"
+  useMultipleFiles = "true"
+  writeBarrelFiles = "false"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Activity {
+  id        String       @id @default(cuid())
+  type      ActivityType
+  projectId String
+  userId    String
+  metadata  Json?
+  createdAt DateTime     @default(now())
+  Project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  User      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([userId])
+}
+
+model Assignment {
+  id          String    @id @default(cuid())
+  componentId String
+  userId      String
+  assignedAt  DateTime  @default(now())
+  Component   Component @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  User        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([componentId, userId])
+  @@index([userId])
+}
+
+model Component {
+  id                                                    String          @id @default(cuid())
+  name                                                  String
+  description                                           String?
+  projectId                                             String
+  status                                                ComponentStatus @default(PLANNING)
+  priority                                              Int             @default(0)
+  estimatedHours                                        Float?
+  dueDate                                               DateTime?
+  createdAt                                             DateTime        @default(now())
+  updatedAt                                             DateTime        @updatedAt
+  Assignment                                            Assignment[]
+  Project                                               Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Dependency_Dependency_dependentComponentIdToComponent Dependency[]    @relation("Dependency_dependentComponentIdToComponent")
+  Dependency_Dependency_requiredComponentIdToComponent  Dependency[]    @relation("Dependency_requiredComponentIdToComponent")
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model Dependency {
+  id                                                   String    @id @default(cuid())
+  dependentComponentId                                 String
+  requiredComponentId                                  String
+  description                                          String?
+  createdAt                                            DateTime  @default(now())
+  Component_Dependency_dependentComponentIdToComponent Component @relation("Dependency_dependentComponentIdToComponent", fields: [dependentComponentId], references: [id], onDelete: Cascade)
+  Component_Dependency_requiredComponentIdToComponent  Component @relation("Dependency_requiredComponentIdToComponent", fields: [requiredComponentId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentComponentId, requiredComponentId])
+  @@index([requiredComponentId])
+}
+
+model Membership {
+  id       String   @id @default(cuid())
+  userId   String
+  teamId   String
+  role     Role     @default(MEMBER)
+  joinedAt DateTime @default(now())
+  Team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  User     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([teamId])
+}
+
+model Project {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  teamId      String
+  ownerId     String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  Activity    Activity[]
+  Component   Component[]
+  User        User        @relation(fields: [ownerId], references: [id])
+  Team        Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([teamId])
+}
+
+model Team {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  Membership  Membership[]
+  Project     Project[]
+}
+
+model User {
+  id         String       @id
+  email      String       @unique
+  name       String?
+  avatarUrl  String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  Activity   Activity[]
+  Assignment Assignment[]
+  Membership Membership[]
+  Project    Project[]
+}
+
+enum ActivityType {
+  PROJECT_CREATED
+  COMPONENT_CREATED
+  COMPONENT_UPDATED
+  COMPONENT_STATUS_CHANGED
+  DEPENDENCY_ADDED
+  DEPENDENCY_REMOVED
+  MEMBER_ASSIGNED
+  MEMBER_UNASSIGNED
+  COMMENT_ADDED
+}
+
+enum ComponentStatus {
+  PLANNING
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  COMPLETED
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
