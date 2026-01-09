@@ -4,31 +4,37 @@ import { getSession } from '@/lib/auth';
 
 const demoUsers = [
   {
+    id: 'demo-marcus-chen-001',
     email: 'marcus.chen@demo.tasktitan.dev',
     name: 'Marcus Chen',
     role: 'MEMBER' as const,
   },
   {
+    id: 'demo-sarah-johnson-002',
     email: 'sarah.johnson@demo.tasktitan.dev',
     name: 'Sarah Johnson',
     role: 'ADMIN' as const,
   },
   {
+    id: 'demo-alex-rivera-003',
     email: 'alex.rivera@demo.tasktitan.dev',
     name: 'Alex Rivera',
     role: 'MEMBER' as const,
   },
   {
+    id: 'demo-priya-sharma-004',
     email: 'priya.sharma@demo.tasktitan.dev',
     name: 'Priya Sharma',
     role: 'MEMBER' as const,
   },
   {
+    id: 'demo-james-oconnor-005',
     email: 'james.oconnor@demo.tasktitan.dev',
     name: "James O'Connor",
     role: 'MEMBER' as const,
   },
   {
+    id: 'demo-emily-watson-006',
     email: 'emily.watson@demo.tasktitan.dev',
     name: 'Emily Watson',
     role: 'VIEWER' as const,
@@ -70,6 +76,7 @@ export async function POST() {
       if (!user) {
         user = await prisma.user.create({
           data: {
+            id: userData.id,
             email: userData.email,
             name: userData.name,
           },
