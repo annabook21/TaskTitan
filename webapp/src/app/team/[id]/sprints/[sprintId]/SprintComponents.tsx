@@ -95,10 +95,7 @@ export default function SprintComponents({ components, sprintId, teamId, canMana
             </h3>
             <div className="space-y-2">
               {items.map((component) => (
-                <div
-                  key={component.id}
-                  className="component-card flex items-center justify-between group"
-                >
+                <div key={component.id} className="component-card flex items-center justify-between group">
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${config.color}`}>
                       {config.label}

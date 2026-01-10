@@ -13,12 +13,7 @@ interface Props {
   suggestedEndDate: string;
 }
 
-export default function NewSprintForm({
-  teamId,
-  suggestedName,
-  suggestedStartDate,
-  suggestedEndDate,
-}: Props) {
+export default function NewSprintForm({ teamId, suggestedName, suggestedStartDate, suggestedEndDate }: Props) {
   const router = useRouter();
   const [name, setName] = useState(suggestedName);
   const [goal, setGoal] = useState('');
@@ -36,7 +31,7 @@ export default function NewSprintForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     execute({
       teamId,
       name,
@@ -48,9 +43,7 @@ export default function NewSprintForm({
   };
 
   // Calculate sprint duration
-  const durationDays = Math.ceil(
-    (new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
-  );
+  const durationDays = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -128,7 +121,7 @@ export default function NewSprintForm({
 
         {durationDays > 0 && (
           <p className="text-sm text-slate-400 mt-3">
-            📅 {durationDays} day{durationDays !== 1 ? 's' : ''} 
+            📅 {durationDays} day{durationDays !== 1 ? 's' : ''}
             {durationDays === 7 && ' (1 week)'}
             {durationDays === 14 && ' (2 weeks)'}
             {durationDays === 21 && ' (3 weeks)'}
@@ -162,9 +155,7 @@ export default function NewSprintForm({
 
       {/* Error message */}
       {result.serverError && (
-        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400">
-          {result.serverError}
-        </div>
+        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400">{result.serverError}</div>
       )}
 
       {/* Submit */}

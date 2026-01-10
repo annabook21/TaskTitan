@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
+import { planSprint as aiPlanSprint } from '@/lib/ai';
 
 const createSprintSchema = z.object({
   teamId: z.string().cuid(),
@@ -120,54 +121,52 @@ export const updateSprint = authActionClient.schema(updateSprintSchema).action(a
   return { sprint: updated };
 });
 
-export const updateSprintStatus = authActionClient
-  .schema(sprintStatusSchema)
-  .action(async ({ parsedInput, ctx }) => {
-    const { id, status } = parsedInput;
-    const { userId } = ctx;
+export const updateSprintStatus = authActionClient.schema(sprintStatusSchema).action(async ({ parsedInput, ctx }) => {
+  const { id, status } = parsedInput;
+  const { userId } = ctx;
 
-    const sprint = await prisma.sprint.findUnique({
-      where: { id },
-    });
-
-    if (!sprint) {
-      throw new Error('Sprint not found');
-    }
-
-    // Verify user is admin/owner of team
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId: sprint.teamId } },
-    });
-
-    if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
-      throw new Error('Only team owners and admins can change sprint status');
-    }
-
-    // If starting a sprint, check no other active sprint exists
-    if (status === 'ACTIVE') {
-      const activeSprint = await prisma.sprint.findFirst({
-        where: {
-          teamId: sprint.teamId,
-          status: 'ACTIVE',
-          id: { not: id },
-        },
-      });
-
-      if (activeSprint) {
-        throw new Error(`Sprint "${activeSprint.name}" is already active. Complete it first.`);
-      }
-    }
-
-    const updated = await prisma.sprint.update({
-      where: { id },
-      data: { status },
-    });
-
-    revalidatePath(`/team/${sprint.teamId}`);
-    revalidatePath(`/team/${sprint.teamId}/sprints`);
-
-    return { sprint: updated };
+  const sprint = await prisma.sprint.findUnique({
+    where: { id },
   });
+
+  if (!sprint) {
+    throw new Error('Sprint not found');
+  }
+
+  // Verify user is admin/owner of team
+  const membership = await prisma.membership.findUnique({
+    where: { userId_teamId: { userId, teamId: sprint.teamId } },
+  });
+
+  if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
+    throw new Error('Only team owners and admins can change sprint status');
+  }
+
+  // If starting a sprint, check no other active sprint exists
+  if (status === 'ACTIVE') {
+    const activeSprint = await prisma.sprint.findFirst({
+      where: {
+        teamId: sprint.teamId,
+        status: 'ACTIVE',
+        id: { not: id },
+      },
+    });
+
+    if (activeSprint) {
+      throw new Error(`Sprint "${activeSprint.name}" is already active. Complete it first.`);
+    }
+  }
+
+  const updated = await prisma.sprint.update({
+    where: { id },
+    data: { status },
+  });
+
+  revalidatePath(`/team/${sprint.teamId}`);
+  revalidatePath(`/team/${sprint.teamId}/sprints`);
+
+  return { sprint: updated };
+});
 
 export const assignComponentToSprint = authActionClient
   .schema(assignToSprintSchema)
@@ -296,12 +295,8 @@ export const getSprintMetrics = authActionClient
       0,
     );
 
-    const daysTotal = Math.ceil(
-      (sprint.endDate.getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24),
-    );
-    const daysElapsed = Math.ceil(
-      (Date.now() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24),
-    );
+    const daysTotal = Math.ceil((sprint.endDate.getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24));
+    const daysElapsed = Math.ceil((Date.now() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24));
     const daysRemaining = Math.max(0, daysTotal - daysElapsed);
 
     return {
@@ -328,3 +323,120 @@ export const getSprintMetrics = authActionClient
       },
     };
   });
+
+const aiPlanSprintSchema = z.object({
+  sprintId: z.string().cuid(),
+  capacityHours: z.number().int().positive(),
+});
+
+/**
+ * AI-powered sprint planning: suggests which components to add to a sprint
+ */
+export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).action(async ({ parsedInput, ctx }) => {
+  const { sprintId, capacityHours } = parsedInput;
+  const { userId } = ctx;
+
+  const sprint = await prisma.sprint.findUnique({
+    where: { id: sprintId },
+    include: { Team: true },
+  });
+
+  if (!sprint) {
+    throw new Error('Sprint not found');
+  }
+
+  // Verify user is member of team
+  const membership = await prisma.membership.findUnique({
+    where: { userId_teamId: { userId, teamId: sprint.teamId } },
+  });
+
+  if (!membership) {
+    throw new Error('You must be a team member to plan sprints');
+  }
+
+  // Get all components NOT in any active/planning sprint (the backlog)
+  const availableComponents = await prisma.component.findMany({
+    where: {
+      Project: { teamId: sprint.teamId },
+      sprintId: null,
+      status: { notIn: ['COMPLETED', 'CANCELLED'] },
+    },
+    include: {
+      Dependency_Dependency_dependentComponentIdToComponent: {
+        include: { Component_Dependency_requiredComponentIdToComponent: true },
+      },
+    },
+  });
+
+  if (availableComponents.length === 0) {
+    return {
+      selectedComponentIds: [],
+      totalHours: 0,
+      reasoning: 'No components available in the backlog to add to this sprint.',
+      warnings: ['All components are either completed, cancelled, or already in a sprint.'],
+    };
+  }
+
+  // Map to AI planning format
+  const componentsForAI = availableComponents.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    status: c.status,
+    estimatedHours: c.estimatedHours,
+    priority: c.priority,
+    dependsOn: c.Dependency_Dependency_dependentComponentIdToComponent.map(
+      (d) => d.Component_Dependency_requiredComponentIdToComponent.name,
+    ),
+  }));
+
+  // Call AI to plan the sprint
+  const plan = await aiPlanSprint(sprint.name, sprint.goal || undefined, capacityHours, componentsForAI);
+
+  return plan;
+});
+
+const applySprintPlanSchema = z.object({
+  sprintId: z.string().cuid(),
+  componentIds: z.array(z.string().cuid()),
+});
+
+/**
+ * Apply an AI-generated sprint plan by assigning components to the sprint
+ */
+export const applySprintPlan = authActionClient.schema(applySprintPlanSchema).action(async ({ parsedInput, ctx }) => {
+  const { sprintId, componentIds } = parsedInput;
+  const { userId } = ctx;
+
+  const sprint = await prisma.sprint.findUnique({
+    where: { id: sprintId },
+  });
+
+  if (!sprint) {
+    throw new Error('Sprint not found');
+  }
+
+  // Verify user is member of team
+  const membership = await prisma.membership.findUnique({
+    where: { userId_teamId: { userId, teamId: sprint.teamId } },
+  });
+
+  if (!membership) {
+    throw new Error('You must be a team member to assign components to sprints');
+  }
+
+  // Batch update all components
+  await prisma.component.updateMany({
+    where: {
+      id: { in: componentIds },
+      Project: { teamId: sprint.teamId },
+    },
+    data: { sprintId },
+  });
+
+  revalidatePath(`/team/${sprint.teamId}`);
+  revalidatePath(`/team/${sprint.teamId}/sprints`);
+  revalidatePath(`/team/${sprint.teamId}/sprints/${sprintId}`);
+
+  return { success: true, assignedCount: componentIds.length };
+});

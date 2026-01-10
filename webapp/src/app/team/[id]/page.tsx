@@ -146,11 +146,7 @@ export default async function TeamDetailPage({ params }: Props) {
               ) : (
                 <div className="space-y-4">
                   {team.Project.map((project) => (
-                    <Link
-                      key={project.id}
-                      href={`/projects/${project.id}`}
-                      className="component-card block group"
-                    >
+                    <Link key={project.id} href={`/projects/${project.id}`} className="component-card block group">
                       <div className="flex items-start justify-between">
                         <div>
                           <h3 className="font-medium text-slate-100 group-hover:text-cyan-400 transition-colors">

@@ -1,16 +1,16 @@
 /**
  * Seed script to add demo users to Team Alpha
- * 
+ *
  * This script must be run against the production database via the bastion host.
- * 
+ *
  * Usage:
  * 1. Start port forwarding: (from CDK output DatabasePortForwardCommand)
  *    aws ssm start-session --region us-west-2 --target i-0fdbef65bd72584ea \
  *      --document-name AWS-StartPortForwardingSessionToRemoteHost \
  *      --parameters '{"portNumber":["5432"], "localPortNumber":["5433"], "host": ["tasktitanstack-databasecluster..."]}'
- * 
+ *
  * 2. Set DATABASE_URL to point to localhost:5433
- * 
+ *
  * 3. Run: npx ts-node src/scripts/seed-demo-team.ts
  */
 

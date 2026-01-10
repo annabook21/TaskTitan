@@ -58,10 +58,7 @@ export async function POST() {
     if (!team) {
       // List available teams for debugging
       const teams = await prisma.team.findMany({ select: { id: true, name: true } });
-      return NextResponse.json(
-        { error: 'Team Alpha not found', availableTeams: teams },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: 'Team Alpha not found', availableTeams: teams }, { status: 404 });
     }
 
     const results: string[] = [];
@@ -131,9 +128,6 @@ export async function POST() {
     });
   } catch (error) {
     console.error('Seed error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Seed failed' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Seed failed' }, { status: 500 });
   }
 }

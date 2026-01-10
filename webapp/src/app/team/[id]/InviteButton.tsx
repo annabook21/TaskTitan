@@ -22,11 +22,7 @@ export default function InviteButton({ teamId }: Props) {
       </button>
 
       {showModal && (
-        <InviteMemberForm
-          teamId={teamId}
-          onClose={() => setShowModal(false)}
-          onSuccess={() => router.refresh()}
-        />
+        <InviteMemberForm teamId={teamId} onClose={() => setShowModal(false)} onSuccess={() => router.refresh()} />
       )}
     </>
   );

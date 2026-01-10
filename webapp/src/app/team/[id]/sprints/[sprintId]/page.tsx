@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import SprintControls from './SprintControls';
 import SprintComponents from './SprintComponents';
+import AISprintPlanner from './AISprintPlanner';
 
 interface Props {
   params: Promise<{ id: string; sprintId: string }>;
@@ -97,18 +98,15 @@ export default async function SprintDetailPage({ params }: Props) {
   const inProgressComponents = sprint.Component.filter((c) => c.status === 'IN_PROGRESS').length;
 
   const totalHours = sprint.Component.reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
-  const completedHours = sprint.Component
-    .filter((c) => c.status === 'COMPLETED')
-    .reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
+  const completedHours = sprint.Component.filter((c) => c.status === 'COMPLETED').reduce(
+    (sum, c) => sum + (c.estimatedHours || 0),
+    0,
+  );
 
   const progress = totalComponents > 0 ? Math.round((completedComponents / totalComponents) * 100) : 0;
 
-  const daysTotal = Math.ceil(
-    (sprint.endDate.getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24)
-  );
-  const daysElapsed = Math.max(0, Math.ceil(
-    (Date.now() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24)
-  ));
+  const daysTotal = Math.ceil((sprint.endDate.getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24));
+  const daysElapsed = Math.max(0, Math.ceil((Date.now() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24)));
   const daysRemaining = Math.max(0, daysTotal - daysElapsed);
 
   return (
@@ -135,7 +133,9 @@ export default async function SprintDetailPage({ params }: Props) {
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <h1 className="text-3xl font-bold">{sprint.name}</h1>
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${config.color}`}>
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${config.color}`}
+                  >
                     <StatusIcon className="w-4 h-4" />
                     {config.label}
                   </span>
@@ -165,9 +165,7 @@ export default async function SprintDetailPage({ params }: Props) {
               </div>
             </div>
 
-            {canManage && (
-              <SprintControls sprint={sprint} teamId={teamId} />
-            )}
+            {canManage && <SprintControls sprint={sprint} teamId={teamId} />}
           </div>
 
           {/* Metrics Cards */}
@@ -176,10 +174,7 @@ export default async function SprintDetailPage({ params }: Props) {
               <div className="text-3xl font-bold text-cyan-400">{progress}%</div>
               <div className="text-sm text-slate-400 mt-1">Complete</div>
               <div className="h-2 bg-slate-700 rounded-full mt-3 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-500 to-green-500"
-                  style={{ width: `${progress}%` }}
-                />
+                <div className="h-full bg-gradient-to-r from-cyan-500 to-green-500" style={{ width: `${progress}%` }} />
               </div>
             </div>
 
@@ -207,13 +202,15 @@ export default async function SprintDetailPage({ params }: Props) {
             </div>
           </div>
 
+          {/* AI Sprint Planning - show for planning sprints */}
+          {canManage && sprint.status === 'PLANNING' && (
+            <div className="mb-8">
+              <AISprintPlanner sprintId={sprintId} defaultCapacity={sprint.capacity || 40} />
+            </div>
+          )}
+
           {/* Components List */}
-          <SprintComponents
-            components={sprint.Component}
-            sprintId={sprintId}
-            teamId={teamId}
-            canManage={canManage}
-          />
+          <SprintComponents components={sprint.Component} sprintId={sprintId} teamId={teamId} canManage={canManage} />
         </div>
       </main>
     </div>

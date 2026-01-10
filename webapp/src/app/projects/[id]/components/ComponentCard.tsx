@@ -3,10 +3,19 @@
 import { useState } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { updateComponent } from '@/app/projects/actions';
-import { MoreVertical, GitBranch, Clock, User as UserIcon, ChevronDown, Check, UserPlus } from 'lucide-react';
+import { assignComponentToSprint } from '@/app/sprints/actions';
+import { MoreVertical, GitBranch, Clock, User as UserIcon, ChevronDown, Check, Zap } from 'lucide-react';
 import { toast } from 'sonner';
-import type { ComponentStatus, User } from '@prisma/client';
+import type { ComponentStatus, User, SprintStatus } from '@prisma/client';
 import AssignmentPanel from './AssignmentPanel';
+
+interface Sprint {
+  id: string;
+  name: string;
+  status: SprintStatus;
+  startDate: Date;
+  endDate: Date;
+}
 
 interface ComponentWithRelations {
   id: string;
@@ -16,6 +25,8 @@ interface ComponentWithRelations {
   priority: number;
   estimatedHours: number | null;
   dueDate: Date | null;
+  sprintId: string | null;
+  sprint: Sprint | null;
   assignments: { user: User }[];
   dependsOn: { requiredComponent: { id: string; name: string } }[];
   dependedOnBy: { dependentComponent: { id: string; name: string } }[];
@@ -24,6 +35,7 @@ interface ComponentWithRelations {
 interface Props {
   component: ComponentWithRelations;
   teamMembers: User[];
+  availableSprints: Sprint[];
 }
 
 const statusOptions: { value: ComponentStatus; label: string; color: string }[] = [
@@ -34,8 +46,9 @@ const statusOptions: { value: ComponentStatus; label: string; color: string }[] 
   { value: 'COMPLETED', label: 'Completed', color: 'emerald' },
 ];
 
-export default function ComponentCard({ component, teamMembers }: Props) {
+export default function ComponentCard({ component, teamMembers, availableSprints }: Props) {
   const [isStatusOpen, setIsStatusOpen] = useState(false);
+  const [isSprintOpen, setIsSprintOpen] = useState(false);
 
   const { execute, isExecuting } = useAction(updateComponent, {
     onSuccess: () => {
@@ -47,10 +60,24 @@ export default function ComponentCard({ component, teamMembers }: Props) {
     },
   });
 
+  const { execute: executeSprint, isExecuting: isSprintExecuting } = useAction(assignComponentToSprint, {
+    onSuccess: () => {
+      toast.success('Sprint updated');
+      setIsSprintOpen(false);
+    },
+    onError: ({ error }) => {
+      toast.error(error.serverError || 'Failed to update sprint');
+    },
+  });
+
   const currentStatus = statusOptions.find((s) => s.value === component.status);
 
   const handleStatusChange = (newStatus: ComponentStatus) => {
     execute({ id: component.id, status: newStatus });
+  };
+
+  const handleSprintChange = (sprintId: string | null) => {
+    executeSprint({ componentId: component.id, sprintId });
   };
 
   return (
@@ -98,6 +125,53 @@ export default function ComponentCard({ component, teamMembers }: Props) {
           </div>
         )}
       </div>
+
+      {/* Sprint Selector */}
+      {availableSprints.length > 0 && (
+        <div className="relative mb-3">
+          <button
+            onClick={() => setIsSprintOpen(!isSprintOpen)}
+            disabled={isSprintExecuting}
+            className={`w-full px-3 py-1.5 text-xs rounded-lg border transition-colors flex items-center justify-between ${
+              component.sprint
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <Zap className="w-3 h-3" />
+              {component.sprint ? component.sprint.name : 'No Sprint (Backlog)'}
+            </span>
+            <ChevronDown className={`w-3 h-3 transition-transform ${isSprintOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {isSprintOpen && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-10 overflow-hidden max-h-48 overflow-y-auto">
+              <button
+                onClick={() => handleSprintChange(null)}
+                className="w-full px-3 py-2 text-left text-sm flex items-center justify-between hover:bg-slate-700 transition-colors"
+              >
+                <span className="text-slate-400">Backlog (No Sprint)</span>
+                {!component.sprintId && <Check className="w-4 h-4 text-cyan-400" />}
+              </button>
+              {availableSprints.map((sprint) => (
+                <button
+                  key={sprint.id}
+                  onClick={() => handleSprintChange(sprint.id)}
+                  className="w-full px-3 py-2 text-left text-sm flex items-center justify-between hover:bg-slate-700 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <Zap className={`w-3 h-3 ${sprint.status === 'ACTIVE' ? 'text-green-400' : 'text-slate-400'}`} />
+                    <span>{sprint.name}</span>
+                    {sprint.status === 'ACTIVE' && <span className="text-xs text-green-400">(Active)</span>}
+                  </span>
+                  {component.sprintId === sprint.id && <Check className="w-4 h-4 text-cyan-400" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Dependencies */}
       {component.dependsOn.length > 0 && (

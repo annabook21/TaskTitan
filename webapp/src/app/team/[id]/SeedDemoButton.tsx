@@ -46,9 +46,7 @@ export default function SeedDemoButton({ teamId }: Props) {
             Add 6 sample team members with realistic profiles for demo purposes.
           </p>
 
-          {result && (
-            <p className="text-sm mt-2 font-medium">{result}</p>
-          )}
+          {result && <p className="text-sm mt-2 font-medium">{result}</p>}
 
           <button
             onClick={handleSeed}

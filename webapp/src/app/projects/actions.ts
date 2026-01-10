@@ -423,9 +423,7 @@ export const generateAIComponents = authActionClient
 
     // Check if AI is configured
     if (!isAIConfigured()) {
-      throw new Error(
-        'AI features require an OpenAI API key. Please configure OPENAI_API_KEY in your environment.',
-      );
+      throw new Error('AI features require an OpenAI API key. Please configure OPENAI_API_KEY in your environment.');
     }
 
     // Get the project

@@ -26,7 +26,7 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
 
   // If user has teams and one is preselected, skip to project step
   const [step, setStep] = useState<'team' | 'project'>(
-    preselectedTeamId && teams.some((t) => t.id === preselectedTeamId) ? 'project' : 'team'
+    preselectedTeamId && teams.some((t) => t.id === preselectedTeamId) ? 'project' : 'team',
   );
   const [teamId, setTeamId] = useState<string>(preselectedTeamId || '');
   const [teamMode, setTeamMode] = useState<'select' | 'create'>(hasExistingTeams ? 'select' : 'create');
@@ -193,9 +193,7 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
                         <div>
                           <div className="font-medium text-slate-200">{team.name}</div>
                           {team.description && (
-                            <div className="text-sm text-slate-500 truncate max-w-[300px]">
-                              {team.description}
-                            </div>
+                            <div className="text-sm text-slate-500 truncate max-w-[300px]">{team.description}</div>
                           )}
                         </div>
                       </div>
@@ -235,9 +233,7 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
               type="submit"
               className="btn-primary"
               disabled={
-                isCreatingTeam ||
-                (teamMode === 'select' && !teamId) ||
-                (teamMode === 'create' && !teamName.trim())
+                isCreatingTeam || (teamMode === 'select' && !teamId) || (teamMode === 'create' && !teamName.trim())
               }
             >
               {isCreatingTeam ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -250,8 +246,7 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
           <div>
             <h2 className="text-lg font-semibold mb-1">Project Details</h2>
             <p className="text-sm text-slate-400">
-              Creating project for team:{' '}
-              <span className="text-cyan-400 font-medium">{selectedTeam?.name}</span>
+              Creating project for team: <span className="text-cyan-400 font-medium">{selectedTeam?.name}</span>
             </p>
           </div>
 

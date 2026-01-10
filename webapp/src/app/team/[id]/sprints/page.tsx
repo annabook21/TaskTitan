@@ -104,9 +104,7 @@ export default async function SprintsPage({ params }: Props) {
                 <Zap className="w-8 h-8 text-amber-400" />
                 Sprints
               </h1>
-              <p className="text-slate-400 mt-1">
-                Plan and track work in timeboxed iterations
-              </p>
+              <p className="text-slate-400 mt-1">Plan and track work in timeboxed iterations</p>
             </div>
 
             {canManageSprints && (
@@ -202,17 +200,16 @@ function SprintCard({ sprint, teamId, featured }: SprintCardProps) {
 
   const completedCount = sprint.Component.filter((c) => c.status === 'COMPLETED').length;
   const totalHours = sprint.Component.reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
-  const completedHours = sprint.Component
-    .filter((c) => c.status === 'COMPLETED')
-    .reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
+  const completedHours = sprint.Component.filter((c) => c.status === 'COMPLETED').reduce(
+    (sum, c) => sum + (c.estimatedHours || 0),
+    0,
+  );
 
-  const progress = sprint._count.Component > 0 
-    ? Math.round((completedCount / sprint._count.Component) * 100) 
-    : 0;
+  const progress = sprint._count.Component > 0 ? Math.round((completedCount / sprint._count.Component) * 100) : 0;
 
   const daysRemaining = Math.max(
     0,
-    Math.ceil((new Date(sprint.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    Math.ceil((new Date(sprint.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
   );
 
   return (
@@ -222,7 +219,9 @@ function SprintCard({ sprint, teamId, featured }: SprintCardProps) {
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${config.color}`}>
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${config.color}`}
+          >
             <StatusIcon className="w-3.5 h-3.5" />
             {config.label}
           </span>
@@ -244,7 +243,9 @@ function SprintCard({ sprint, teamId, featured }: SprintCardProps) {
       {/* Progress bar */}
       <div className="mb-3">
         <div className="flex justify-between text-xs text-slate-500 mb-1">
-          <span>{completedCount}/{sprint._count.Component} items</span>
+          <span>
+            {completedCount}/{sprint._count.Component} items
+          </span>
           <span>{progress}%</span>
         </div>
         <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
@@ -275,9 +276,7 @@ function SprintCard({ sprint, teamId, featured }: SprintCardProps) {
           <Clock className="w-3.5 h-3.5 inline mr-1" />
           {completedHours}/{totalHours}h completed
           {sprint.capacity && (
-            <span className="ml-2">
-              ({Math.round((totalHours / sprint.capacity) * 100)}% of capacity)
-            </span>
+            <span className="ml-2">({Math.round((totalHours / sprint.capacity) * 100)}% of capacity)</span>
           )}
         </div>
       )}

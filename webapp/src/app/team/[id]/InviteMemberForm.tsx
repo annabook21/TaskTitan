@@ -42,10 +42,7 @@ export default function InviteMemberForm({ teamId, onClose, onSuccess }: Props) 
             </div>
             <h2 className="text-xl font-semibold">Invite Member</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-slate-700 rounded-lg transition-colors">
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
@@ -65,9 +62,7 @@ export default function InviteMemberForm({ teamId, onClose, onSuccess }: Props) 
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all text-slate-100 placeholder-slate-500"
               required
             />
-            <p className="text-xs text-slate-500 mt-2">
-              The user must have an existing account
-            </p>
+            <p className="text-xs text-slate-500 mt-2">The user must have an existing account</p>
           </div>
 
           <div>

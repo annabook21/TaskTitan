@@ -138,9 +138,7 @@ Analyze this project and suggest 5-12 components that would be needed to build i
     if (error instanceof Error) {
       // Check for common Bedrock errors
       if (error.name === 'AccessDeniedException') {
-        throw new Error(
-          'AI features require Bedrock model access. Please enable Claude in the AWS Bedrock console.',
-        );
+        throw new Error('AI features require Bedrock model access. Please enable Claude in the AWS Bedrock console.');
       }
       if (error.name === 'ValidationException') {
         throw new Error('AI request validation failed. Please try again with a shorter description.');
@@ -159,4 +157,127 @@ export function isAIConfigured(): boolean {
   // In Lambda, we always have AWS credentials
   // The real check is whether we have Bedrock model access (handled at runtime)
   return true;
+}
+
+export interface SprintPlanningComponent {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  estimatedHours: number | null;
+  priority: number;
+  dependsOn: string[]; // Component names it depends on
+}
+
+export interface SprintPlanningResult {
+  selectedComponentIds: string[];
+  totalHours: number;
+  reasoning: string;
+  warnings: string[];
+}
+
+/**
+ * AI-powered sprint planning: suggests which components to include in a sprint
+ * based on capacity, priorities, and dependencies.
+ */
+export async function planSprint(
+  sprintName: string,
+  sprintGoal: string | undefined,
+  capacityHours: number,
+  availableComponents: SprintPlanningComponent[],
+): Promise<SprintPlanningResult> {
+  const client = getBedrockClient();
+
+  const systemPrompt = `You are an expert sprint planning assistant helping teams select the right work items for their sprint.
+Your job is to analyze available components and select the best subset that:
+1. Fits within the sprint capacity (hours)
+2. Respects dependencies (don't include something if its dependencies aren't done or included)
+3. Prioritizes high-priority items
+4. Aligns with the sprint goal if provided
+
+Be practical: aim for 70-80% capacity utilization to leave room for unexpected work.
+Flag any risks or concerns as warnings.
+
+Respond with ONLY valid JSON, no other text.`;
+
+  const componentsList = availableComponents.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description || '',
+    status: c.status,
+    hours: c.estimatedHours || 0,
+    priority: c.priority,
+    dependsOn: c.dependsOn,
+  }));
+
+  const userPrompt = `Sprint: ${sprintName}
+${sprintGoal ? `Sprint Goal: ${sprintGoal}` : ''}
+Capacity: ${capacityHours} hours
+
+Available Components (not yet in a sprint):
+${JSON.stringify(componentsList, null, 2)}
+
+Analyze these components and select which ones should be included in this sprint. Return a JSON object with:
+- "selectedComponentIds": array of component IDs to include
+- "totalHours": sum of estimated hours for selected components
+- "reasoning": brief explanation of your selection strategy (2-3 sentences)
+- "warnings": array of any concerns (overcommitment, missing dependencies, blocked items, etc.)`;
+
+  try {
+    const command = new InvokeModelCommand({
+      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.3, // Lower temperature for more deterministic planning
+      }),
+    });
+
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const content = responseBody.content?.[0]?.text;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    // Parse the JSON from Claude's response
+    let jsonContent = content;
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[1];
+    }
+
+    const result = JSON.parse(jsonContent) as SprintPlanningResult;
+
+    // Validate the result
+    if (!Array.isArray(result.selectedComponentIds)) {
+      result.selectedComponentIds = [];
+    }
+    if (typeof result.totalHours !== 'number') {
+      result.totalHours = 0;
+    }
+    if (!result.reasoning) {
+      result.reasoning = 'AI-generated sprint plan.';
+    }
+    if (!Array.isArray(result.warnings)) {
+      result.warnings = [];
+    }
+
+    // Filter to only valid component IDs
+    const validIds = new Set(availableComponents.map((c) => c.id));
+    result.selectedComponentIds = result.selectedComponentIds.filter((id) => validIds.has(id));
+
+    return result;
+  } catch (error) {
+    console.error('AI sprint planning error:', error);
+    if (error instanceof Error) {
+      throw new Error(`AI sprint planning failed: ${error.message}`);
+    }
+    throw new Error('AI sprint planning failed');
+  }
 }

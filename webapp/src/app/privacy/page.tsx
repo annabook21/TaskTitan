@@ -18,10 +18,7 @@ export default async function PrivacyPage() {
 
       <main className="flex-grow">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8"
-          >
+          <Link href="/" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8">
             <ArrowLeft className="w-4 h-4" />
             Back to Dashboard
           </Link>
@@ -53,26 +50,24 @@ export default async function PrivacyPage() {
               <section>
                 <h2 className="text-xl font-semibold text-slate-100 mb-3">Data Storage</h2>
                 <p className="text-slate-400">
-                  Your data is stored securely on AWS infrastructure with encryption at rest
-                  and in transit. We use Amazon Aurora PostgreSQL for reliable data storage
-                  with automated backups.
+                  Your data is stored securely on AWS infrastructure with encryption at rest and in transit. We use
+                  Amazon Aurora PostgreSQL for reliable data storage with automated backups.
                 </p>
               </section>
 
               <section>
                 <h2 className="text-xl font-semibold text-slate-100 mb-3">Data Sharing</h2>
                 <p className="text-slate-400">
-                  We do not sell or share your personal data with third parties. Your project
-                  data is only visible to team members you explicitly invite.
+                  We do not sell or share your personal data with third parties. Your project data is only visible to
+                  team members you explicitly invite.
                 </p>
               </section>
 
               <section>
                 <h2 className="text-xl font-semibold text-slate-100 mb-3">AI Features</h2>
                 <p className="text-slate-400">
-                  When using AI component generation, your project description is sent to
-                  OpenAI&apos;s API for processing. OpenAI&apos;s data handling policies apply to this
-                  interaction.
+                  When using AI component generation, your project description is sent to OpenAI&apos;s API for
+                  processing. OpenAI&apos;s data handling policies apply to this interaction.
                 </p>
               </section>
 
@@ -85,9 +80,7 @@ export default async function PrivacyPage() {
             </div>
           </div>
 
-          <div className="mt-8 text-center text-sm text-slate-500">
-            Last updated: January 2026
-          </div>
+          <div className="mt-8 text-center text-sm text-slate-500">Last updated: January 2026</div>
         </div>
       </main>
     </div>

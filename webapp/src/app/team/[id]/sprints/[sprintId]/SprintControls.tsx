@@ -50,11 +50,7 @@ export default function SprintControls({ sprint, teamId }: Props) {
           disabled={isUpdatingStatus}
           className="inline-flex items-center gap-2 px-4 py-2.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 rounded-xl text-green-400 font-medium transition-colors disabled:opacity-50"
         >
-          {isUpdatingStatus ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <PlayCircle className="w-4 h-4" />
-          )}
+          {isUpdatingStatus ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4" />}
           Start Sprint
         </button>
       )}
@@ -66,11 +62,7 @@ export default function SprintControls({ sprint, teamId }: Props) {
             disabled={isUpdatingStatus}
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-xl text-cyan-400 font-medium transition-colors disabled:opacity-50"
           >
-            {isUpdatingStatus ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4" />
-            )}
+            {isUpdatingStatus ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
             Complete Sprint
           </button>
           <button
@@ -92,11 +84,7 @@ export default function SprintControls({ sprint, teamId }: Props) {
                 disabled={isDeleting}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-xl text-red-400 font-medium transition-colors disabled:opacity-50"
               >
-                {isDeleting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  'Confirm Delete'
-                )}
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Delete'}
               </button>
               <button
                 onClick={() => setShowDeleteConfirm(false)}

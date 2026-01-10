@@ -46,7 +46,7 @@ export default async function NewSprintPage({ params }: Props) {
   const suggestedStartDate = lastSprint
     ? new Date(lastSprint.endDate.getTime() + 24 * 60 * 60 * 1000) // Day after last sprint ends
     : new Date();
-  
+
   // Default 2-week sprint
   const suggestedEndDate = new Date(suggestedStartDate.getTime() + 14 * 24 * 60 * 60 * 1000);
 
@@ -75,9 +75,7 @@ export default async function NewSprintPage({ params }: Props) {
               <Zap className="w-8 h-8 text-amber-400" />
               New Sprint
             </h1>
-            <p className="text-slate-400 mt-1">
-              Create a new sprint to plan and track work for {team.name}
-            </p>
+            <p className="text-slate-400 mt-1">Create a new sprint to plan and track work for {team.name}</p>
           </div>
 
           <NewSprintForm

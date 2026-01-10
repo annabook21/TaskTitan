@@ -18,10 +18,7 @@ export default async function DocsPage() {
 
       <main className="flex-grow">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8"
-          >
+          <Link href="/" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8">
             <ArrowLeft className="w-4 h-4" />
             Back to Dashboard
           </Link>
@@ -75,17 +72,13 @@ export default async function DocsPage() {
                 <BookOpen className="w-6 h-6 text-cyan-400" />
                 <h2 className="text-lg font-semibold">API Reference</h2>
               </div>
-              <p className="text-slate-400 text-sm mb-4">
-                Technical documentation for integrating with TaskTitan.
-              </p>
+              <p className="text-slate-400 text-sm mb-4">Technical documentation for integrating with TaskTitan.</p>
               <p className="text-xs text-slate-500 italic">Coming soon...</p>
             </div>
           </div>
 
           <div className="mt-12 p-6 bg-slate-900/50 border border-slate-800 rounded-xl text-center">
-            <p className="text-slate-400">
-              Documentation is under construction. Check back soon!
-            </p>
+            <p className="text-slate-400">Documentation is under construction. Check back soon!</p>
           </div>
         </div>
       </main>

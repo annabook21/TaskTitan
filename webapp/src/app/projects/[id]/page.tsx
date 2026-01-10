@@ -29,6 +29,10 @@ export default async function ProjectDetailPage({ params }: Props) {
           Membership: {
             include: { User: true },
           },
+          Sprint: {
+            where: { status: { in: ['PLANNING', 'ACTIVE'] } },
+            orderBy: { startDate: 'asc' },
+          },
         },
       },
       User: true,
@@ -37,6 +41,7 @@ export default async function ProjectDetailPage({ params }: Props) {
           Assignment: {
             include: { User: true },
           },
+          Sprint: true,
           Dependency_Dependency_dependentComponentIdToComponent: {
             include: { Component_Dependency_requiredComponentIdToComponent: true },
           },
@@ -61,6 +66,7 @@ export default async function ProjectDetailPage({ params }: Props) {
   // Map components for easier use
   const components = project.Component.map((c) => ({
     ...c,
+    sprint: c.Sprint,
     assignments: c.Assignment.map((a) => ({ ...a, user: a.User })),
     dependsOn: c.Dependency_Dependency_dependentComponentIdToComponent.map((d) => ({
       requiredComponent: d.Component_Dependency_requiredComponentIdToComponent,
@@ -69,6 +75,9 @@ export default async function ProjectDetailPage({ params }: Props) {
       dependentComponent: d.Component_Dependency_dependentComponentIdToComponent,
     })),
   }));
+
+  // Get available sprints for this team
+  const availableSprints = project.Team.Sprint || [];
 
   // Group components by status
   const componentsByStatus = {
@@ -199,7 +208,12 @@ export default async function ProjectDetailPage({ params }: Props) {
 
                           <div className="space-y-3 min-h-[100px]">
                             {statusComponents.map((component) => (
-                              <ComponentCard key={component.id} component={component} teamMembers={teamMembers} />
+                              <ComponentCard
+                                key={component.id}
+                                component={component}
+                                teamMembers={teamMembers}
+                                availableSprints={availableSprints}
+                              />
                             ))}
                           </div>
                         </div>
