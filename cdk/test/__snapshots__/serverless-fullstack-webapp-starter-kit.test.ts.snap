@@ -2,6 +2,34 @@
 
 exports[`Snapshot test 1`] = `
 {
+  "Outputs": {
+    "HostedZoneId": {
+      "Description": "Route53 Hosted Zone ID - update your domain nameservers to these",
+      "Export": {
+        "Name": "TaskTitanUsEast1Stack-HostedZoneId",
+      },
+      "Value": {
+        "Ref": "HostedZoneDB99F866",
+      },
+    },
+    "NameServers": {
+      "Description": "Route53 Name Servers - configure these at your domain registrar",
+      "Export": {
+        "Name": "TaskTitanUsEast1Stack-NameServers",
+      },
+      "Value": {
+        "Fn::Join": [
+          ",",
+          {
+            "Fn::GetAtt": [
+              "HostedZoneDB99F866",
+              "NameServers",
+            ],
+          },
+        ],
+      },
+    },
+  },
   "Parameters": {
     "BootstrapVersion": {
       "Default": "/cdk-bootstrap/hnb659fds/version",
@@ -16,7 +44,9 @@ exports[`Snapshot test 1`] = `
         "DomainValidationOptions": [
           {
             "DomainName": "example.com",
-            "HostedZoneId": "DUMMY",
+            "HostedZoneId": {
+              "Ref": "HostedZoneDB99F866",
+            },
           },
         ],
         "SubjectAlternativeNames": [
@@ -120,9 +150,6 @@ exports[`Snapshot test 1`] = `
         },
         "WriterProps": {
           "exports": {
-            "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefCertificateV29EE77EAF5F5E6CD7": {
-              "Ref": "CertificateV29EE77EAF",
-            },
             "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E": {
               "Ref": "SignPayloadHandlerFunctionVersionF9FE430A",
             },
@@ -133,9 +160,17 @@ exports[`Snapshot test 1`] = `
       "Type": "Custom::CrossRegionExportWriter",
       "UpdateReplacePolicy": "Delete",
     },
+    "HostedZoneDB99F866": {
+      "Properties": {
+        "Name": "example.com.",
+      },
+      "Type": "AWS::Route53::HostedZone",
+    },
     "Record83264F3E": {
       "Properties": {
-        "HostedZoneId": "DUMMY",
+        "HostedZoneId": {
+          "Ref": "HostedZoneDB99F866",
+        },
         "Name": "example.com.",
         "ResourceRecords": [
           "8.8.8.8",
@@ -254,16 +289,6 @@ exports[`Snapshot test 1`] = `
 exports[`Snapshot test 2`] = `
 {
   "Description": "TaskTitan - Serverless 3-Tier Application for Component-Based Project Planning",
-  "Mappings": {
-    "AWSCloudFrontPartitionHostedZoneIdMap": {
-      "aws": {
-        "zoneId": "Z2FDTNDATAQYW2",
-      },
-      "aws-cn": {
-        "zoneId": "Z3RFFRIM2A3IF5",
-      },
-    },
-  },
   "Outputs": {
     "AsyncJobHandlerArnCA46B385": {
       "Value": {
@@ -279,7 +304,20 @@ exports[`Snapshot test 2`] = `
       },
     },
     "AuthUserPoolDomainName8D4A2606": {
-      "Value": "auth.example.com",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Fn::GetAtt": [
+                "AuthDomainPrefixE1742B23",
+                "generated",
+              ],
+            },
+            ".auth.us-west-2.amazoncognito.com",
+          ],
+        ],
+      },
     },
     "AuthUserPoolIdC0605E59": {
       "Value": {
@@ -408,7 +446,20 @@ exports[`Snapshot test 2`] = `
     },
     "FrontendDomainName": {
       "Description": "TaskTitan frontend URL (HTTPS)",
-      "Value": "https://web.example.com",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://",
+            {
+              "Fn::GetAtt": [
+                "Webapp107041BD",
+                "DomainName",
+              ],
+            },
+          ],
+        ],
+      },
     },
     "MigrationCommand": {
       "Value": {
@@ -1064,22 +1115,132 @@ exports[`Snapshot test 2`] = `
       },
       "Type": "AWS::Cognito::ManagedLoginBranding",
     },
-    "AuthCognitoDomainRecordBA8AA168": {
+    "AuthDomainPrefixE1742B23": {
+      "DeletionPolicy": "Delete",
       "Properties": {
-        "HostedZoneId": "DUMMY",
-        "Name": "auth.example.com.",
-        "ResourceRecords": [
-          {
-            "Fn::GetAtt": [
-              "AuthUserPoolCognitoDomainAD9D79E1",
-              "CloudFrontDistribution",
+        "ServiceTimeout": "10",
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "RandomStringGenerator11e9c903f11a4989833c985dddef5eb28C5103D0",
+            "Arn",
+          ],
+        },
+        "length": 10,
+        "prefix": "webapp-",
+      },
+      "Type": "Custom::RandomString",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "AuthUpdateCallbackUrlsA55622E9": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "AuthUpdateCallbackUrlsCustomResourcePolicy14EEB23D",
+      ],
+      "Properties": {
+        "Create": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"@aws-sdk/client-cognito-identity-provider","action":"updateUserPoolClient","parameters":{"ClientId":"",
+              {
+                "Ref": "AuthUserPoolClientC635291F",
+              },
+              "","UserPoolId":"",
+              {
+                "Ref": "AuthUserPool8115E87F",
+              },
+              "","AllowedOAuthFlows":["code"],"AllowedOAuthFlowsUserPoolClient":true,"AllowedOAuthScopes":["profile","phone","email","openid","aws.cognito.signin.user.admin"],"ExplicitAuthFlows":["ALLOW_USER_PASSWORD_AUTH","ALLOW_USER_SRP_AUTH","ALLOW_REFRESH_TOKEN_AUTH"],"CallbackURLs":["https://",
+              {
+                "Fn::GetAtt": [
+                  "Webapp107041BD",
+                  "DomainName",
+                ],
+              },
+              "/api/auth/sign-in-callback","http://localhost:3010/api/auth/sign-in-callback"],"LogoutURLs":["https://",
+              {
+                "Fn::GetAtt": [
+                  "Webapp107041BD",
+                  "DomainName",
+                ],
+              },
+              "/api/auth/sign-out-callback","http://localhost:3010/api/auth/sign-out-callback"],"SupportedIdentityProviders":["COGNITO"],"TokenValidityUnits":{"IdToken":"minutes"},"IdTokenValidity":1440},"physicalResourceId":{"id":"",
+              {
+                "Ref": "AuthUserPool8115E87F",
+              },
+              ""}}",
             ],
+          ],
+        },
+        "InstallLatestAwsSdk": true,
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
+            "Arn",
+          ],
+        },
+        "Update": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"@aws-sdk/client-cognito-identity-provider","action":"updateUserPoolClient","parameters":{"ClientId":"",
+              {
+                "Ref": "AuthUserPoolClientC635291F",
+              },
+              "","UserPoolId":"",
+              {
+                "Ref": "AuthUserPool8115E87F",
+              },
+              "","AllowedOAuthFlows":["code"],"AllowedOAuthFlowsUserPoolClient":true,"AllowedOAuthScopes":["profile","phone","email","openid","aws.cognito.signin.user.admin"],"ExplicitAuthFlows":["ALLOW_USER_PASSWORD_AUTH","ALLOW_USER_SRP_AUTH","ALLOW_REFRESH_TOKEN_AUTH"],"CallbackURLs":["https://",
+              {
+                "Fn::GetAtt": [
+                  "Webapp107041BD",
+                  "DomainName",
+                ],
+              },
+              "/api/auth/sign-in-callback","http://localhost:3010/api/auth/sign-in-callback"],"LogoutURLs":["https://",
+              {
+                "Fn::GetAtt": [
+                  "Webapp107041BD",
+                  "DomainName",
+                ],
+              },
+              "/api/auth/sign-out-callback","http://localhost:3010/api/auth/sign-out-callback"],"SupportedIdentityProviders":["COGNITO"],"TokenValidityUnits":{"IdToken":"minutes"},"IdTokenValidity":1440},"physicalResourceId":{"id":"",
+              {
+                "Ref": "AuthUserPool8115E87F",
+              },
+              ""}}",
+            ],
+          ],
+        },
+      },
+      "Type": "Custom::AWS",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "AuthUpdateCallbackUrlsCustomResourcePolicy14EEB23D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "cognito-idp:UpdateUserPoolClient",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuthUserPool8115E87F",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AuthUpdateCallbackUrlsCustomResourcePolicy14EEB23D",
+        "Roles": [
+          {
+            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
           },
         ],
-        "TTL": "1800",
-        "Type": "CNAME",
       },
-      "Type": "AWS::Route53::RecordSet",
+      "Type": "AWS::IAM::Policy",
     },
     "AuthUserPool8115E87F": {
       "DeletionPolicy": "Delete",
@@ -1140,8 +1301,7 @@ exports[`Snapshot test 2`] = `
           "aws.cognito.signin.user.admin",
         ],
         "CallbackURLs": [
-          "http://localhost:3010/api/auth/sign-in-callback",
-          "https://web.example.com/api/auth/sign-in-callback",
+          "http://localhost/dummy",
         ],
         "ExplicitAuthFlows": [
           "ALLOW_USER_PASSWORD_AUTH",
@@ -1150,8 +1310,7 @@ exports[`Snapshot test 2`] = `
         ],
         "IdTokenValidity": 1440,
         "LogoutURLs": [
-          "http://localhost:3010/api/auth/sign-out-callback",
-          "https://web.example.com/api/auth/sign-out-callback",
+          "http://localhost/dummy",
         ],
         "SupportedIdentityProviders": [
           "COGNITO",
@@ -1167,15 +1326,12 @@ exports[`Snapshot test 2`] = `
     },
     "AuthUserPoolCognitoDomainAD9D79E1": {
       "Properties": {
-        "CustomDomainConfig": {
-          "CertificateArn": {
-            "Fn::GetAtt": [
-              "ExportsReader8B249524",
-              "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefCertificateV29EE77EAF5F5E6CD7",
-            ],
-          },
+        "Domain": {
+          "Fn::GetAtt": [
+            "AuthDomainPrefixE1742B23",
+            "generated",
+          ],
         },
-        "Domain": "auth.example.com",
         "ManagedLoginVersion": 2,
         "UserPoolId": {
           "Ref": "AuthUserPool8115E87F",
@@ -2130,7 +2286,6 @@ exports[`Snapshot test 2`] = `
       "Properties": {
         "ReaderProps": {
           "imports": {
-            "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefCertificateV29EE77EAF5F5E6CD7": "{{resolve:ssm:/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefCertificateV29EE77EAF5F5E6CD7}}",
             "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E": "{{resolve:ssm:/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E}}",
           },
           "prefix": "TaskTitanStack",
@@ -2417,6 +2572,91 @@ exports[`Snapshot test 2`] = `
         "DashboardName": "TaskTitan-Monitoring",
       },
       "Type": "AWS::CloudWatch::Dashboard",
+    },
+    "RandomStringGenerator11e9c903f11a4989833c985dddef5eb28C5103D0": {
+      "DependsOn": [
+        "RandomStringGenerator11e9c903f11a4989833c985dddef5eb2ServiceRoleAB6B57A9",
+      ],
+      "Properties": {
+        "Code": {
+          "ZipFile": "const response = require('cfn-response');
+const crypto = require('crypto');
+
+exports.handler = async function (event, context) {
+  try {
+    console.log(event);
+    if (event.RequestType == 'Delete') {
+      return await response.send(event, context, response.SUCCESS);
+    }
+
+    const prefix = event.ResourceProperties.prefix ?? '';
+    const length = event.ResourceProperties.length ?? '8';
+    const generate = () => {
+      const random = crypto.randomBytes(parseInt(length)).toString('hex');
+      return \`\${prefix}\${random.slice(0, length)}\`;
+    };
+
+    if (event.RequestType == 'Create') {
+      const generated = generate();
+      return await response.send(event, context, response.SUCCESS, { generated }, generated);
+    }
+    if (event.RequestType == 'Update') {
+      const current = event.PhysicalResourceId;
+      if (current.startsWith(prefix)) {
+        return await response.send(event, context, response.SUCCESS, { generated: current }, current);
+      }
+      const generated = generate();
+      return await response.send(event, context, response.SUCCESS, { generated }, generated);
+    }
+  } catch (e) {
+    console.log(e);
+    await response.send(event, context, response.FAILED);
+  }
+};
+",
+        },
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "RandomStringGenerator11e9c903f11a4989833c985dddef5eb2ServiceRoleAB6B57A9",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 5,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "RandomStringGenerator11e9c903f11a4989833c985dddef5eb2ServiceRoleAB6B57A9": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
     },
     "SchedulerRoleForTarget44ece2CFC6840F": {
       "Properties": {
@@ -3081,9 +3321,6 @@ exports[`Snapshot test 2`] = `
     "Webapp107041BD": {
       "Properties": {
         "DistributionConfig": {
-          "Aliases": [
-            "web.example.com",
-          ],
           "Comment": "CloudFront for Webapp",
           "DefaultCacheBehavior": {
             "AllowedMethods": [
@@ -3162,16 +3399,6 @@ exports[`Snapshot test 2`] = `
               },
             },
           ],
-          "ViewerCertificate": {
-            "AcmCertificateArn": {
-              "Fn::GetAtt": [
-                "ExportsReader8B249524",
-                "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefCertificateV29EE77EAF5F5E6CD7",
-              ],
-            },
-            "MinimumProtocolVersion": "TLSv1.2_2021",
-            "SslSupportMethod": "sni-only",
-          },
         },
       },
       "Type": "AWS::CloudFront::Distribution",
@@ -3194,7 +3421,7 @@ exports[`Snapshot test 2`] = `
           "Fn::Join": [
             "",
             [
-              "docker buildx build --build-arg ALLOWED_ORIGIN_HOST=*.example.com --build-arg SKIP_TS_BUILD=true --build-arg NEXT_PUBLIC_EVENT_HTTP_ENDPOINT=https://",
+              "docker buildx build --build-arg ALLOWED_ORIGIN_HOST=*.cloudfront.net --build-arg SKIP_TS_BUILD=true --build-arg NEXT_PUBLIC_EVENT_HTTP_ENDPOINT=https://",
               {
                 "Fn::GetAtt": [
                   "EventBusApi6E8C7C94",
@@ -3493,14 +3720,29 @@ exports[`Snapshot test 2`] = `
         },
         "Environment": {
           "Variables": {
-            "AMPLIFY_APP_ORIGIN": "https://web.example.com",
+            "AMPLIFY_APP_ORIGIN_SOURCE_PARAMETER": {
+              "Ref": "WebappOriginSourceParameterD87E143B",
+            },
             "ASYNC_JOB_HANDLER_ARN": {
               "Fn::GetAtt": [
                 "AsyncJobHandler438266BD",
                 "Arn",
               ],
             },
-            "COGNITO_DOMAIN": "auth.example.com",
+            "COGNITO_DOMAIN": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::GetAtt": [
+                      "AuthDomainPrefixE1742B23",
+                      "generated",
+                    ],
+                  },
+                  ".auth.us-west-2.amazoncognito.com",
+                ],
+              ],
+            },
             "DATABASE_ENGINE": {
               "Fn::Join": [
                 "",
@@ -3796,6 +4038,30 @@ exports[`Snapshot test 2`] = `
                 "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-*",
                 "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-*",
               ],
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-west-2:123456789012:parameter/",
+                    {
+                      "Ref": "WebappOriginSourceParameterD87E143B",
+                    },
+                  ],
+                ],
+              },
             },
           ],
           "Version": "2012-10-17",
@@ -4158,30 +4424,12 @@ exports[`Snapshot test 2`] = `
       },
       "Type": "AWS::Lambda::Permission",
     },
-    "WebappRecord02DDD651": {
+    "WebappOriginSourceParameterD87E143B": {
       "Properties": {
-        "AliasTarget": {
-          "DNSName": {
-            "Fn::GetAtt": [
-              "Webapp107041BD",
-              "DomainName",
-            ],
-          },
-          "HostedZoneId": {
-            "Fn::FindInMap": [
-              "AWSCloudFrontPartitionHostedZoneIdMap",
-              {
-                "Ref": "AWS::Partition",
-              },
-              "zoneId",
-            ],
-          },
-        },
-        "HostedZoneId": "DUMMY",
-        "Name": "web.example.com.",
-        "Type": "A",
+        "Type": "String",
+        "Value": "dummy",
       },
-      "Type": "AWS::Route53::RecordSet",
+      "Type": "AWS::SSM::Parameter",
     },
     "WebappSharedCachePolicy14FEE4A0": {
       "Properties": {
@@ -4213,6 +4461,104 @@ exports[`Snapshot test 2`] = `
         },
       },
       "Type": "AWS::CloudFront::CachePolicy",
+    },
+    "WebappUpdateAmplifyOriginSourceParameter3F609A08": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "WebappUpdateAmplifyOriginSourceParameterCustomResourcePolicy5D80E122",
+      ],
+      "Properties": {
+        "Create": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"ssm","action":"putParameter","parameters":{"Name":"",
+              {
+                "Ref": "WebappOriginSourceParameterD87E143B",
+              },
+              "","Value":"https://",
+              {
+                "Fn::GetAtt": [
+                  "Webapp107041BD",
+                  "DomainName",
+                ],
+              },
+              "","Overwrite":true},"physicalResourceId":{"id":"",
+              {
+                "Ref": "WebappOriginSourceParameterD87E143B",
+              },
+              ""}}",
+            ],
+          ],
+        },
+        "InstallLatestAwsSdk": true,
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
+            "Arn",
+          ],
+        },
+        "Update": {
+          "Fn::Join": [
+            "",
+            [
+              "{"service":"ssm","action":"putParameter","parameters":{"Name":"",
+              {
+                "Ref": "WebappOriginSourceParameterD87E143B",
+              },
+              "","Value":"https://",
+              {
+                "Fn::GetAtt": [
+                  "Webapp107041BD",
+                  "DomainName",
+                ],
+              },
+              "","Overwrite":true},"physicalResourceId":{"id":"",
+              {
+                "Ref": "WebappOriginSourceParameterD87E143B",
+              },
+              ""}}",
+            ],
+          ],
+        },
+      },
+      "Type": "Custom::AWS",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "WebappUpdateAmplifyOriginSourceParameterCustomResourcePolicy5D80E122": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ssm:PutParameter",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-west-2:123456789012:parameter/",
+                    {
+                      "Ref": "WebappOriginSourceParameterD87E143B",
+                    },
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "WebappUpdateAmplifyOriginSourceParameterCustomResourcePolicy5D80E122",
+        "Roles": [
+          {
+            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
   },
   "Rules": {
