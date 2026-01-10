@@ -45,23 +45,33 @@ model Component {
   id                                                    String          @id @default(cuid())
   name                                                  String
   description                                           String?
+  type                                                  ComponentType   @default(TASK)
   projectId                                             String
+  parentId                                              String?         // For hierarchy: Epic -> Feature -> Story -> Task
   sprintId                                              String?         // null = backlog
   status                                                ComponentStatus @default(PLANNING)
   priority                                              Int             @default(0)
   estimatedHours                                        Float?
   dueDate                                               DateTime?
+  owner                                                 String?         // Imported owner name (may not match a User)
+  tags                                                  String[]        @default([])
+  externalId                                            String?         // For import tracking (e.g., Jira key)
   createdAt                                             DateTime        @default(now())
   updatedAt                                             DateTime        @updatedAt
   Assignment                                            Assignment[]
   Project                                               Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Parent                                                Component?      @relation("ComponentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  Children                                              Component[]     @relation("ComponentHierarchy")
   Sprint                                                Sprint?         @relation(fields: [sprintId], references: [id], onDelete: SetNull)
   Dependency_Dependency_dependentComponentIdToComponent Dependency[]    @relation("Dependency_dependentComponentIdToComponent")
   Dependency_Dependency_requiredComponentIdToComponent  Dependency[]    @relation("Dependency_requiredComponentIdToComponent")
 
   @@index([projectId])
+  @@index([parentId])
   @@index([sprintId])
   @@index([status])
+  @@index([type])
+  @@index([externalId])
 }
 
 model Dependency {
@@ -174,6 +184,14 @@ enum ComponentStatus {
   BLOCKED
   REVIEW
   COMPLETED
+}
+
+enum ComponentType {
+  EPIC
+  FEATURE
+  STORY
+  TASK
+  BUG
 }
 
 enum Role {

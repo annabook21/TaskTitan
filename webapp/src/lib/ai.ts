@@ -159,6 +159,148 @@ export function isAIConfigured(): boolean {
   return true;
 }
 
+export interface ColumnMapping {
+  sourceColumn: string;
+  targetField: string | null;
+  confidence: number;
+}
+
+export interface ImportMappingResult {
+  mappings: ColumnMapping[];
+  detectedFormat: string;
+  suggestions: string[];
+  warnings: string[];
+}
+
+/**
+ * AI-powered column mapping for CSV/JSON imports
+ * Analyzes headers and sample data to suggest field mappings
+ */
+export async function analyzeImportData(
+  headers: string[],
+  sampleRows: Record<string, string>[],
+  existingProjects: string[],
+  existingSprints: string[],
+): Promise<ImportMappingResult> {
+  const client = getBedrockClient();
+
+  const targetFields = [
+    'name',
+    'description',
+    'type',
+    'parentName',
+    'owner',
+    'status',
+    'priority',
+    'estimatedHours',
+    'sprint',
+    'tags',
+    'externalId',
+    'dependencies',
+  ];
+
+  const systemPrompt = `You are an expert at analyzing spreadsheet data for project management imports.
+Your job is to map source columns to target fields for a work item import.
+
+Target fields available:
+- name: The title/summary of the work item (REQUIRED)
+- description: Detailed description
+- type: One of EPIC, FEATURE, STORY, TASK, BUG
+- parentName: Name of parent item (for hierarchy)
+- owner: Person assigned
+- status: PLANNING, IN_PROGRESS, BLOCKED, REVIEW, COMPLETED
+- priority: 0-5 (0=lowest, 5=critical)
+- estimatedHours: Numeric estimate
+- sprint: Sprint name to assign to
+- tags: Comma-separated tags
+- externalId: External system ID (e.g., Jira key)
+- dependencies: Comma-separated names of items this depends on
+
+Respond with ONLY valid JSON.`;
+
+  const userPrompt = `Analyze these column headers and sample data to suggest mappings:
+
+Headers: ${JSON.stringify(headers)}
+
+Sample data (first 3 rows):
+${JSON.stringify(sampleRows.slice(0, 3), null, 2)}
+
+Existing projects: ${existingProjects.join(', ') || 'None'}
+Existing sprints: ${existingSprints.join(', ') || 'None'}
+
+Return JSON with:
+- "mappings": array of { sourceColumn, targetField (or null if no match), confidence (0-1) }
+- "detectedFormat": brief description of the data format (e.g., "Jira export", "Simple task list", "Roadmap spreadsheet")
+- "suggestions": array of helpful tips for this import
+- "warnings": array of potential issues detected`;
+
+  try {
+    const command = new InvokeModelCommand({
+      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.2,
+      }),
+    });
+
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const content = responseBody.content?.[0]?.text;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    let jsonContent = content;
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[1];
+    }
+
+    const result = JSON.parse(jsonContent) as ImportMappingResult;
+
+    // Validate mappings
+    result.mappings = result.mappings.map((m) => ({
+      sourceColumn: m.sourceColumn,
+      targetField: targetFields.includes(m.targetField || '') ? m.targetField : null,
+      confidence: typeof m.confidence === 'number' ? m.confidence : 0.5,
+    }));
+
+    return result;
+  } catch (error) {
+    console.error('AI import analysis error:', error);
+    // Return basic mappings based on common patterns
+    return {
+      mappings: headers.map((h) => {
+        const lower = h.toLowerCase();
+        let targetField: string | null = null;
+        if (lower.includes('name') || lower.includes('title') || lower.includes('summary')) targetField = 'name';
+        else if (lower.includes('desc')) targetField = 'description';
+        else if (lower.includes('type') || lower.includes('issue')) targetField = 'type';
+        else if (lower.includes('parent') || lower.includes('epic')) targetField = 'parentName';
+        else if (lower.includes('owner') || lower.includes('assign')) targetField = 'owner';
+        else if (lower.includes('status') || lower.includes('state')) targetField = 'status';
+        else if (lower.includes('priority') || lower.includes('prio')) targetField = 'priority';
+        else if (lower.includes('estimate') || lower.includes('hours') || lower.includes('points')) targetField = 'estimatedHours';
+        else if (lower.includes('sprint') || lower.includes('iteration')) targetField = 'sprint';
+        else if (lower.includes('tag') || lower.includes('label')) targetField = 'tags';
+        else if (lower.includes('key') || lower.includes('id') || lower.includes('jira')) targetField = 'externalId';
+        else if (lower.includes('depend') || lower.includes('block')) targetField = 'dependencies';
+
+        return { sourceColumn: h, targetField, confidence: targetField ? 0.7 : 0 };
+      }),
+      detectedFormat: 'Unknown format',
+      suggestions: ['Review mappings carefully before importing'],
+      warnings: ['AI analysis unavailable - using pattern matching'],
+    };
+  }
+}
+
 export interface SprintPlanningComponent {
   id: string;
   name: string;

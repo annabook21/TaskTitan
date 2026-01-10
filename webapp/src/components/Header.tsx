@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Hexagon, Menu, X, User, LogOut, ChevronDown } from 'lucide-react';
+import { Hexagon, Menu, X, User, LogOut, ChevronDown, Upload } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 const navLinks = [
@@ -112,6 +112,15 @@ export default function Header({ user }: HeaderProps) {
                         />
                       </svg>
                       My Projects
+                    </Link>
+
+                    <Link
+                      href="/import"
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-800 transition-colors"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <Upload className="w-4 h-4" />
+                      Import Data
                     </Link>
 
                     <hr className="my-1 border-slate-700" />
