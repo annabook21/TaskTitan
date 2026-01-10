@@ -3,7 +3,7 @@ import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, Plus, Layers, GitBranch, Users, Clock, MoreVertical, Sparkles } from 'lucide-react';
+import { ArrowLeft, Plus, Layers, GitBranch, Users, Clock, MoreVertical, Sparkles, Zap, PlayCircle, PauseCircle } from 'lucide-react';
 import ComponentCard from './components/ComponentCard';
 import CreateComponentForm from './components/CreateComponentForm';
 import DependencyGraph from './components/DependencyGraph';
@@ -226,6 +226,74 @@ export default async function ProjectDetailPage({ params }: Props) {
 
             {/* Sidebar */}
             <div className="space-y-6">
+              {/* Sprints */}
+              <div className="component-card">
+                <h3 className="font-medium mb-4 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  Sprints
+                </h3>
+                {availableSprints.length === 0 ? (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-slate-500 mb-3">No active sprints</p>
+                    <Link
+                      href={`/team/${team.id}/sprints/new`}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/20 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Create Sprint
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {availableSprints.map((sprint) => {
+                      const sprintComponents = components.filter((c) => c.sprintId === sprint.id);
+                      const completed = sprintComponents.filter((c) => c.status === 'COMPLETED').length;
+                      const total = sprintComponents.length;
+                      const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+                      
+                      return (
+                        <Link
+                          key={sprint.id}
+                          href={`/team/${team.id}/sprints/${sprint.id}`}
+                          className="block p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors border border-slate-700/50 hover:border-amber-500/30"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium text-slate-200 flex items-center gap-2">
+                              {sprint.status === 'ACTIVE' ? (
+                                <PlayCircle className="w-4 h-4 text-green-400" />
+                              ) : (
+                                <PauseCircle className="w-4 h-4 text-slate-400" />
+                              )}
+                              {sprint.name}
+                            </span>
+                            {sprint.status === 'ACTIVE' && (
+                              <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded">Active</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span>{total} items</span>
+                            <span>•</span>
+                            <span>{progress}% done</span>
+                          </div>
+                          <div className="h-1.5 bg-slate-700 rounded-full mt-2 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-amber-500 to-green-500"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                        </Link>
+                      );
+                    })}
+                    <Link
+                      href={`/team/${team.id}/sprints`}
+                      className="block text-center text-sm text-slate-400 hover:text-amber-400 mt-2"
+                    >
+                      View all sprints →
+                    </Link>
+                  </div>
+                )}
+              </div>
+
               {/* Team Members */}
               <div className="component-card">
                 <h3 className="font-medium mb-4 flex items-center gap-2">
