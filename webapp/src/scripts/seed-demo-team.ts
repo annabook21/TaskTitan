@@ -15,6 +15,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { createId } from '@paralleldrive/cuid2';
 
 const prisma = new PrismaClient();
 
@@ -86,6 +87,7 @@ async function main() {
     if (!user) {
       user = await prisma.user.create({
         data: {
+          id: createId(),
           email: userData.email,
           name: userData.name,
         },

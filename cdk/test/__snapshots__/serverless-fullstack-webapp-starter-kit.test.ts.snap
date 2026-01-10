@@ -166,20 +166,6 @@ exports[`Snapshot test 1`] = `
       },
       "Type": "AWS::Route53::HostedZone",
     },
-    "Record83264F3E": {
-      "Properties": {
-        "HostedZoneId": {
-          "Ref": "HostedZoneDB99F866",
-        },
-        "Name": "example.com.",
-        "ResourceRecords": [
-          "8.8.8.8",
-        ],
-        "TTL": "1800",
-        "Type": "A",
-      },
-      "Type": "AWS::Route53::RecordSet",
-    },
     "SignPayloadHandlerCFEAA14C": {
       "DependsOn": [
         "SignPayloadHandlerServiceRole29261232",
