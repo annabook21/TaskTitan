@@ -3960,6 +3960,14 @@ exports.handler = async function (event, context) {
               ],
             },
             {
+              "Action": "bedrock:InvokeModel",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-*",
+              ],
+            },
+            {
               "Action": [
                 "ssm:DescribeParameters",
                 "ssm:GetParameters",
