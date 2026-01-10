@@ -359,7 +359,7 @@ export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).ac
     where: {
       Project: { teamId: sprint.teamId },
       sprintId: null,
-      status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      status: { not: 'COMPLETED' },
     },
     include: {
       Dependency_Dependency_dependentComponentIdToComponent: {
@@ -470,7 +470,7 @@ export const aiSuggestSprint = authActionClient.schema(suggestSprintSchema).acti
     where: {
       Project: { teamId },
       sprintId: null,
-      status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      status: { not: 'COMPLETED' },
     },
     orderBy: { priority: 'desc' },
     select: {
