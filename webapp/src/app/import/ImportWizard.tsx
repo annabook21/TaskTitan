@@ -216,7 +216,8 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
     };
 
     const rows = items.map((item: Record<string, unknown>) => flatten(item));
-    const headers: string[] = [...new Set(rows.flatMap((r: Record<string, unknown>) => Object.keys(r)))];
+    const allKeys = rows.flatMap((r: Record<string, unknown>) => Object.keys(r));
+    const headers = [...new Set(allKeys)] as string[];
 
     return { headers, rows };
   };

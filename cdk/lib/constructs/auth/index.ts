@@ -1,7 +1,13 @@
 import { UpdateUserPoolClientCommandInput } from '@aws-sdk/client-cognito-identity-provider';
 import { CfnOutput, CfnResource, CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
-import { CfnManagedLoginBranding, ManagedLoginVersion, UserPool, UserPoolClient, UserPoolDomain } from 'aws-cdk-lib/aws-cognito';
+import {
+  CfnManagedLoginBranding,
+  ManagedLoginVersion,
+  UserPool,
+  UserPoolClient,
+  UserPoolDomain,
+} from 'aws-cdk-lib/aws-cognito';
 import { Code, Runtime, SingletonFunction } from 'aws-cdk-lib/aws-lambda';
 import { CnameRecord, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
