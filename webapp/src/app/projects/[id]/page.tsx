@@ -9,6 +9,7 @@ import CreateComponentForm from './components/CreateComponentForm';
 import DependencyGraph from './components/DependencyGraph';
 import AIGeneratePanel from './components/AIGeneratePanel';
 import TimelineView from './components/TimelineView';
+import DeleteProjectButton from './DeleteProjectButton';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -339,6 +340,14 @@ export default async function ProjectDetailPage({ params }: Props) {
                   </div>
                 )}
               </div>
+
+              {/* Danger Zone - only for owner */}
+              {project.ownerId === userId && (
+                <div className="component-card border-red-500/30">
+                  <h3 className="text-sm font-medium text-red-400 mb-3">Danger Zone</h3>
+                  <DeleteProjectButton projectId={project.id} projectName={project.name} />
+                </div>
+              )}
             </div>
           </div>
         </div>

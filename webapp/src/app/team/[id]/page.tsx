@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import InviteButton from './InviteButton';
 import SeedDemoButton from './SeedDemoButton';
+import DeleteTeamButton from './DeleteTeamButton';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -213,6 +214,14 @@ export default async function TeamDetailPage({ params }: Props) {
               {currentUserMembership?.role === 'OWNER' && (
                 <div className="mt-6">
                   <SeedDemoButton teamId={team.id} />
+                </div>
+              )}
+
+              {/* Danger Zone - only for owner */}
+              {currentUserMembership?.role === 'OWNER' && (
+                <div className="mt-8 pt-6 border-t border-slate-700">
+                  <h3 className="text-sm font-medium text-red-400 mb-3">Danger Zone</h3>
+                  <DeleteTeamButton teamId={team.id} teamName={team.name} />
                 </div>
               )}
             </div>
