@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Certificate, CertificateValidation, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
-import { ARecord, HostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
+import { HostedZone } from 'aws-cdk-lib/aws-route53';
 import { Construct } from 'constructs';
 import { EdgeFunction } from './constructs/cf-lambda-furl-service/edge-function';
 import { join } from 'path';
@@ -58,13 +58,9 @@ export class UsEast1Stack extends cdk.Stack {
         exportName: `${this.stackName}-NameServers`,
       });
 
-      // cognito requires A record for Hosted UI custom domain
-      // https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-add-custom-domain.html#cognito-user-pools-add-custom-domain-adding
-      // > Its parent domain must have a valid DNS A record. You can assign any value to this record.
-      new ARecord(this, 'Record', {
-        zone: zone,
-        target: RecordTarget.fromIpAddresses('8.8.8.8'),
-      });
+      // Note: Cognito requires the parent domain to have a valid A record before adding a custom domain.
+      // The root domain A record is created in MainStack pointing to CloudFront (serving the webapp).
+      // The Auth construct adds an explicit dependency to ensure proper ordering.
 
       const cert = new Certificate(this, 'CertificateV2', {
         domainName: `*.${zone.zoneName}`,

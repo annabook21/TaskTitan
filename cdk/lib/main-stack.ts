@@ -143,9 +143,15 @@ export class MainStack extends Stack {
       auth,
       eventBus,
       asyncJob,
-      // Use root domain (tasktitan.live) - remove subDomain property or set to undefined
-      // subDomain: 'web', // Uncomment if you want web.tasktitan.live instead
+      // Serve webapp from root domain (e.g., tasktitan.live instead of web.tasktitan.live)
     });
+
+    // When using a custom domain, Cognito requires the parent domain to have a valid A record.
+    // The webapp's CloudFront A record (for the root domain) satisfies this requirement.
+    // Add explicit dependency to ensure the A record is created before Cognito validates the domain.
+    if (webapp.aRecord) {
+      auth.cognitoDomain.node.addDependency(webapp.aRecord);
+    }
 
     // CloudWatch Monitoring Dashboard
     new Monitoring(this, 'Monitoring', {

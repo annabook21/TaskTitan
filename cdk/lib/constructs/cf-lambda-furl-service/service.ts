@@ -61,6 +61,12 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
   public readonly urlParameter: StringParameter;
   public readonly url: string;
   public readonly domainName: string;
+  /**
+   * The Route53 A record pointing to CloudFront.
+   * Only set when using a custom domain (hostedZone is provided).
+   * Use this to add dependencies for resources that need the A record to exist first.
+   */
+  public readonly aRecord?: ARecord;
 
   constructor(scope: Construct, id: string, props: CloudFrontLambdaFunctionUrlServiceProps) {
     super(scope, id);
@@ -121,7 +127,7 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
     });
 
     if (hostedZone) {
-      new ARecord(this, 'Record', {
+      this.aRecord = new ARecord(this, 'Record', {
         zone: hostedZone,
         target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
         recordName: subDomain,

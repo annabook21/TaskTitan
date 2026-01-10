@@ -1,7 +1,7 @@
 import { UpdateUserPoolClientCommandInput } from '@aws-sdk/client-cognito-identity-provider';
 import { CfnOutput, CfnResource, CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
-import { CfnManagedLoginBranding, ManagedLoginVersion, UserPool, UserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import { CfnManagedLoginBranding, ManagedLoginVersion, UserPool, UserPoolClient, UserPoolDomain } from 'aws-cdk-lib/aws-cognito';
 import { Code, Runtime, SingletonFunction } from 'aws-cdk-lib/aws-lambda';
 import { CnameRecord, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
@@ -28,6 +28,12 @@ export class Auth extends Construct {
   readonly userPool: UserPool;
   readonly client: UserPoolClient;
   readonly domainName: string;
+  /**
+   * The Cognito User Pool Domain resource.
+   * When using a custom domain, this resource requires the parent domain to have an A record.
+   * Use `cognitoDomain.node.addDependency()` to ensure the A record is created first.
+   */
+  readonly cognitoDomain: UserPoolDomain;
 
   private callbackUrlCount = 0;
 
@@ -95,7 +101,7 @@ export class Auth extends Construct {
     this.client = client;
     this.userPool = userPool;
 
-    const domain = userPool.addDomain('CognitoDomain', {
+    this.cognitoDomain = userPool.addDomain('CognitoDomain', {
       ...(hostedZone && props.sharedCertificate
         ? {
             customDomain: {
@@ -115,7 +121,7 @@ export class Auth extends Construct {
       new CnameRecord(this, 'CognitoDomainRecord', {
         zone: hostedZone,
         recordName: subDomain,
-        domainName: domain.cloudFrontEndpoint,
+        domainName: this.cognitoDomain.cloudFrontEndpoint,
       });
     }
 

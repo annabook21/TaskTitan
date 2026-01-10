@@ -4,7 +4,7 @@ import { DockerImageFunction, DockerImageCode, Architecture, Tracing } from 'aws
 import { Construct } from 'constructs';
 import { readFileSync } from 'fs';
 import { CloudFrontLambdaFunctionUrlService } from './cf-lambda-furl-service/service';
-import { IHostedZone } from 'aws-cdk-lib/aws-route53';
+import { ARecord, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { Database } from './database';
 import { EdgeFunction } from './cf-lambda-furl-service/edge-function';
@@ -50,6 +50,11 @@ export interface WebappProps {
 export class Webapp extends Construct {
   public readonly baseUrl: string;
   public readonly handler: DockerImageFunction;
+  /**
+   * The Route53 A record for the webapp domain.
+   * Only set when using a custom domain.
+   */
+  public readonly aRecord?: ARecord;
 
   constructor(scope: Construct, id: string, props: WebappProps) {
     super(scope, id);
@@ -119,6 +124,7 @@ export class Webapp extends Construct {
       signPayloadHandler: props.signPayloadHandler,
     });
     this.baseUrl = service.url;
+    this.aRecord = service.aRecord;
 
     if (hostedZone) {
       auth.addAllowedCallbackUrls(
