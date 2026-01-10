@@ -66,7 +66,7 @@ export default async function TeamDetailPage({ params }: Props) {
   }
 
   // Get current user's role in this team
-  const currentUserMembership = team.Membership.find((m) => m.userId === userId);
+  const currentUserMembership = team.Membership.find((m) => String(m.userId) === String(userId));
   const isOwnerOrAdmin = currentUserMembership?.role === 'OWNER' || currentUserMembership?.role === 'ADMIN';
 
   return (

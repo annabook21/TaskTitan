@@ -342,10 +342,16 @@ export default async function ProjectDetailPage({ params }: Props) {
               </div>
 
               {/* Danger Zone - only for owner */}
-              {project.ownerId === userId && (
+              {String(project.ownerId) === String(userId) ? (
                 <div className="component-card border-red-500/30">
                   <h3 className="text-sm font-medium text-red-400 mb-3">Danger Zone</h3>
                   <DeleteProjectButton projectId={project.id} projectName={project.name} />
+                </div>
+              ) : (
+                <div className="component-card border-slate-700">
+                  <p className="text-xs text-slate-500">
+                    Owner: {project.ownerId} | You: {userId}
+                  </p>
                 </div>
               )}
             </div>

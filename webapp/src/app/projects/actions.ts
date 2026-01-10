@@ -121,16 +121,46 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
   const { id } = parsedInput;
   const { userId } = ctx;
 
-  // Verify user is owner
+  // Verify user is owner (using String comparison to avoid type mismatch)
   const project = await prisma.project.findFirst({
-    where: { id, ownerId: userId },
+    where: {
+      id,
+      Team: { Membership: { some: { userId } } },
+    },
+    select: { id: true, ownerId: true },
   });
 
   if (!project) {
+    throw new Error('Project not found');
+  }
+
+  if (String(project.ownerId) !== String(userId)) {
     throw new Error('Only the project owner can delete it');
   }
 
-  await prisma.project.delete({ where: { id } });
+  // Delete in transaction to handle cascading deletes properly
+  await prisma.$transaction(async (tx) => {
+    const componentIds = await tx.component.findMany({
+      where: { projectId: id },
+      select: { id: true },
+    }).then(rows => rows.map(r => r.id));
+
+    if (componentIds.length) {
+      await tx.assignment.deleteMany({ where: { componentId: { in: componentIds } } });
+      await tx.dependency.deleteMany({
+        where: {
+          OR: [
+            { requiredComponentId: { in: componentIds } },
+            { dependentComponentId: { in: componentIds } },
+          ],
+        },
+      });
+      await tx.component.deleteMany({ where: { id: { in: componentIds } } });
+    }
+
+    await tx.activity.deleteMany({ where: { projectId: id } });
+    await tx.project.delete({ where: { id } });
+  });
 
   revalidatePath('/');
   revalidatePath('/projects');

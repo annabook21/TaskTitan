@@ -207,22 +207,36 @@ export const removeMember = authActionClient.schema(removeMemberSchema).action(a
 export const deleteTeam = authActionClient
   .schema(z.object({ id: z.string().cuid() }))
   .action(async ({ parsedInput, ctx }) => {
-    const { id } = parsedInput;
-    const { userId } = ctx;
+    try {
+      const { id } = parsedInput;
+      const { userId } = ctx;
 
-    // Verify user is owner
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId: id } },
-    });
+      // Verify user is owner
+      const membership = await prisma.membership.findUnique({
+        where: { userId_teamId: { userId, teamId: id } },
+      });
 
-    if (!membership || membership.role !== 'OWNER') {
-      throw new Error('Only the team owner can delete the team');
+      if (!membership || membership.role !== 'OWNER') {
+        throw new Error('Only the team owner can delete the team');
+      }
+
+      // Cascades are set up in schema (Team -> Project, Membership, Sprint)
+      // Projects cascade to Components -> Assignments, Dependencies
+      // So we can delete the team directly
+      await prisma.team.delete({ where: { id } });
+
+      revalidatePath('/');
+      revalidatePath('/team');
+
+      return { success: true };
+    } catch (error) {
+      // If it's already our error, re-throw it
+      if (error instanceof Error && error.message.includes('owner')) {
+        throw error;
+      }
+      
+      // For FK constraint errors or other Prisma errors, provide a helpful message
+      console.error('Error deleting team:', error);
+      throw new Error('Failed to delete team. Please ensure all related data can be deleted.');
     }
-
-    await prisma.team.delete({ where: { id } });
-
-    revalidatePath('/');
-    revalidatePath('/team');
-
-    return { success: true };
   });
