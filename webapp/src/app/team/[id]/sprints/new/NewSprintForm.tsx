@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAction } from 'next-safe-action/hooks';
-import { createSprint } from '@/app/sprints/actions';
-import { Loader2, Zap, Calendar, Target, Clock } from 'lucide-react';
+import { createSprint, aiSuggestSprint } from '@/app/sprints/actions';
+import { Loader2, Zap, Calendar, Target, Clock, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface Props {
   teamId: string;
@@ -20,6 +21,7 @@ export default function NewSprintForm({ teamId, suggestedName, suggestedStartDat
   const [startDate, setStartDate] = useState(suggestedStartDate);
   const [endDate, setEndDate] = useState(suggestedEndDate);
   const [capacity, setCapacity] = useState<string>('');
+  const [aiReasoning, setAiReasoning] = useState<string | null>(null);
 
   const { execute, isExecuting, result } = useAction(createSprint, {
     onSuccess: (data) => {
@@ -28,6 +30,26 @@ export default function NewSprintForm({ teamId, suggestedName, suggestedStartDat
       }
     },
   });
+
+  const { execute: executeSuggest, isExecuting: isSuggesting } = useAction(aiSuggestSprint, {
+    onSuccess: ({ data }) => {
+      if (data) {
+        setName(data.name);
+        setGoal(data.goal);
+        setCapacity(data.recommendedCapacity.toString());
+        setAiReasoning(data.reasoning);
+        toast.success('AI suggestions applied!');
+      }
+    },
+    onError: ({ error }) => {
+      toast.error(error.serverError || 'Failed to get AI suggestions');
+    },
+  });
+
+  const handleAISuggest = () => {
+    setAiReasoning(null);
+    executeSuggest({ teamId });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +69,41 @@ export default function NewSprintForm({ teamId, suggestedName, suggestedStartDat
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* AI Suggest Button */}
+      <div className="flex items-center justify-between p-4 bg-gradient-to-r from-violet-500/10 to-cyan-500/10 border border-violet-500/30 rounded-xl">
+        <div>
+          <h3 className="font-medium text-slate-200 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-violet-400" />
+            AI Sprint Planner
+          </h3>
+          <p className="text-sm text-slate-400 mt-1">Let AI analyze your backlog and suggest sprint details</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleAISuggest}
+          disabled={isSuggesting}
+          className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+        >
+          {isSuggesting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Analyzing...
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-4 h-4" />
+              AI Suggest
+            </>
+          )}
+        </button>
+      </div>
+
+      {aiReasoning && (
+        <div className="p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-300">
+          <strong>AI:</strong> {aiReasoning}
+        </div>
+      )}
+
       {/* Sprint Name */}
       <div className="component-card">
         <label htmlFor="name" className="block text-sm font-medium text-slate-300 mb-2">

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
-import { planSprint as aiPlanSprint } from '@/lib/ai';
+import { planSprint as aiPlanSprint, suggestSprintDetails } from '@/lib/ai';
 
 const createSprintSchema = z.object({
   teamId: z.string().cuid(),
@@ -439,4 +439,59 @@ export const applySprintPlan = authActionClient.schema(applySprintPlanSchema).ac
   revalidatePath(`/team/${sprint.teamId}/sprints/${sprintId}`);
 
   return { success: true, assignedCount: componentIds.length };
+});
+
+const suggestSprintSchema = z.object({
+  teamId: z.string().cuid(),
+});
+
+/**
+ * AI-powered sprint suggestion: suggests name, goal, and capacity based on backlog
+ */
+export const aiSuggestSprint = authActionClient.schema(suggestSprintSchema).action(async ({ parsedInput, ctx }) => {
+  const { teamId } = parsedInput;
+  const { userId } = ctx;
+
+  // Verify user is member of team
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    include: {
+      Membership: { where: { userId } },
+      Sprint: { orderBy: { createdAt: 'desc' } },
+    },
+  });
+
+  if (!team || team.Membership.length === 0) {
+    throw new Error('Team not found or you are not a member');
+  }
+
+  // Get backlog components (not in any sprint, not completed)
+  const backlogComponents = await prisma.component.findMany({
+    where: {
+      Project: { teamId },
+      sprintId: null,
+      status: { notIn: ['COMPLETED', 'CANCELLED'] },
+    },
+    orderBy: { priority: 'desc' },
+    select: {
+      name: true,
+      description: true,
+      priority: true,
+      estimatedHours: true,
+    },
+  });
+
+  if (backlogComponents.length === 0) {
+    return {
+      name: `Sprint ${team.Sprint.length + 1}`,
+      goal: 'No backlog items available - add components to your projects first.',
+      recommendedCapacity: 40,
+      reasoning: 'No backlog items to analyze',
+    };
+  }
+
+  const sprintNumber = team.Sprint.length + 1;
+  const suggestion = await suggestSprintDetails(team.name, backlogComponents, sprintNumber);
+
+  return suggestion;
 });

@@ -180,6 +180,101 @@ export interface SprintPlanningResult {
  * AI-powered sprint planning: suggests which components to include in a sprint
  * based on capacity, priorities, and dependencies.
  */
+export interface SprintSuggestion {
+  name: string;
+  goal: string;
+  recommendedCapacity: number;
+  reasoning: string;
+}
+
+/**
+ * AI-powered sprint suggestion: analyzes backlog to suggest sprint name, goal, and capacity
+ */
+export async function suggestSprintDetails(
+  teamName: string,
+  backlogComponents: { name: string; description: string | null; priority: number; estimatedHours: number | null }[],
+  sprintNumber: number,
+): Promise<SprintSuggestion> {
+  const client = getBedrockClient();
+
+  const systemPrompt = `You are a helpful sprint planning assistant. Based on the team's backlog, suggest a meaningful sprint name, goal, and capacity.
+Be practical and focused. Sprint names should be memorable and reflect the work (e.g., "Auth & Security Sprint", "UI Polish Week", "API Integration Cycle").
+Sprint goals should be specific and achievable (1-2 sentences).
+Recommend capacity based on the total estimated hours in the backlog, aiming for 70-80% of available work to fit in a 2-week sprint.
+
+Respond with ONLY valid JSON, no other text.`;
+
+  const backlogSummary = backlogComponents.slice(0, 15).map((c) => ({
+    name: c.name,
+    description: c.description || '',
+    priority: c.priority,
+    hours: c.estimatedHours || 0,
+  }));
+
+  const totalHours = backlogComponents.reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
+
+  const userPrompt = `Team: ${teamName}
+Sprint Number: ${sprintNumber}
+Total backlog items: ${backlogComponents.length}
+Total estimated hours: ${totalHours}
+
+Top priority backlog items:
+${JSON.stringify(backlogSummary, null, 2)}
+
+Based on this backlog, suggest:
+- "name": A meaningful sprint name (not just "Sprint ${sprintNumber}")
+- "goal": A specific, achievable sprint goal (1-2 sentences)
+- "recommendedCapacity": Suggested team capacity in hours for a 2-week sprint
+- "reasoning": Brief explanation of your suggestions (1 sentence)`;
+
+  try {
+    const command = new InvokeModelCommand({
+      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.7,
+      }),
+    });
+
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const content = responseBody.content?.[0]?.text;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    let jsonContent = content;
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[1];
+    }
+
+    const result = JSON.parse(jsonContent) as SprintSuggestion;
+
+    return {
+      name: result.name || `Sprint ${sprintNumber}`,
+      goal: result.goal || '',
+      recommendedCapacity: result.recommendedCapacity || 80,
+      reasoning: result.reasoning || 'AI-generated suggestion',
+    };
+  } catch (error) {
+    console.error('AI sprint suggestion error:', error);
+    // Return sensible defaults on error
+    return {
+      name: `Sprint ${sprintNumber}`,
+      goal: 'Complete high-priority backlog items',
+      recommendedCapacity: Math.min(80, totalHours),
+      reasoning: 'Default suggestion (AI unavailable)',
+    };
+  }
+}
+
 export async function planSprint(
   sprintName: string,
   sprintGoal: string | undefined,
