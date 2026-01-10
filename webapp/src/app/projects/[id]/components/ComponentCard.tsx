@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { updateComponent } from '@/app/projects/actions';
 import { assignComponentToSprint } from '@/app/sprints/actions';
-import { MoreVertical, GitBranch, Clock, User as UserIcon, ChevronDown, Check, Zap } from 'lucide-react';
+import { MoreVertical, GitBranch, Clock, User as UserIcon, ChevronDown, Check, Zap, Github } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ComponentStatus, User, SprintStatus } from '@prisma/client';
 import AssignmentPanel from './AssignmentPanel';
@@ -27,6 +27,7 @@ interface ComponentWithRelations {
   dueDate: Date | null;
   sprintId: string | null;
   sprint: Sprint | null;
+  githubPrUrl: string | null;
   assignments: { user: User }[];
   dependsOn: { requiredComponent: { id: string; name: string } }[];
   dependedOnBy: { dependentComponent: { id: string; name: string } }[];
@@ -92,6 +93,19 @@ export default function ComponentCard({ component, teamMembers, availableSprints
 
       {/* Description */}
       {component.description && <p className="text-sm text-slate-400 line-clamp-2 mb-3">{component.description}</p>}
+
+      {/* GitHub PR Link */}
+      {component.githubPrUrl && (
+        <a
+          href={component.githubPrUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 mb-2 transition-colors"
+        >
+          <Github className="w-3 h-3" />
+          View Pull Request
+        </a>
+      )}
 
       {/* Status Dropdown */}
       <div className="relative mb-3">

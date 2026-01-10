@@ -22,6 +22,7 @@ import DependencyGraph from './components/DependencyGraph';
 import AIGeneratePanel from './components/AIGeneratePanel';
 import TimelineView from './components/TimelineView';
 import DeleteProjectButton from './DeleteProjectButton';
+import GitHubIntegrationSettings from './components/GitHubIntegrationSettings';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -352,6 +353,18 @@ export default async function ProjectDetailPage({ params }: Props) {
                   </div>
                 )}
               </div>
+
+              {/* GitHub Integration - only for owner or admin */}
+              {team.Membership.some((m) => m.userId === userId && (m.role === 'OWNER' || m.role === 'ADMIN')) && (
+                <GitHubIntegrationSettings
+                  projectId={project.id}
+                  currentSettings={{
+                    githubRepoUrl: project.githubRepoUrl,
+                    githubWebhookSecret: project.githubWebhookSecret,
+                    githubPrTargetStatus: project.githubPrTargetStatus,
+                  }}
+                />
+              )}
 
               {/* Danger Zone - only for owner */}
               {String(project.ownerId) === String(userId) ? (

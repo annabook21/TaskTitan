@@ -56,6 +56,7 @@ model Component {
   owner                                                 String? // Imported owner name (may not match a User)
   tags                                                  String[]        @default([])
   externalId                                            String? // For import tracking (e.g., Jira key)
+  githubPrUrl                                           String? // GitHub PR URL
   createdAt                                             DateTime        @default(now())
   updatedAt                                             DateTime        @updatedAt
   Assignment                                            Assignment[]
@@ -72,6 +73,7 @@ model Component {
   @@index([status])
   @@index([type])
   @@index([externalId])
+  @@index([githubPrUrl])
 }
 
 model Dependency {
@@ -101,20 +103,25 @@ model Membership {
 }
 
 model Project {
-  id          String      @id @default(cuid())
-  name        String
-  description String?
-  teamId      String
-  ownerId     String
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  Activity    Activity[]
-  Component   Component[]
-  User        User        @relation(fields: [ownerId], references: [id])
-  Team        Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  id                   String           @id @default(cuid())
+  name                 String
+  description          String?
+  teamId               String
+  ownerId              String
+  // GitHub Integration
+  githubRepoUrl        String?
+  githubWebhookSecret  String?
+  githubPrTargetStatus ComponentStatus? @default(REVIEW)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  Activity             Activity[]
+  Component            Component[]
+  User                 User             @relation(fields: [ownerId], references: [id])
+  Team                 Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([ownerId])
   @@index([teamId])
+  @@index([githubRepoUrl])
 }
 
 model Sprint {
