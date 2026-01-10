@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAction } from 'next-safe-action/hooks';
-import { analyzeImport, executeImport } from './actions';
+import { analyzeImport, executeImport, cleanupData } from './actions';
 import {
   Upload,
   FileSpreadsheet,
@@ -16,6 +16,9 @@ import {
   ChevronDown,
   X,
   FileJson,
+  Wand2,
+  Edit3,
+  RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -72,6 +75,11 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
 
+  // Editing state
+  const [editingRow, setEditingRow] = useState<number | null>(null);
+  const [cleanupChanges, setCleanupChanges] = useState<string[]>([]);
+  const [originalRows, setOriginalRows] = useState<Record<string, string>[]>([]);
+
   // Import results
   const [importStats, setImportStats] = useState<{
     created: number;
@@ -109,6 +117,45 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
       toast.error(error.serverError || 'Import failed');
     },
   });
+
+  const { execute: doCleanup, isExecuting: isCleaning } = useAction(cleanupData, {
+    onSuccess: ({ data }) => {
+      if (data) {
+        // Save original for undo
+        if (originalRows.length === 0) {
+          setOriginalRows([...rows]);
+        }
+        // Apply cleaned data
+        const cleanedRows = data.rows.map((r) => r.cleaned);
+        setRows(cleanedRows);
+        // Collect all changes
+        const allChanges = data.rows.flatMap((r) => r.changes || []);
+        setCleanupChanges(allChanges);
+        toast.success(`AI made ${data.totalChanges} improvements!`);
+      }
+    },
+    onError: ({ error }) => {
+      toast.error(error.serverError || 'Cleanup failed');
+    },
+  });
+
+  const handleCleanup = () => {
+    doCleanup({ teamId, rows, mappings });
+  };
+
+  const handleUndoCleanup = () => {
+    if (originalRows.length > 0) {
+      setRows([...originalRows]);
+      setCleanupChanges([]);
+      toast.info('Reverted to original data');
+    }
+  };
+
+  const updateRowField = (rowIndex: number, column: string, value: string) => {
+    setRows((prev) =>
+      prev.map((row, i) => (i === rowIndex ? { ...row, [column]: value } : row)),
+    );
+  };
 
   // Parse CSV
   const parseCSV = (text: string): { headers: string[]; rows: Record<string, string>[] } => {
@@ -395,6 +442,64 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
               </div>
             )}
 
+            {/* AI Cleanup Button */}
+            <div className="mb-4 p-4 bg-gradient-to-r from-violet-500/10 to-cyan-500/10 border border-violet-500/30 rounded-xl flex items-center justify-between">
+              <div>
+                <h4 className="font-medium text-slate-200 flex items-center gap-2">
+                  <Wand2 className="w-5 h-5 text-violet-400" />
+                  AI Data Cleanup
+                </h4>
+                <p className="text-sm text-slate-400 mt-1">
+                  Fix typos, normalize values, detect hierarchy, fill missing data
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {originalRows.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleUndoCleanup}
+                    className="px-3 py-2 text-sm text-slate-400 hover:text-white flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Undo
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCleanup}
+                  disabled={isCleaning}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                >
+                  {isCleaning ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Cleaning...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-4 h-4" />
+                      Clean Data
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Cleanup changes */}
+            {cleanupChanges.length > 0 && (
+              <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                <h4 className="text-sm font-medium text-green-400 mb-1">✨ AI Improvements ({cleanupChanges.length})</h4>
+                <ul className="text-sm text-green-300/80 space-y-1 max-h-24 overflow-y-auto">
+                  {cleanupChanges.slice(0, 10).map((c, i) => (
+                    <li key={i}>• {c}</li>
+                  ))}
+                  {cleanupChanges.length > 10 && (
+                    <li className="text-slate-500">...and {cleanupChanges.length - 10} more</li>
+                  )}
+                </ul>
+              </div>
+            )}
+
             {/* Warnings */}
             {warnings.length > 0 && (
               <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
@@ -468,13 +573,20 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
             </div>
           </div>
 
-          {/* Preview */}
+          {/* Editable Preview */}
           <div className="component-card">
-            <h3 className="font-medium mb-3">Preview (first 3 rows)</h3>
-            <div className="overflow-x-auto">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-cyan-400" />
+                Preview & Edit ({rows.length} rows)
+              </h3>
+              <span className="text-xs text-slate-500">Click any cell to edit</span>
+            </div>
+            <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="sticky top-0 bg-slate-900">
                   <tr className="text-left text-slate-500 border-b border-slate-700">
+                    <th className="pb-2 pr-2 w-8">#</th>
                     {mappings
                       .filter((m) => m.targetField)
                       .map((m) => (
@@ -485,13 +597,32 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 3).map((row, i) => (
-                    <tr key={i} className="border-b border-slate-800">
+                  {rows.map((row, i) => (
+                    <tr key={i} className="border-b border-slate-800 hover:bg-slate-800/50">
+                      <td className="py-2 pr-2 text-slate-500 text-xs">{i + 1}</td>
                       {mappings
                         .filter((m) => m.targetField)
                         .map((m) => (
-                          <td key={m.sourceColumn} className="py-2 pr-4 text-slate-300 truncate max-w-[150px]">
-                            {row[m.sourceColumn] || '—'}
+                          <td key={m.sourceColumn} className="py-1 pr-2">
+                            {editingRow === i ? (
+                              <input
+                                type="text"
+                                value={row[m.sourceColumn] || ''}
+                                onChange={(e) => updateRowField(i, m.sourceColumn, e.target.value)}
+                                onBlur={() => setEditingRow(null)}
+                                onKeyDown={(e) => e.key === 'Enter' && setEditingRow(null)}
+                                autoFocus={m.targetField === 'name'}
+                                className="w-full px-2 py-1 bg-slate-900 border border-cyan-500 rounded text-slate-100 text-sm"
+                              />
+                            ) : (
+                              <div
+                                onClick={() => setEditingRow(i)}
+                                className="px-2 py-1 text-slate-300 truncate max-w-[200px] cursor-pointer hover:bg-slate-700 rounded"
+                                title={row[m.sourceColumn] || '—'}
+                              >
+                                {row[m.sourceColumn] || <span className="text-slate-600">—</span>}
+                              </div>
+                            )}
                           </td>
                         ))}
                     </tr>

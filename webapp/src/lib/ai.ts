@@ -159,6 +159,123 @@ export function isAIConfigured(): boolean {
   return true;
 }
 
+export interface CleanedRow {
+  original: Record<string, string>;
+  cleaned: Record<string, string>;
+  changes: string[];
+}
+
+export interface CleanupResult {
+  rows: CleanedRow[];
+  summary: string;
+  totalChanges: number;
+}
+
+/**
+ * AI-powered data cleanup for imports
+ * Normalizes, enhances, and fixes messy data
+ */
+export async function cleanupImportData(
+  rows: Record<string, string>[],
+  mappings: { sourceColumn: string; targetField: string | null }[],
+): Promise<CleanupResult> {
+  const client = getBedrockClient();
+
+  // Build field map
+  const fieldMap = new Map<string, string>();
+  for (const m of mappings) {
+    if (m.targetField) {
+      fieldMap.set(m.sourceColumn, m.targetField);
+    }
+  }
+
+  const systemPrompt = `You are a data cleanup expert. Your job is to clean and enhance project management data for import.
+
+For each row, you should:
+1. Fix typos and normalize casing in names (Title Case for names)
+2. Normalize status values to: PLANNING, IN_PROGRESS, BLOCKED, REVIEW, COMPLETED
+3. Normalize type values to: EPIC, FEATURE, STORY, TASK, BUG
+4. Normalize priority to: 0-5 (0=lowest, 5=critical)
+5. If description is empty but name is long, split into name + description
+6. Detect hierarchy from naming patterns (e.g., "Epic: Auth" → type=EPIC, name="Auth")
+7. Clean up estimates (convert "2d" to "16", "1w" to "40", etc.)
+8. Add missing descriptions based on context (brief, 1 sentence)
+
+Return ONLY valid JSON with the cleaned data.`;
+
+  // Process in batches of 10
+  const batchSize = 10;
+  const allResults: CleanedRow[] = [];
+  let totalChanges = 0;
+
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    
+    const userPrompt = `Clean up these ${batch.length} rows. Return a JSON array of objects with:
+- "original": the original row data
+- "cleaned": the cleaned/enhanced row data (same keys)
+- "changes": array of strings describing what was changed
+
+Field mappings (sourceColumn → targetField):
+${Array.from(fieldMap.entries())
+  .map(([s, t]) => `  "${s}" → ${t}`)
+  .join('\n')}
+
+Data to clean:
+${JSON.stringify(batch, null, 2)}`;
+
+    try {
+      const command = new InvokeModelCommand({
+        modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+          anthropic_version: 'bedrock-2023-05-31',
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          temperature: 0.2,
+        }),
+      });
+
+      const response = await client.send(command);
+      const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+      const content = responseBody.content?.[0]?.text;
+
+      if (content) {
+        let jsonContent = content;
+        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          jsonContent = jsonMatch[1];
+        }
+
+        const batchResults = JSON.parse(jsonContent) as CleanedRow[];
+        for (const r of batchResults) {
+          allResults.push(r);
+          totalChanges += r.changes?.length || 0;
+        }
+      } else {
+        // If AI fails, keep original
+        for (const row of batch) {
+          allResults.push({ original: row, cleaned: row, changes: [] });
+        }
+      }
+    } catch (error) {
+      console.error('AI cleanup batch error:', error);
+      // Keep original on error
+      for (const row of batch) {
+        allResults.push({ original: row, cleaned: row, changes: [] });
+      }
+    }
+  }
+
+  return {
+    rows: allResults,
+    summary: `Cleaned ${rows.length} rows with ${totalChanges} improvements`,
+    totalChanges,
+  };
+}
+
 export interface ColumnMapping {
   sourceColumn: string;
   targetField: string | null;

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
-import { analyzeImportData } from '@/lib/ai';
+import { analyzeImportData, cleanupImportData } from '@/lib/ai';
 import type { ComponentType, ComponentStatus } from '@prisma/client';
 
 const analyzeSchema = z.object({
@@ -63,6 +63,37 @@ export const analyzeImport = authActionClient.schema(analyzeSchema).action(async
     sprints.map((s) => s.name),
   );
 
+  return result;
+});
+
+const cleanupSchema = z.object({
+  teamId: z.string().cuid(),
+  rows: z.array(z.record(z.string())),
+  mappings: z.array(
+    z.object({
+      sourceColumn: z.string(),
+      targetField: z.string().nullable(),
+    }),
+  ),
+});
+
+/**
+ * AI-powered data cleanup - normalizes and enhances messy data
+ */
+export const cleanupData = authActionClient.schema(cleanupSchema).action(async ({ parsedInput, ctx }) => {
+  const { teamId, rows, mappings } = parsedInput;
+  const { userId } = ctx;
+
+  // Verify user is member of team
+  const membership = await prisma.membership.findUnique({
+    where: { userId_teamId: { userId, teamId } },
+  });
+
+  if (!membership) {
+    throw new Error('You must be a team member to clean data');
+  }
+
+  const result = await cleanupImportData(rows, mappings);
   return result;
 });
 
