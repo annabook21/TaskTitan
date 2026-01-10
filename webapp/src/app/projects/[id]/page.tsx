@@ -3,7 +3,19 @@ import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, Plus, Layers, GitBranch, Users, Clock, MoreVertical, Sparkles, Zap, PlayCircle, PauseCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  Plus,
+  Layers,
+  GitBranch,
+  Users,
+  Clock,
+  MoreVertical,
+  Sparkles,
+  Zap,
+  PlayCircle,
+  PauseCircle,
+} from 'lucide-react';
 import ComponentCard from './components/ComponentCard';
 import CreateComponentForm from './components/CreateComponentForm';
 import DependencyGraph from './components/DependencyGraph';
@@ -251,7 +263,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                       const completed = sprintComponents.filter((c) => c.status === 'COMPLETED').length;
                       const total = sprintComponents.length;
                       const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
-                      
+
                       return (
                         <Link
                           key={sprint.id}

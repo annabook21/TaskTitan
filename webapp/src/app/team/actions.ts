@@ -234,7 +234,7 @@ export const deleteTeam = authActionClient
       if (error instanceof Error && error.message.includes('owner')) {
         throw error;
       }
-      
+
       // For FK constraint errors or other Prisma errors, provide a helpful message
       console.error('Error deleting team:', error);
       throw new Error('Failed to delete team. Please ensure all related data can be deleted.');

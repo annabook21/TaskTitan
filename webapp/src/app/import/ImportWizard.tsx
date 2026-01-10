@@ -152,9 +152,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
   };
 
   const updateRowField = (rowIndex: number, column: string, value: string) => {
-    setRows((prev) =>
-      prev.map((row, i) => (i === rowIndex ? { ...row, [column]: value } : row)),
-    );
+    setRows((prev) => prev.map((row, i) => (i === rowIndex ? { ...row, [column]: value } : row)));
   };
 
   // Parse CSV
@@ -309,9 +307,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
           <div key={s} className="flex items-center">
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
-                step >= s
-                  ? 'bg-gradient-to-r from-violet-600 to-cyan-600 text-white'
-                  : 'bg-slate-800 text-slate-500'
+                step >= s ? 'bg-gradient-to-r from-violet-600 to-cyan-600 text-white' : 'bg-slate-800 text-slate-500'
               }`}
             >
               {step > s ? <Check className="w-4 h-4" /> : s}
@@ -361,8 +357,8 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
               AI-Powered Mapping
             </h3>
             <p className="text-sm text-slate-400">
-              Our AI will analyze your data and automatically map columns to the right fields. You can review and
-              adjust before importing.
+              Our AI will analyze your data and automatically map columns to the right fields. You can review and adjust
+              before importing.
             </p>
           </div>
         </div>
@@ -488,7 +484,9 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
             {/* Cleanup changes */}
             {cleanupChanges.length > 0 && (
               <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-                <h4 className="text-sm font-medium text-green-400 mb-1">✨ AI Improvements ({cleanupChanges.length})</h4>
+                <h4 className="text-sm font-medium text-green-400 mb-1">
+                  ✨ AI Improvements ({cleanupChanges.length})
+                </h4>
                 <ul className="text-sm text-green-300/80 space-y-1 max-h-24 overflow-y-auto">
                   {cleanupChanges.slice(0, 10).map((c, i) => (
                     <li key={i}>• {c}</li>
@@ -676,9 +674,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
           <h2 className="text-2xl font-bold mb-2">Import Complete!</h2>
           <p className="text-slate-400 mb-6">
             Successfully imported <span className="text-cyan-400 font-semibold">{importStats.created}</span> items
-            {importStats.skipped > 0 && (
-              <span className="text-slate-500"> ({importStats.skipped} skipped)</span>
-            )}
+            {importStats.skipped > 0 && <span className="text-slate-500"> ({importStats.skipped} skipped)</span>}
           </p>
 
           {/* Warnings */}

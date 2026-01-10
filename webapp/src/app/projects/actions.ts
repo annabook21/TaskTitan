@@ -140,19 +140,18 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
 
   // Delete in transaction to handle cascading deletes properly
   await prisma.$transaction(async (tx) => {
-    const componentIds = await tx.component.findMany({
-      where: { projectId: id },
-      select: { id: true },
-    }).then(rows => rows.map(r => r.id));
+    const componentIds = await tx.component
+      .findMany({
+        where: { projectId: id },
+        select: { id: true },
+      })
+      .then((rows) => rows.map((r) => r.id));
 
     if (componentIds.length) {
       await tx.assignment.deleteMany({ where: { componentId: { in: componentIds } } });
       await tx.dependency.deleteMany({
         where: {
-          OR: [
-            { requiredComponentId: { in: componentIds } },
-            { dependentComponentId: { in: componentIds } },
-          ],
+          OR: [{ requiredComponentId: { in: componentIds } }, { dependentComponentId: { in: componentIds } }],
         },
       });
       await tx.component.deleteMany({ where: { id: { in: componentIds } } });

@@ -210,7 +210,7 @@ Return ONLY valid JSON with the cleaned data.`;
 
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize);
-    
+
     const userPrompt = `Clean up these ${batch.length} rows. Return a JSON array of objects with:
 - "original": the original row data
 - "cleaned": the cleaned/enhanced row data (same keys)
@@ -403,7 +403,8 @@ Return JSON with:
         else if (lower.includes('owner') || lower.includes('assign')) targetField = 'owner';
         else if (lower.includes('status') || lower.includes('state')) targetField = 'status';
         else if (lower.includes('priority') || lower.includes('prio')) targetField = 'priority';
-        else if (lower.includes('estimate') || lower.includes('hours') || lower.includes('points')) targetField = 'estimatedHours';
+        else if (lower.includes('estimate') || lower.includes('hours') || lower.includes('points'))
+          targetField = 'estimatedHours';
         else if (lower.includes('sprint') || lower.includes('iteration')) targetField = 'sprint';
         else if (lower.includes('tag') || lower.includes('label')) targetField = 'tags';
         else if (lower.includes('key') || lower.includes('id') || lower.includes('jira')) targetField = 'externalId';

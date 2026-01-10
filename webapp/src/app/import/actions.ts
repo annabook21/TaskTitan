@@ -221,7 +221,12 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
       const externalId = getValue(row, 'externalId');
       const parentName = getValue(row, 'parentName');
       const tagsRaw = getValue(row, 'tags');
-      const tags = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
+      const tags = tagsRaw
+        ? tagsRaw
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [];
 
       let estimatedHours: number | null = null;
       const hoursRaw = getValue(row, 'estimatedHours');
@@ -303,7 +308,10 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     const componentId = createdItems.get(name);
     if (!componentId) continue;
 
-    const depNames = depsRaw.split(',').map((d) => d.trim()).filter(Boolean);
+    const depNames = depsRaw
+      .split(',')
+      .map((d) => d.trim())
+      .filter(Boolean);
     for (const depName of depNames) {
       const requiredId = createdItems.get(depName);
       if (requiredId) {

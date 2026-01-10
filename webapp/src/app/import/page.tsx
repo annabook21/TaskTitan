@@ -39,10 +39,7 @@ export default async function ImportPage({ searchParams }: Props) {
 
       <main className="flex-grow">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <ImportWizard
-            teams={teams}
-            selectedTeam={selectedTeam}
-          />
+          <ImportWizard teams={teams} selectedTeam={selectedTeam} />
         </div>
       </main>
     </div>
