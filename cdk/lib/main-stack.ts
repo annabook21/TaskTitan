@@ -12,7 +12,7 @@ import {
   NatProvider,
   Vpc,
 } from 'aws-cdk-lib/aws-ec2';
-import { HostedZone } from 'aws-cdk-lib/aws-route53';
+import { HostedZone, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { Webapp } from './constructs/webapp';
 import { EdgeFunction } from './constructs/cf-lambda-furl-service/edge-function';

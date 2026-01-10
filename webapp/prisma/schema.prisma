@@ -47,15 +47,15 @@ model Component {
   description                                           String?
   type                                                  ComponentType   @default(TASK)
   projectId                                             String
-  parentId                                              String?         // For hierarchy: Epic -> Feature -> Story -> Task
-  sprintId                                              String?         // null = backlog
+  parentId                                              String? // For hierarchy: Epic -> Feature -> Story -> Task
+  sprintId                                              String? // null = backlog
   status                                                ComponentStatus @default(PLANNING)
   priority                                              Int             @default(0)
   estimatedHours                                        Float?
   dueDate                                               DateTime?
-  owner                                                 String?         // Imported owner name (may not match a User)
+  owner                                                 String? // Imported owner name (may not match a User)
   tags                                                  String[]        @default([])
-  externalId                                            String?         // For import tracking (e.g., Jira key)
+  externalId                                            String? // For import tracking (e.g., Jira key)
   createdAt                                             DateTime        @default(now())
   updatedAt                                             DateTime        @updatedAt
   Assignment                                            Assignment[]
@@ -118,16 +118,16 @@ model Project {
 }
 
 model Sprint {
-  id          String       @id @default(cuid())
-  name        String       // e.g., "Sprint 23" or "Cycle 5"
-  goal        String?      // Optional sprint goal
-  teamId      String
-  startDate   DateTime
-  endDate     DateTime
-  status      SprintStatus @default(PLANNING)
-  capacity    Int?         // Optional: team capacity in hours
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id        String       @id @default(cuid())
+  name      String // e.g., "Sprint 23" or "Cycle 5"
+  goal      String? // Optional sprint goal
+  teamId    String
+  startDate DateTime
+  endDate   DateTime
+  status    SprintStatus @default(PLANNING)
+  capacity  Int? // Optional: team capacity in hours
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   Team      Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
   Component Component[]
@@ -202,8 +202,8 @@ enum Role {
 }
 
 enum SprintStatus {
-  PLANNING   // Not yet started, still being planned
-  ACTIVE     // Currently running
-  COMPLETED  // Successfully finished
-  CANCELLED  // Cancelled before completion
+  PLANNING // Not yet started, still being planned
+  ACTIVE // Currently running
+  COMPLETED // Successfully finished
+  CANCELLED // Cancelled before completion
 }
