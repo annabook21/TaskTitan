@@ -29,6 +29,12 @@ interface MainStackProps extends StackProps {
    */
   readonly domainName?: string;
   /**
+   * Route53 hosted zone for the custom domain (created in us-east-1 stack).
+   *
+   * @default No custom domain.
+   */
+  readonly hostedZone?: IHostedZone;
+  /**
    * ACM certificate for custom domain (must be in us-east-1).
    *
    * @default No custom domain.
@@ -64,11 +70,10 @@ export class MainStack extends Stack {
     // Set useNatInstance=true for dev/test environments to save costs
     const { useNatInstance = false, backupRetentionDays = 7 } = props;
 
-    const hostedZone = props.domainName
-      ? HostedZone.fromLookup(this, 'HostedZone', {
-          domainName: props.domainName,
-        })
-      : undefined;
+    // Use the hosted zone from us-east-1 stack
+    // CDK cross-stack references (with crossRegionReferences: true) will handle the Route53 reference
+    // Route53 hosted zones are global, so this works across regions
+    const hostedZone = props.hostedZone;
 
     // Access logs bucket for CloudFront - Security best practice
     const accessLogBucket = new Bucket(this, 'AccessLogBucket', {
@@ -138,7 +143,8 @@ export class MainStack extends Stack {
       auth,
       eventBus,
       asyncJob,
-      subDomain: 'web',
+      // Use root domain (tasktitan.live) - remove subDomain property or set to undefined
+      // subDomain: 'web', // Uncomment if you want web.tasktitan.live instead
     });
 
     // CloudWatch Monitoring Dashboard

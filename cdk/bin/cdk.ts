@@ -11,7 +11,8 @@ interface EnvironmentProps {
 
   /**
    * Custom domain name for the webapp and Cognito.
-   * You need to have a public Route53 hosted zone for the domain name in your AWS account.
+   * CDK will automatically create a Route53 hosted zone for this domain.
+   * After deployment, update your domain registrar's nameservers to match the CDK output.
    *
    * @default No custom domain name. When not specified, the stack automatically generates
    * a random prefix for the Cognito domain (e.g., tasktitan-abc123def4.auth.us-west-2.amazoncognito.com)
@@ -30,8 +31,8 @@ interface EnvironmentProps {
 
 const props: EnvironmentProps = {
   account: process.env.CDK_DEFAULT_ACCOUNT!,
-  // Uncomment and set your domain name if you have a Route53 hosted zone
-  // domainName: 'tasktitan.example.com',
+  // Custom domain name - requires Route53 hosted zone in your AWS account
+  domainName: 'tasktitan.live',
   useNatInstance: false, // Use NAT Gateway for production (best practice)
 };
 
@@ -51,6 +52,7 @@ new MainStack(app, 'TaskTitanStack', {
   },
   crossRegionReferences: true,
   sharedCertificate: virginia.certificate,
+  hostedZone: virginia.hostedZone,
   domainName: props.domainName,
   useNatInstance: props.useNatInstance,
   signPayloadHandler: virginia.signPayloadHandler,
