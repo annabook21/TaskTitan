@@ -15,9 +15,14 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { createId } from '@paralleldrive/cuid2';
+import { randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
+
+// Generate a unique ID for demo users (mimics Cognito sub format)
+function generateDemoUserId(): string {
+  return `demo-${randomBytes(16).toString('hex')}`;
+}
 
 const demoUsers = [
   {
@@ -87,7 +92,7 @@ async function main() {
     if (!user) {
       user = await prisma.user.create({
         data: {
-          id: createId(),
+          id: generateDemoUserId(),
           email: userData.email,
           name: userData.name,
         },
