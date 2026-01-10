@@ -46,6 +46,7 @@ model Component {
   name                                                  String
   description                                           String?
   projectId                                             String
+  sprintId                                              String?         // null = backlog
   status                                                ComponentStatus @default(PLANNING)
   priority                                              Int             @default(0)
   estimatedHours                                        Float?
@@ -54,10 +55,12 @@ model Component {
   updatedAt                                             DateTime        @updatedAt
   Assignment                                            Assignment[]
   Project                                               Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Sprint                                                Sprint?         @relation(fields: [sprintId], references: [id], onDelete: SetNull)
   Dependency_Dependency_dependentComponentIdToComponent Dependency[]    @relation("Dependency_dependentComponentIdToComponent")
   Dependency_Dependency_requiredComponentIdToComponent  Dependency[]    @relation("Dependency_requiredComponentIdToComponent")
 
   @@index([projectId])
+  @@index([sprintId])
   @@index([status])
 }
 
@@ -104,6 +107,26 @@ model Project {
   @@index([teamId])
 }
 
+model Sprint {
+  id          String       @id @default(cuid())
+  name        String       // e.g., "Sprint 23" or "Cycle 5"
+  goal        String?      // Optional sprint goal
+  teamId      String
+  startDate   DateTime
+  endDate     DateTime
+  status      SprintStatus @default(PLANNING)
+  capacity    Int?         // Optional: team capacity in hours
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  Team      Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  Component Component[]
+
+  @@index([teamId])
+  @@index([startDate, endDate])
+  @@index([status])
+}
+
 model Team {
   id          String       @id @default(cuid())
   name        String
@@ -112,6 +135,7 @@ model Team {
   updatedAt   DateTime     @updatedAt
   Membership  Membership[]
   Project     Project[]
+  Sprint      Sprint[]
 }
 
 model User {
@@ -137,6 +161,11 @@ enum ActivityType {
   MEMBER_ASSIGNED
   MEMBER_UNASSIGNED
   COMMENT_ADDED
+  SPRINT_CREATED
+  SPRINT_STARTED
+  SPRINT_COMPLETED
+  COMPONENT_ADDED_TO_SPRINT
+  COMPONENT_REMOVED_FROM_SPRINT
 }
 
 enum ComponentStatus {
@@ -152,4 +181,11 @@ enum Role {
   ADMIN
   MEMBER
   VIEWER
+}
+
+enum SprintStatus {
+  PLANNING   // Not yet started, still being planned
+  ACTIVE     // Currently running
+  COMPLETED  // Successfully finished
+  CANCELLED  // Cancelled before completion
 }

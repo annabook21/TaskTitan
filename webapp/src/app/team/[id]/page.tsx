@@ -14,6 +14,7 @@ import {
   Plus,
   Mail,
   Calendar,
+  Zap,
 } from 'lucide-react';
 import InviteButton from './InviteButton';
 import SeedDemoButton from './SeedDemoButton';
@@ -109,6 +110,13 @@ export default async function TeamDetailPage({ params }: Props) {
             </div>
 
             <div className="flex items-center gap-3">
+              <Link
+                href={`/team/${team.id}/sprints`}
+                className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-amber-300 font-medium transition-colors inline-flex items-center gap-2"
+              >
+                <Zap className="w-5 h-5" />
+                Sprints
+              </Link>
               <Link href={`/projects/new?teamId=${team.id}`} className="btn-primary">
                 <Plus className="w-5 h-5" />
                 New Project
