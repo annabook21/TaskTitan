@@ -9,6 +9,7 @@ const navLinks = [
   { href: '/', label: 'Dashboard' },
   { href: '/projects', label: 'Projects' },
   { href: '/team', label: 'Team' },
+  { href: '/import', label: 'Import' },
 ];
 
 interface HeaderProps {
