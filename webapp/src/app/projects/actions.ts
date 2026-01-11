@@ -127,7 +127,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
       id,
       Team: { Membership: { some: { userId } } },
     },
-    select: { id: true, ownerId: true },
+    select: { id: true, ownerId: true, name: true },
   });
 
   if (!project) {
@@ -138,28 +138,14 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
     throw new Error('Only the project owner can delete it');
   }
 
-  // Delete in transaction to handle cascading deletes properly
-  await prisma.$transaction(async (tx) => {
-    const componentIds = await tx.component
-      .findMany({
-        where: { projectId: id },
-        select: { id: true },
-      })
-      .then((rows) => rows.map((r) => r.id));
-
-    if (componentIds.length) {
-      await tx.assignment.deleteMany({ where: { componentId: { in: componentIds } } });
-      await tx.dependency.deleteMany({
-        where: {
-          OR: [{ requiredComponentId: { in: componentIds } }, { dependentComponentId: { in: componentIds } }],
-        },
-      });
-      await tx.component.deleteMany({ where: { id: { in: componentIds } } });
-    }
-
-    await tx.activity.deleteMany({ where: { projectId: id } });
-    await tx.project.delete({ where: { id } });
-  });
+  try {
+    // Prisma schema has onDelete: Cascade configured for all related models,
+    // so we just need to delete the project and related records are cleaned up automatically
+    await prisma.project.delete({ where: { id } });
+  } catch (error) {
+    console.error('Failed to delete project:', error);
+    throw new Error('Failed to delete project. Please try again.');
+  }
 
   revalidatePath('/');
   revalidatePath('/projects');

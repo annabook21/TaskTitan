@@ -18,9 +18,15 @@ export default function DeleteProjectButton({ projectId, projectName }: Props) {
   const [confirmText, setConfirmText] = useState('');
 
   const { execute, isExecuting } = useAction(deleteProject, {
-    onSuccess: () => {
-      toast.success('Project deleted');
-      router.push('/projects');
+    onSuccess: (result) => {
+      if (result.data?.success) {
+        toast.success('Project deleted');
+        // Use replace to prevent back-navigation to deleted project
+        router.replace('/projects');
+      } else {
+        toast.error('Failed to delete project');
+        setShowConfirm(false);
+      }
     },
     onError: ({ error }) => {
       toast.error(error.serverError || 'Failed to delete project');
