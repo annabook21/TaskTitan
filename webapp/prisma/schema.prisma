@@ -116,7 +116,7 @@ model Project {
   updatedAt            DateTime         @updatedAt
   Activity             Activity[]
   Component            Component[]
-  User                 User             @relation(fields: [ownerId], references: [id])
+  User                 User             @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   Team                 Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([ownerId])
