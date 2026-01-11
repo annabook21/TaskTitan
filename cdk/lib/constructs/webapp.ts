@@ -71,7 +71,7 @@ export class Webapp extends Construct {
         .split('\n'),
       tagPrefix: 'webapp-starter-',
       buildArgs: {
-        ALLOWED_ORIGIN_HOST: hostedZone ? `*.${hostedZone.zoneName}` : '*.cloudfront.net',
+        ALLOWED_ORIGIN_HOST: hostedZone ? `${hostedZone.zoneName},*.${hostedZone.zoneName}` : '*.cloudfront.net',
         SKIP_TS_BUILD: 'true',
         NEXT_PUBLIC_EVENT_HTTP_ENDPOINT: eventBus.httpEndpoint,
         NEXT_PUBLIC_AWS_REGION: Stack.of(this).region,
