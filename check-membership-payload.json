@@ -1,0 +1,3 @@
+{
+  "query": "SELECT u.id as user_id, u.email, t.id as team_id, t.name as team_name, m.role as current_role FROM \"User\" u LEFT JOIN \"Membership\" m ON u.id = m.\"userId\" LEFT JOIN \"Team\" t ON m.\"teamId\" = t.id ORDER BY u.email;"
+}

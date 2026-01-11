@@ -1,0 +1,18 @@
+{
+  "command": "custom",
+  "sql": [
+    "-- First, let's see what teams and memberships exist",
+    "SELECT t.id as team_id, t.name as team_name, m.userId as user_id, m.role, u.email",
+    "FROM \"Team\" t",
+    "LEFT JOIN \"Membership\" m ON t.id = m.\"teamId\"",
+    "LEFT JOIN \"User\" u ON m.\"userId\" = u.id",
+    "ORDER BY t.name, m.role;",
+    "",
+    "-- To fix ownership, we need to UPDATE the membership",
+    "-- Replace YOUR_USER_ID and YOUR_TEAM_ID with actual values from above query",
+    "-- UPDATE \"Membership\"",
+    "-- SET role = 'OWNER'",
+    "-- WHERE \"userId\" = 'YOUR_USER_ID'",
+    "-- AND \"teamId\" = 'YOUR_TEAM_ID';"
+  ]
+}

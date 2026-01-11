@@ -75,6 +75,7 @@ export class Webapp extends Construct {
         SKIP_TS_BUILD: 'true',
         NEXT_PUBLIC_EVENT_HTTP_ENDPOINT: eventBus.httpEndpoint,
         NEXT_PUBLIC_AWS_REGION: Stack.of(this).region,
+        BUILD_TIMESTAMP: new Date().toISOString(),
       },
     });
 
