@@ -33,6 +33,7 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
   const [teamName, setTeamName] = useState('');
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
+  const [autoGenerateAI, setAutoGenerateAI] = useState(true);
 
   // Set teamId if preselected
   useEffect(() => {
@@ -58,7 +59,9 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
     onSuccess: ({ data }) => {
       if (data?.project) {
         toast.success('Project created!');
-        router.push(`/projects/${data.project.id}`);
+        // Redirect with generateAI flag if auto-generate is enabled
+        const url = autoGenerateAI ? `/projects/${data.project.id}?generateAI=true` : `/projects/${data.project.id}`;
+        router.push(url);
       }
     },
     onError: ({ error }) => {
@@ -279,17 +282,28 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
             />
           </div>
 
-          <div className="p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
+          <div className="p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-lg space-y-3">
             <div className="flex items-start gap-3">
               <Sparkles className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
               <div>
                 <h4 className="font-medium text-cyan-300 text-sm">AI Component Generation</h4>
                 <p className="text-xs text-slate-400 mt-1">
-                  After creating your project, you can use AI to automatically suggest components based on your
-                  description. Add a detailed description above for best results!
+                  Automatically generate project structure, components, and a detailed description using AI based on
+                  your project name and description.
                 </p>
               </div>
             </div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoGenerateAI}
+                onChange={(e) => setAutoGenerateAI(e.target.checked)}
+                className="w-4 h-4 rounded border-cyan-500/50 bg-slate-800 text-cyan-500 focus:ring-2 focus:ring-cyan-500/50"
+              />
+              <span className="text-sm text-slate-300">
+                Auto-generate components and description with AI after creating project
+              </span>
+            </label>
           </div>
 
           <div className="flex justify-end gap-3">

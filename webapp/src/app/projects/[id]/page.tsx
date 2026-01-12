@@ -19,10 +19,11 @@ import {
 import ComponentCard from './components/ComponentCard';
 import CreateComponentForm from './components/CreateComponentForm';
 import DependencyGraph from './components/DependencyGraph';
-import AIGeneratePanel from './components/AIGeneratePanel';
+import AIGeneratePanelWrapper from './components/AIGeneratePanelWrapper';
 import TimelineView from './components/TimelineView';
 import DeleteProjectButton from './DeleteProjectButton';
 import GitHubIntegrationSettings from './components/GitHubIntegrationSettings';
+import SprintTimeline from './components/SprintTimeline';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -154,13 +155,16 @@ export default async function ProjectDetailPage({ params }: Props) {
             </div>
 
             <div className="flex items-center gap-3">
-              <AIGeneratePanel
+              <AIGeneratePanelWrapper
                 projectId={project.id}
                 hasDescription={!!project.description && project.description.length >= 20}
               />
               <CreateComponentForm projectId={project.id} />
             </div>
           </div>
+
+          {/* Sprint Timeline */}
+          <SprintTimeline sprints={availableSprints} components={components} teamId={team.id} />
 
           {/* Main Content */}
           <div className="grid lg:grid-cols-4 gap-8">

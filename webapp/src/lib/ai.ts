@@ -30,6 +30,16 @@ export interface GeneratedComponent {
 export interface AIGenerationResult {
   components: GeneratedComponent[];
   summary: string;
+  enhancedDescription?: string; // Optional enhanced project description
+  sprints?: GeneratedSprint[]; // Optional sprint plan
+}
+
+export interface GeneratedSprint {
+  name: string;
+  goal: string;
+  durationWeeks: number;
+  componentNames: string[]; // Names of components to include in this sprint
+  capacity?: number; // Suggested capacity in hours
 }
 
 /**
@@ -38,11 +48,13 @@ export interface AIGenerationResult {
  * @param projectName - Name of the project
  * @param projectDescription - Detailed description of the project
  * @param existingComponents - Optional array of existing component names to avoid duplicates
+ * @param generateSprints - Whether to also generate a sprint plan (default: false)
  */
 export async function generateComponents(
   projectName: string,
   projectDescription: string,
   existingComponents: string[] = [],
+  generateSprints: boolean = false,
 ): Promise<AIGenerationResult> {
   const client = getBedrockClient();
 
@@ -65,6 +77,20 @@ Consider:
 
 Respond with ONLY valid JSON, no other text.`;
 
+  const sprintInstructions = generateSprints
+    ? `
+- "sprints": array of 2-4 sprint objects with { name, goal, durationWeeks, componentNames, capacity }
+  * Group components logically by dependencies and priority
+  * Early sprints should focus on foundational/high-priority components
+  * Later sprints build on earlier work
+  * Each sprint should be 1-2 weeks
+  * IMPORTANT: Respect dependencies - a component cannot be in a sprint before its dependencies
+  * IMPORTANT: Apply 80% capacity buffer - if sprint components total 50 hours, set capacity to 62 hours (50/0.8)
+  * This buffer accounts for meetings, code review, testing, and unexpected issues
+  * Capacity calculation: sum of component estimatedHours divided by 0.8 (80% utilization)
+  * componentNames should reference the exact component names from the components array`
+    : '';
+
   const userPrompt = `Project Name: ${projectName}
 
 Project Description:
@@ -74,7 +100,8 @@ ${existingComponents.length > 0 ? `Existing Components (do not suggest these aga
 
 Analyze this project and suggest 5-12 components that would be needed to build it. Return a JSON object with:
 - "components": array of component objects with { name, description, estimatedHours, priority, suggestedDependencies }
-- "summary": a brief summary of the overall architecture approach (2-3 sentences)`;
+- "summary": a brief summary of the overall architecture approach (2-3 sentences)
+- "enhancedDescription": an improved, detailed project description (3-4 sentences) that includes key features, tech stack suggestions, and target users${sprintInstructions}`;
 
   try {
     // Use Claude Sonnet 4.5 via inference profile (cross-region)

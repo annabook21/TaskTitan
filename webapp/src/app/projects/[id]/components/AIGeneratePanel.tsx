@@ -1,9 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { generateAIComponents, applyAIComponents } from '@/app/projects/actions';
-import { Sparkles, X, Loader2, Check, AlertCircle, Clock, GitBranch, Layers } from 'lucide-react';
+import {
+  Sparkles,
+  X,
+  Loader2,
+  Check,
+  AlertCircle,
+  Clock,
+  GitBranch,
+  Layers,
+  Calendar,
+  Zap,
+  AlertTriangle,
+  TrendingUp,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 interface GeneratedComponent {
@@ -14,22 +27,66 @@ interface GeneratedComponent {
   suggestedDependencies: string[];
 }
 
+interface GeneratedSprint {
+  name: string;
+  goal: string;
+  durationWeeks: number;
+  componentNames: string[];
+  capacity?: number;
+}
+
 interface Props {
   projectId: string;
   hasDescription: boolean;
+  autoOpen?: boolean;
 }
 
-export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = false }: Props) {
+  const [isOpen, setIsOpen] = useState(autoOpen);
   const [generatedComponents, setGeneratedComponents] = useState<GeneratedComponent[]>([]);
+  const [generatedSprints, setGeneratedSprints] = useState<GeneratedSprint[]>([]);
   const [summary, setSummary] = useState('');
+  const [enhancedDescription, setEnhancedDescription] = useState('');
   const [selectedComponents, setSelectedComponents] = useState<Set<string>>(new Set());
+  const [generateSprints, setGenerateSprints] = useState(true);
+
+  // Helper to detect cross-sprint dependencies
+  const getCrossSprintDependencies = (sprint: GeneratedSprint, sprintIndex: number) => {
+    const warnings: string[] = [];
+    const sprintComponentNames = new Set(sprint.componentNames);
+
+    // Get all components in earlier sprints
+    const earlierComponents = new Set<string>();
+    for (let i = 0; i < sprintIndex; i++) {
+      generatedSprints[i].componentNames.forEach((name) => earlierComponents.add(name));
+    }
+
+    // Check if any component in this sprint depends on a component in a later sprint
+    for (const compName of sprint.componentNames) {
+      const component = generatedComponents.find((c) => c.name === compName);
+      if (!component) continue;
+
+      for (const depName of component.suggestedDependencies) {
+        // Dependency is in a later sprint (not in this sprint or earlier sprints)
+        if (!sprintComponentNames.has(depName) && !earlierComponents.has(depName)) {
+          const laterSprint = generatedSprints.findIndex((s, idx) => idx > sprintIndex && s.componentNames.includes(depName));
+          if (laterSprint !== -1) {
+            warnings.push(`${compName} depends on ${depName} (Sprint ${laterSprint + 1})`);
+          }
+        }
+      }
+    }
+
+    return warnings;
+  };
 
   const { execute: executeGenerate, isExecuting: isGenerating } = useAction(generateAIComponents, {
     onSuccess: ({ data }) => {
       if (data) {
         setGeneratedComponents(data.components);
+        setGeneratedSprints(data.sprints || []);
         setSummary(data.summary);
+        setEnhancedDescription(data.enhancedDescription || '');
         // Select all by default
         setSelectedComponents(new Set(data.components.map((c) => c.name)));
       }
@@ -42,9 +99,14 @@ export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
   const { execute: executeApply, isExecuting: isApplying } = useAction(applyAIComponents, {
     onSuccess: ({ data }) => {
       if (data) {
-        toast.success(`Created ${data.created} components with ${data.dependencies} dependencies`);
+        const message =
+          data.sprints && data.sprints > 0
+            ? `Created ${data.created} components, ${data.dependencies} dependencies, and ${data.sprints} sprints`
+            : `Created ${data.created} components with ${data.dependencies} dependencies`;
+        toast.success(message);
         setIsOpen(false);
         setGeneratedComponents([]);
+        setGeneratedSprints([]);
         setSelectedComponents(new Set());
       }
     },
@@ -55,7 +117,8 @@ export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
 
   const handleGenerate = () => {
     setGeneratedComponents([]);
-    executeGenerate({ projectId });
+    setGeneratedSprints([]);
+    executeGenerate({ projectId, generateSprints });
   };
 
   const handleApply = () => {
@@ -64,7 +127,12 @@ export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
       toast.error('Please select at least one component');
       return;
     }
-    executeApply({ projectId, components: toApply });
+    executeApply({
+      projectId,
+      components: toApply,
+      enhancedDescription,
+      sprints: generatedSprints.length > 0 ? generatedSprints : undefined,
+    });
   };
 
   const toggleComponent = (name: string) => {
@@ -84,6 +152,13 @@ export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
   const selectNone = () => {
     setSelectedComponents(new Set());
   };
+
+  // Auto-trigger generation when opened automatically
+  useEffect(() => {
+    if (autoOpen && hasDescription && isOpen && generatedComponents.length === 0) {
+      handleGenerate();
+    }
+  }, [autoOpen, hasDescription, isOpen]);
 
   if (!isOpen) {
     return (
@@ -148,10 +223,22 @@ export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
                     </div>
                   )}
 
-                  <button onClick={handleGenerate} disabled={isGenerating || !hasDescription} className="btn-primary">
-                    <Sparkles className="w-5 h-5" />
-                    Generate Components
-                  </button>
+                  <div className="flex flex-col items-center gap-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={generateSprints}
+                        onChange={(e) => setGenerateSprints(e.target.checked)}
+                        className="w-4 h-4 rounded border-cyan-500/50 bg-slate-800 text-cyan-500 focus:ring-2 focus:ring-cyan-500/50"
+                      />
+                      <span className="text-sm text-slate-300">Also generate sprint plan</span>
+                    </label>
+
+                    <button onClick={handleGenerate} disabled={isGenerating || !hasDescription} className="btn-primary">
+                      <Sparkles className="w-5 h-5" />
+                      Generate {generateSprints ? 'Components & Sprints' : 'Components'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -233,6 +320,121 @@ export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
                 })}
               </div>
 
+              {/* Sprints Section */}
+              {generatedSprints.length > 0 && (
+                <div className="space-y-4">
+                  <div className="border-t border-slate-700 pt-6">
+                    <h4 className="font-medium text-amber-300 mb-2 flex items-center gap-2">
+                      <Zap className="w-5 h-5" />
+                      Suggested Sprint Plan ({generatedSprints.length} sprints)
+                    </h4>
+                    <div className="mb-4 p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg text-xs text-slate-400">
+                      <div className="flex items-start gap-2">
+                        <TrendingUp className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-green-400" />
+                        <div>
+                          <span className="text-slate-300 font-medium">Smart capacity planning:</span> Sprints include a
+                          20% buffer for meetings, code review, testing, and unexpected issues. Target 70-80% utilization
+                          for healthy velocity.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-3">
+                      {generatedSprints.map((sprint, index) => {
+                        const sprintComponents = sprint.componentNames.filter((name) => selectedComponents.has(name));
+                        const sprintHours = generatedComponents
+                          .filter((c) => sprint.componentNames.includes(c.name) && selectedComponents.has(c.name))
+                          .reduce((sum, c) => sum + c.estimatedHours, 0);
+
+                        const crossSprintDeps = getCrossSprintDependencies(sprint, index);
+                        const utilizationPercent = sprint.capacity ? Math.round((sprintHours / sprint.capacity) * 100) : 0;
+                        const bufferHours = sprint.capacity ? sprint.capacity - sprintHours : 0;
+
+                        return (
+                          <div
+                            key={index}
+                            className="p-4 bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/20 rounded-lg"
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex-1">
+                                <h5 className="font-medium text-slate-200 mb-1">
+                                  Sprint {index + 1}: {sprint.name}
+                                </h5>
+                                <p className="text-sm text-slate-400 mb-2">{sprint.goal}</p>
+                                <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
+                                  <span className="flex items-center gap-1">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    {sprint.durationWeeks} week{sprint.durationWeeks > 1 ? 's' : ''}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Layers className="w-3.5 h-3.5" />
+                                    {sprintComponents.length} component{sprintComponents.length !== 1 ? 's' : ''}
+                                  </span>
+                                  {sprint.capacity && (
+                                    <>
+                                      <span className="flex items-center gap-1">
+                                        <Clock className="w-3.5 h-3.5" />
+                                        {sprintHours}h work
+                                      </span>
+                                      <span
+                                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                                          utilizationPercent > 90
+                                            ? 'bg-red-500/20 text-red-400'
+                                            : utilizationPercent > 75
+                                              ? 'bg-amber-500/20 text-amber-400'
+                                              : 'bg-green-500/20 text-green-400'
+                                        }`}
+                                      >
+                                        <TrendingUp className="w-3 h-3" />
+                                        {utilizationPercent}% capacity
+                                      </span>
+                                      {bufferHours > 0 && (
+                                        <span className="flex items-center gap-1 text-green-400">
+                                          +{Math.round(bufferHours)}h buffer
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Cross-Sprint Dependency Warnings */}
+                            {crossSprintDeps.length > 0 && (
+                              <div className="mt-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs">
+                                <div className="flex items-start gap-2">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                                  <div>
+                                    <div className="font-medium text-amber-400 mb-1">Dependency Warning</div>
+                                    <ul className="text-amber-300/80 space-y-0.5">
+                                      {crossSprintDeps.map((warning, idx) => (
+                                        <li key={idx}>• {warning}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {sprintComponents.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-1.5">
+                                {sprintComponents.map((compName) => (
+                                  <span
+                                    key={compName}
+                                    className="text-xs px-2 py-1 bg-slate-800/50 border border-slate-700 rounded text-slate-300"
+                                  >
+                                    {compName}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Stats */}
               <div className="flex items-center justify-center gap-6 text-sm text-slate-400 py-2">
                 <span className="flex items-center gap-2">
@@ -246,6 +448,12 @@ export default function AIGeneratePanel({ projectId, hasDescription }: Props) {
                     .reduce((acc, c) => acc + c.estimatedHours, 0)}{' '}
                   total hours
                 </span>
+                {generatedSprints.length > 0 && (
+                  <span className="flex items-center gap-2">
+                    <Zap className="w-4 h-4" />
+                    {generatedSprints.length} sprints
+                  </span>
+                )}
               </div>
             </div>
           )}

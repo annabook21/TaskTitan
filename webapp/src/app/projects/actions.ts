@@ -428,12 +428,13 @@ export const unassignComponent = authActionClient
 // AI Component Generation
 const generateComponentsSchema = z.object({
   projectId: z.string().cuid(),
+  generateSprints: z.boolean().optional(),
 });
 
 export const generateAIComponents = authActionClient
   .schema(generateComponentsSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { projectId } = parsedInput;
+    const { projectId, generateSprints = false } = parsedInput;
     const { userId } = ctx;
 
     // Check if AI is configured
@@ -464,12 +465,14 @@ export const generateAIComponents = authActionClient
 
     const existingNames = project.Component.map((c: { name: string }) => c.name);
 
-    // Generate components using AI
-    const result = await generateComponents(project.name, project.description, existingNames);
+    // Generate components using AI (optionally with sprints)
+    const result = await generateComponents(project.name, project.description, existingNames, generateSprints);
 
     return {
       components: result.components,
       summary: result.summary,
+      enhancedDescription: result.enhancedDescription,
+      sprints: result.sprints,
     };
   });
 
@@ -484,12 +487,24 @@ const applyAIComponentsSchema = z.object({
       suggestedDependencies: z.array(z.string()),
     }),
   ),
+  enhancedDescription: z.string().optional(),
+  sprints: z
+    .array(
+      z.object({
+        name: z.string(),
+        goal: z.string(),
+        durationWeeks: z.number(),
+        componentNames: z.array(z.string()),
+        capacity: z.number().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const applyAIComponents = authActionClient
   .schema(applyAIComponentsSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { projectId, components } = parsedInput;
+    const { projectId, components, enhancedDescription, sprints } = parsedInput;
     const { userId } = ctx;
 
     // Verify access
@@ -502,6 +517,14 @@ export const applyAIComponents = authActionClient
 
     if (!project) {
       throw new Error('Project not found or access denied');
+    }
+
+    // Update project description if enhanced description provided
+    if (enhancedDescription && (!project.description || project.description.length < enhancedDescription.length)) {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { description: enhancedDescription },
+      });
     }
 
     // Create all components
@@ -555,6 +578,51 @@ export const applyAIComponents = authActionClient
       );
     }
 
+    // Create sprints if provided
+    let createdSprints = 0;
+    if (sprints && sprints.length > 0) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (let i = 0; i < sprints.length; i++) {
+        const sprint = sprints[i];
+        const startDate = new Date(today);
+        startDate.setDate(startDate.getDate() + i * sprint.durationWeeks * 7);
+
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + sprint.durationWeeks * 7);
+
+        // Create the sprint
+        const createdSprint = await prisma.sprint.create({
+          data: {
+            name: sprint.name,
+            goal: sprint.goal,
+            teamId: project.teamId,
+            startDate,
+            endDate,
+            status: 'PLANNING',
+            capacity: sprint.capacity,
+          },
+        });
+
+        // Assign components to this sprint
+        const componentIds = sprint.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null);
+
+        if (componentIds.length > 0) {
+          await Promise.all(
+            componentIds.map((componentId) =>
+              prisma.component.update({
+                where: { id: componentId },
+                data: { sprintId: createdSprint.id },
+              }),
+            ),
+          );
+        }
+
+        createdSprints++;
+      }
+    }
+
     // Log activity
     await prisma.activity.create({
       data: {
@@ -564,15 +632,18 @@ export const applyAIComponents = authActionClient
         metadata: {
           aiGenerated: true,
           componentCount: createdComponents.length,
+          sprintCount: createdSprints,
         },
       },
     });
 
     revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/team/${project.teamId}/sprints`);
 
     return {
       created: createdComponents.length,
       dependencies: dependenciesToCreate.length,
+      sprints: createdSprints,
     };
   });
 

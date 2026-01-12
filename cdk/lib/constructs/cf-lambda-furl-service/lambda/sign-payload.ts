@@ -12,6 +12,9 @@ export const handler: CloudFrontRequestHandler = async (event) => {
   const hashedBody = hashPayload(Buffer.from(body, 'base64'));
   request.headers['x-amz-content-sha256'] = [{ key: 'x-amz-content-sha256', value: hashedBody }];
 
+  // x-forwarded-host is set by the CloudFront Function on viewer-request
+  // We just need to sign the payload here
+
   // LWA replaces authorization2 to authorization again
   // if (request.headers['authorization'] != null) {
   //   request.headers['authorization2'] = [{ key: 'authorization2', value: request.headers['authorization'][0].value }];

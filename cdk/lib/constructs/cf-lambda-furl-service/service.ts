@@ -8,6 +8,9 @@ import {
   CachePolicy,
   CacheQueryStringBehavior,
   Distribution,
+  FunctionEventType,
+  Function as CloudFrontFunction,
+  FunctionCode,
   LambdaEdgeEventType,
   OriginRequestPolicy,
   SecurityPolicyProtocol,
@@ -20,6 +23,8 @@ import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { EdgeFunction } from './edge-function';
 import { AwsCustomResource, PhysicalResourceId, AwsCustomResourcePolicy } from 'aws-cdk-lib/custom-resources';
+import { join } from 'path';
+import { readFileSync } from 'fs';
 
 export interface CloudFrontLambdaFunctionUrlServiceProps {
   /**
@@ -102,6 +107,13 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
       enableAcceptEncodingGzip: true,
     });
 
+    // CloudFront Function to set x-forwarded-host for Next.js Server Actions
+    const setForwardedHostFn = new CloudFrontFunction(this, 'SetForwardedHost', {
+      code: FunctionCode.fromFile({
+        filePath: join(__dirname, 'set-forwarded-host.js'),
+      }),
+    });
+
     const distribution = new Distribution(this, 'Resource', {
       comment: `CloudFront for ${serviceName}`,
       defaultBehavior: {
@@ -109,6 +121,12 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
         cachePolicy,
         allowedMethods: AllowedMethods.ALLOW_ALL,
         originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        functionAssociations: [
+          {
+            function: setForwardedHostFn,
+            eventType: FunctionEventType.VIEWER_REQUEST,
+          },
+        ],
         edgeLambdas: [
           {
             functionVersion: signPayloadHandler.versionArn(this),
