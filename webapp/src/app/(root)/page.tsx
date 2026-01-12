@@ -250,7 +250,7 @@ export default async function Dashboard() {
       <footer className="border-t border-slate-800 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between text-sm text-slate-500">
-            <div>© 2024 TaskTitan. Built with AWS Serverless.</div>
+            <div>© 2026 TaskTitan. Built with AWS Serverless.</div>
             <div className="flex items-center gap-4">
               <Link href="/docs" className="hover:text-slate-300">
                 Docs

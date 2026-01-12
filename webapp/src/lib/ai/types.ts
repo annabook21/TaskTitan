@@ -8,9 +8,11 @@
 export interface GeneratedComponent {
   name: string;
   description: string;
+  type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
   estimatedHours: number;
   priority: number;
   suggestedDependencies: string[]; // Names of other components this depends on
+  parentName?: string; // Optional name of parent component for hierarchy
 }
 
 export interface GeneratedSprint {

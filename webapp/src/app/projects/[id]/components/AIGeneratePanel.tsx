@@ -22,9 +22,11 @@ import { toast } from 'sonner';
 interface GeneratedComponent {
   name: string;
   description: string;
+  type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
   estimatedHours: number;
   priority: number;
   suggestedDependencies: string[];
+  parentName?: string;
 }
 
 interface GeneratedSprint {

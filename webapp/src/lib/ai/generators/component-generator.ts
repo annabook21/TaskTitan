@@ -77,9 +77,11 @@ export async function generateComponents(
     result.components = result.components.map((c, index) => ({
       name: c.name || `Component ${index + 1}`,
       description: c.description || '',
+      type: c.type || 'STORY', // Default to STORY if not provided
       estimatedHours: Math.max(1, Math.min(200, Number(c.estimatedHours) || 8)),
       priority: Math.max(1, Math.min(10, Number(c.priority) || 5)),
       suggestedDependencies: Array.isArray(c.suggestedDependencies) ? c.suggestedDependencies : [],
+      parentName: c.parentName,
     }));
 
     result.summary = result.summary || 'AI-generated component breakdown for your project.';
