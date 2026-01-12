@@ -57,6 +57,14 @@ model Component {
   tags                                                  String[]                   @default([])
   externalId                                            String? // For import tracking (e.g., Jira key)
   githubPrUrl                                           String? // GitHub PR URL
+  // Component Context (Decision Journal)
+  contextDecision                                       String?                    @db.Text // What was decided
+  contextRationale                                      String?                    @db.Text // Why this approach
+  contextAlternatives                                   String?                    @db.Text // Alternatives considered
+  contextLinks                                          String[] // Related links (pasted, not fetched)
+  contextAiSummary                                      String?                    @db.Text // AI-generated "future reader" summary
+  contextUpdatedAt                                      DateTime? // When context was last updated
+  contextUpdatedBy                                      String? // User who last updated context
   createdAt                                             DateTime                   @default(now())
   updatedAt                                             DateTime                   @updatedAt
   Assignment                                            Assignment[]

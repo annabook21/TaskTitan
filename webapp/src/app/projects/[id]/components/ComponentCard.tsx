@@ -7,9 +7,10 @@ import { assignComponentToSprint } from '@/app/sprints/actions';
 import { generatePreviewAction } from './preview-actions';
 import { MoreVertical, GitBranch, Clock, User as UserIcon, ChevronDown, Check, Zap, Github, Sparkles, Eye, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { ComponentStatus, User, SprintStatus } from '@prisma/client';
+import type { ComponentStatus, ComponentType, User, SprintStatus } from '@prisma/client';
 import AssignmentPanel from './AssignmentPanel';
 import PreviewModal from './PreviewModal';
+import ComponentContextPanel from './ComponentContextPanel';
 
 interface Sprint {
   id: string;
@@ -23,6 +24,7 @@ interface ComponentWithRelations {
   id: string;
   name: string;
   description: string | null;
+  type: ComponentType;
   status: ComponentStatus;
   priority: number;
   estimatedHours: number | null;
@@ -34,6 +36,11 @@ interface ComponentWithRelations {
   dependsOn: { requiredComponent: { id: string; name: string } }[];
   dependedOnBy: { dependentComponent: { id: string; name: string } }[];
   Preview?: { id: string; htmlContent: string }[];
+  contextDecision: string | null;
+  contextRationale: string | null;
+  contextAlternatives: string | null;
+  contextLinks: string[];
+  contextAiSummary: string | null;
 }
 
 interface Props {
@@ -251,6 +258,9 @@ export default function ComponentCard({ component, teamMembers, availableSprints
           Depends on: {component.dependsOn.map((d) => d.requiredComponent.name).join(', ')}
         </div>
       )}
+
+      {/* Component Context Panel */}
+      <ComponentContextPanel component={component} />
 
       {/* Footer */}
       <div className="flex items-center justify-between pt-2 border-t border-slate-800">

@@ -48,6 +48,12 @@ npm run dev                             # Start dev server
 - **AI**: Amazon Bedrock with Claude Sonnet 4.5
 - **Infra**: CloudFront + Lambda Function URLs, EventBridge, AppSync Events
 
+### AI Configuration
+- Default model: `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (global inference profile for 10% cost savings)
+- Override via `BEDROCK_MODEL_ID` environment variable
+- All AI prompts use sentinel delimiters (`<<<JSON` / `JSON>>>`) for robust parsing
+- Fallback to markdown code blocks if sentinels not found
+
 ### Server Actions Pattern
 All backend logic uses type-safe server actions:
 1. Define Zod schema for input validation

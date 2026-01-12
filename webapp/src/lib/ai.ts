@@ -19,6 +19,70 @@ function getBedrockClient(): BedrockRuntimeClient {
   return bedrockClient;
 }
 
+/**
+ * Bedrock model ID for all AI generation functions.
+ * Using global inference profile for ~10% cost savings vs geographic profile.
+ * Override via BEDROCK_MODEL_ID environment variable.
+ *
+ * Cost comparison (per 1M input tokens):
+ * - us.anthropic.claude-sonnet-4-5: $3.30
+ * - global.anthropic.claude-sonnet-4-5: ~$3.00 (estimated 10% savings)
+ *
+ * Supports: US West (Oregon), US East (N. Virginia), US East (Ohio), Europe (Ireland), Asia Pacific (Tokyo)
+ */
+const MODEL_ID = process.env.BEDROCK_MODEL_ID || 'global.anthropic.claude-sonnet-4-5-20250929-v1:0';
+
+/**
+ * Extracts JSON from Bedrock response with 3-tier fallback strategy:
+ * 1. Sentinel delimiters (<<<JSON / JSON>>>) - most reliable
+ * 2. Markdown code block (```json) - common format
+ * 3. Raw content - last resort
+ *
+ * This approach prevents parsing failures when Claude adds explanatory text
+ * before/after the JSON response.
+ *
+ * @param content - Raw text response from Bedrock API
+ * @returns Extracted JSON string ready for parsing
+ */
+function extractJsonFromResponse(content: string): string {
+  // First try sentinel delimiters (most reliable)
+  const startMarker = '<<<JSON';
+  const endMarker = 'JSON>>>';
+  const startIdx = content.indexOf(startMarker);
+  const endIdx = content.lastIndexOf(endMarker);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    return content.slice(startIdx + startMarker.length, endIdx).trim();
+  }
+
+  // Fallback: try markdown code block
+  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  // Last resort: assume entire content is JSON
+  return content.trim();
+}
+
+/**
+ * Extracts HTML from Bedrock response, handling markdown code blocks.
+ * Used by generateWireframe() which returns HTML instead of JSON.
+ *
+ * @param content - Raw text response from Bedrock API
+ * @returns Extracted HTML string
+ */
+function extractHtmlFromResponse(content: string): string {
+  // Try HTML code block first
+  const htmlMatch = content.match(/```(?:html)?\s*([\s\S]*?)\s*```/);
+  if (htmlMatch) {
+    return htmlMatch[1].trim();
+  }
+
+  // Assume entire content is HTML
+  return content.trim();
+}
+
 export interface GeneratedComponent {
   name: string;
   description: string;
@@ -98,16 +162,25 @@ ${projectDescription}
 
 ${existingComponents.length > 0 ? `Existing Components (do not suggest these again): ${existingComponents.join(', ')}` : ''}
 
-Analyze this project and suggest 5-12 components that would be needed to build it. Return a JSON object with:
+Analyze this project and suggest 5-12 components that would be needed to build it.
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
 - "components": array of component objects with { name, description, estimatedHours, priority, suggestedDependencies }
 - "summary": a brief summary of the overall architecture approach (2-3 sentences)
-- "enhancedDescription": an improved, detailed project description (3-4 sentences) that includes key features, tech stack suggestions, and target users${sprintInstructions}`;
+- "enhancedDescription": an improved, detailed project description (3-4 sentences) that includes key features, tech stack suggestions, and target users${sprintInstructions}
+
+Example format:
+<<<JSON
+{
+  "components": [...],
+  "summary": "...",
+  "enhancedDescription": "..."
+}
+JSON>>>`;
 
   try {
-    // Use Claude Sonnet 4.5 via inference profile (cross-region)
-    // Inference profiles use "us." prefix for cross-region routing
     const command = new InvokeModelCommand({
-      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      modelId: MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -127,20 +200,13 @@ Analyze this project and suggest 5-12 components that would be needed to build i
     const response = await client.send(command);
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
-    // Extract text content from Claude's response
     const content = responseBody.content?.[0]?.text;
     if (!content) {
       throw new Error('No response from AI');
     }
 
-    // Parse the JSON from Claude's response
-    // Claude might wrap JSON in markdown code blocks, so we need to extract it
-    let jsonContent = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonContent = jsonMatch[1];
-    }
-
+    // Use robust JSON extraction with sentinel delimiters
+    const jsonContent = extractJsonFromResponse(content);
     const result = JSON.parse(jsonContent) as AIGenerationResult;
 
     // Validate and sanitize the response
@@ -238,10 +304,23 @@ Return ONLY valid JSON with the cleaned data.`;
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize);
 
-    const userPrompt = `Clean up these ${batch.length} rows. Return a JSON array of objects with:
+    const userPrompt = `Clean up these ${batch.length} rows.
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY a valid JSON array of objects with:
 - "original": the original row data
 - "cleaned": the cleaned/enhanced row data (same keys)
 - "changes": array of strings describing what was changed
+
+Example format:
+<<<JSON
+[
+  {
+    "original": {...},
+    "cleaned": {...},
+    "changes": ["..."]
+  }
+]
+JSON>>>
 
 Field mappings (sourceColumn → targetField):
 ${Array.from(fieldMap.entries())
@@ -253,7 +332,7 @@ ${JSON.stringify(batch, null, 2)}`;
 
     try {
       const command = new InvokeModelCommand({
-        modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        modelId: MODEL_ID,
         contentType: 'application/json',
         accept: 'application/json',
         body: JSON.stringify({
@@ -270,12 +349,7 @@ ${JSON.stringify(batch, null, 2)}`;
       const content = responseBody.content?.[0]?.text;
 
       if (content) {
-        let jsonContent = content;
-        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (jsonMatch) {
-          jsonContent = jsonMatch[1];
-        }
-
+        const jsonContent = extractJsonFromResponse(content);
         const batchResults = JSON.parse(jsonContent) as CleanedRow[];
         for (const r of batchResults) {
           allResults.push(r);
@@ -372,15 +446,25 @@ ${JSON.stringify(sampleRows.slice(0, 3), null, 2)}
 Existing projects: ${existingProjects.join(', ') || 'None'}
 Existing sprints: ${existingSprints.join(', ') || 'None'}
 
-Return JSON with:
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
 - "mappings": array of { sourceColumn, targetField (or null if no match), confidence (0-1) }
 - "detectedFormat": brief description of the data format (e.g., "Jira export", "Simple task list", "Roadmap spreadsheet")
 - "suggestions": array of helpful tips for this import
-- "warnings": array of potential issues detected`;
+- "warnings": array of potential issues detected
+
+Example format:
+<<<JSON
+{
+  "mappings": [...],
+  "detectedFormat": "...",
+  "suggestions": [...],
+  "warnings": [...]
+}
+JSON>>>`;
 
   try {
     const command = new InvokeModelCommand({
-      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      modelId: MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -400,12 +484,7 @@ Return JSON with:
       throw new Error('No response from AI');
     }
 
-    let jsonContent = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonContent = jsonMatch[1];
-    }
-
+    const jsonContent = extractJsonFromResponse(content);
     const result = JSON.parse(jsonContent) as ImportMappingResult;
 
     // Validate mappings
@@ -508,15 +587,25 @@ Total estimated hours: ${totalHours}
 Top priority backlog items:
 ${JSON.stringify(backlogSummary, null, 2)}
 
-Based on this backlog, suggest:
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
 - "name": A meaningful sprint name (not just "Sprint ${sprintNumber}")
 - "goal": A specific, achievable sprint goal (1-2 sentences)
 - "recommendedCapacity": Suggested team capacity in hours for a 2-week sprint
-- "reasoning": Brief explanation of your suggestions (1 sentence)`;
+- "reasoning": Brief explanation of your suggestions (1 sentence)
+
+Example format:
+<<<JSON
+{
+  "name": "Auth & Security Sprint",
+  "goal": "...",
+  "recommendedCapacity": 80,
+  "reasoning": "..."
+}
+JSON>>>`;
 
   try {
     const command = new InvokeModelCommand({
-      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      modelId: MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -536,12 +625,7 @@ Based on this backlog, suggest:
       throw new Error('No response from AI');
     }
 
-    let jsonContent = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonContent = jsonMatch[1];
-    }
-
+    const jsonContent = extractJsonFromResponse(content);
     const result = JSON.parse(jsonContent) as SprintSuggestion;
 
     return {
@@ -599,15 +683,27 @@ Capacity: ${capacityHours} hours
 Available Components (not yet in a sprint):
 ${JSON.stringify(componentsList, null, 2)}
 
-Analyze these components and select which ones should be included in this sprint. Return a JSON object with:
+Analyze these components and select which ones should be included in this sprint.
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
 - "selectedComponentIds": array of component IDs to include
 - "totalHours": sum of estimated hours for selected components
 - "reasoning": brief explanation of your selection strategy (2-3 sentences)
-- "warnings": array of any concerns (overcommitment, missing dependencies, blocked items, etc.)`;
+- "warnings": array of any concerns (overcommitment, missing dependencies, blocked items, etc.)
+
+Example format:
+<<<JSON
+{
+  "selectedComponentIds": ["id1", "id2"],
+  "totalHours": 38,
+  "reasoning": "...",
+  "warnings": []
+}
+JSON>>>`;
 
   try {
     const command = new InvokeModelCommand({
-      modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      modelId: MODEL_ID,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -628,12 +724,7 @@ Analyze these components and select which ones should be included in this sprint
     }
 
     // Parse the JSON from Claude's response
-    let jsonContent = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonContent = jsonMatch[1];
-    }
-
+    const jsonContent = extractJsonFromResponse(content);
     const result = JSON.parse(jsonContent) as SprintPlanningResult;
 
     // Validate the result
@@ -661,6 +752,673 @@ Analyze these components and select which ones should be included in this sprint
       throw new Error(`AI sprint planning failed: ${error.message}`);
     }
     throw new Error('AI sprint planning failed');
+  }
+}
+
+/**
+ * Natural language component creation
+ * Parses user intent like "Create a login form with email and password"
+ * and generates a structured component with proper type, description, and dependencies
+ */
+export interface NaturalLanguageComponentInput {
+  userInput: string;
+  projectContext?: {
+    projectName: string;
+    projectDescription: string;
+    existingComponents: Array<{ name: string; type: string }>;
+  };
+  parentComponent?: {
+    id: string;
+    name: string;
+    type: string;
+  };
+}
+
+export interface NaturalLanguageComponentResult {
+  name: string;
+  description: string;
+  type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
+  estimatedHours: number;
+  priority: number;
+  suggestedDependencies: string[];
+  reasoning: string; // Why the AI chose this structure
+}
+
+export async function createComponentFromNaturalLanguage(
+  input: NaturalLanguageComponentInput,
+): Promise<NaturalLanguageComponentResult> {
+  const client = getBedrockClient();
+
+  const systemPrompt = `You are an expert software architect helping teams create well-structured work items.
+Your job is to parse natural language descriptions and create properly structured components with:
+
+1. Clear, concise name (3-6 words, Title Case)
+2. Detailed description explaining scope and acceptance criteria
+3. Correct type based on scope:
+   - EPIC: Large initiative spanning multiple features (weeks/months)
+   - FEATURE: Distinct functionality that delivers user value (days/weeks)
+   - STORY: Specific user-facing change or requirement (hours/days)
+   - TASK: Technical work item (implementation, refactor, setup)
+   - BUG: Defect or issue to fix
+4. Realistic estimate (2-80 hours for most items)
+5. Priority (1-10, where 10 is critical/blocking)
+6. Dependencies on existing components if applicable
+
+Be practical and specific. Don't over-engineer or create unnecessary complexity.
+
+Respond with ONLY valid JSON, no other text.`;
+
+  const contextInfo = input.projectContext
+    ? `
+Project: ${input.projectContext.projectName}
+Description: ${input.projectContext.projectDescription}
+
+Existing Components:
+${input.projectContext.existingComponents.map((c) => `- ${c.name} (${c.type})`).join('\n')}`
+    : '';
+
+  const parentInfo = input.parentComponent
+    ? `
+Parent Component: ${input.parentComponent.name} (${input.parentComponent.type})
+This component should be a child of the parent.`
+    : '';
+
+  const userPrompt = `User Request: "${input.userInput}"
+${contextInfo}${parentInfo}
+
+Parse this request and create a structured component.
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
+- "name": Clear component name (Title Case, 3-6 words)
+- "description": Detailed description with acceptance criteria (2-4 sentences)
+- "type": One of EPIC, FEATURE, STORY, TASK, BUG
+- "estimatedHours": Realistic estimate (2-80 hours)
+- "priority": Priority from 1-10
+- "suggestedDependencies": Array of existing component names this depends on (empty if none)
+- "reasoning": Brief explanation of your choices (1-2 sentences)
+
+Example format:
+<<<JSON
+{
+  "name": "User Login Form",
+  "description": "...",
+  "type": "STORY",
+  "estimatedHours": 8,
+  "priority": 9,
+  "suggestedDependencies": [],
+  "reasoning": "..."
+}
+JSON>>>`;
+
+  try {
+    const command = new InvokeModelCommand({
+      modelId: MODEL_ID,
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.3, // Lower for more deterministic parsing
+      }),
+    });
+
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const content = responseBody.content?.[0]?.text;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    // Parse JSON from response
+    const jsonContent = extractJsonFromResponse(content);
+    const result = JSON.parse(jsonContent) as NaturalLanguageComponentResult;
+
+    // Validate and sanitize
+    const validTypes = ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'];
+    if (!validTypes.includes(result.type)) {
+      result.type = 'TASK'; // Default fallback
+    }
+
+    result.estimatedHours = Math.max(1, Math.min(200, Number(result.estimatedHours) || 8));
+    result.priority = Math.max(1, Math.min(10, Number(result.priority) || 5));
+    result.suggestedDependencies = Array.isArray(result.suggestedDependencies) ? result.suggestedDependencies : [];
+
+    return result;
+  } catch (error) {
+    console.error('Natural language component creation error:', error);
+    if (error instanceof Error) {
+      throw new Error(`Component creation failed: ${error.message}`);
+    }
+    throw new Error('Component creation failed');
+  }
+}
+
+/**
+ * Smart breakdown suggestions
+ * When viewing an Epic, suggests Feature breakdowns
+ * When viewing a Feature, suggests Story implementations
+ */
+export interface ComponentBreakdownInput {
+  component: {
+    id: string;
+    name: string;
+    description: string | null;
+    type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
+  };
+  projectContext?: {
+    projectName: string;
+    relatedComponents: Array<{ name: string; type: string; description: string | null }>;
+  };
+}
+
+export interface SuggestedChildComponent {
+  name: string;
+  description: string;
+  type: 'FEATURE' | 'STORY' | 'TASK';
+  estimatedHours: number;
+  priority: number;
+  suggestedDependencies: string[];
+}
+
+export interface ComponentBreakdownResult {
+  suggestions: SuggestedChildComponent[];
+  reasoning: string;
+  recommendedApproach: string; // Overall strategy for breaking down the work
+}
+
+export async function suggestComponentBreakdown(
+  input: ComponentBreakdownInput,
+): Promise<ComponentBreakdownResult> {
+  const client = getBedrockClient();
+
+  // Determine target type based on parent
+  let targetType: string;
+  let guidance: string;
+
+  if (input.component.type === 'EPIC') {
+    targetType = 'FEATURE';
+    guidance = `Suggest 3-6 FEATURES that break down this Epic into distinct, valuable deliverables.
+Each Feature should be independently deliverable and provide user value.
+Think in terms of "What can we ship?" not "What tasks need doing?"`;
+  } else if (input.component.type === 'FEATURE') {
+    targetType = 'STORY';
+    guidance = `Suggest 4-8 STORIES that implement this Feature.
+Each Story should be a specific user-facing change or requirement.
+Think in terms of "As a user, I want to..." scenarios.`;
+  } else {
+    // STORY can break down into TASKs
+    targetType = 'TASK';
+    guidance = `Suggest 3-5 TASKS that implement this Story.
+Each Task should be a technical work item (API endpoint, database schema, UI component, tests).
+Think in terms of "What needs to be built?" from an engineering perspective.`;
+  }
+
+  const systemPrompt = `You are an expert software architect helping teams break down work hierarchically.
+Your job is to analyze a component and suggest logical child components that break it into smaller pieces.
+
+${guidance}
+
+For each suggestion:
+1. Name: Clear, concise (3-6 words)
+2. Description: Specific scope and acceptance criteria (2-3 sentences)
+3. Type: ${targetType}
+4. EstimatedHours: Realistic estimate
+5. Priority: 1-10 (based on dependencies and criticality)
+6. Dependencies: Other suggested components this depends on
+
+Be practical. Don't over-engineer. Focus on value delivery.
+
+Respond with ONLY valid JSON, no other text.`;
+
+  const contextInfo = input.projectContext
+    ? `
+Project: ${input.projectContext.projectName}
+
+Related Components in Project:
+${input.projectContext.relatedComponents.map((c) => `- ${c.name} (${c.type}): ${c.description || 'No description'}`).join('\n')}`
+    : '';
+
+  const userPrompt = `Parent Component to Break Down:
+Name: ${input.component.name}
+Type: ${input.component.type}
+Description: ${input.component.description || 'No description provided'}
+${contextInfo}
+
+Analyze this ${input.component.type} and suggest child ${targetType}s.
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
+- "suggestions": Array of child components with { name, description, type, estimatedHours, priority, suggestedDependencies }
+- "reasoning": Why you chose this breakdown approach (2-3 sentences)
+- "recommendedApproach": Overall strategy for implementing this work (1-2 sentences)
+
+Example format:
+<<<JSON
+{
+  "suggestions": [{
+    "name": "...",
+    "description": "...",
+    "type": "${targetType}",
+    "estimatedHours": 16,
+    "priority": 8,
+    "suggestedDependencies": []
+  }],
+  "reasoning": "...",
+  "recommendedApproach": "..."
+}
+JSON>>>`;
+
+  try {
+    const command = new InvokeModelCommand({
+      modelId: MODEL_ID,
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 3072,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.5,
+      }),
+    });
+
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const content = responseBody.content?.[0]?.text;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    // Parse JSON
+    const jsonContent = extractJsonFromResponse(content);
+    const result = JSON.parse(jsonContent) as ComponentBreakdownResult;
+
+    // Validate and sanitize
+    if (!Array.isArray(result.suggestions)) {
+      result.suggestions = [];
+    }
+
+    result.suggestions = result.suggestions.map((s) => ({
+      name: s.name || 'Unnamed Component',
+      description: s.description || '',
+      type: s.type || targetType,
+      estimatedHours: Math.max(1, Math.min(200, Number(s.estimatedHours) || 8)),
+      priority: Math.max(1, Math.min(10, Number(s.priority) || 5)),
+      suggestedDependencies: Array.isArray(s.suggestedDependencies) ? s.suggestedDependencies : [],
+    }));
+
+    return result;
+  } catch (error) {
+    console.error('Component breakdown suggestion error:', error);
+    if (error instanceof Error) {
+      throw new Error(`Breakdown suggestion failed: ${error.message}`);
+    }
+    throw new Error('Breakdown suggestion failed');
+  }
+}
+
+/**
+ * Component templates for common software patterns
+ * Provides pre-defined structures for CRUD, APIs, forms, authentication, etc.
+ */
+export enum ComponentTemplate {
+  CRUD_FEATURE = 'crud_feature',
+  REST_API = 'rest_api',
+  USER_AUTH = 'user_auth',
+  FORM_WITH_VALIDATION = 'form_with_validation',
+  DATA_DASHBOARD = 'data_dashboard',
+  FILE_UPLOAD = 'file_upload',
+  SEARCH_FILTER = 'search_filter',
+  NOTIFICATION_SYSTEM = 'notification_system',
+  PAYMENT_INTEGRATION = 'payment_integration',
+  ADMIN_PANEL = 'admin_panel',
+}
+
+export interface ComponentTemplateMetadata {
+  id: ComponentTemplate;
+  name: string;
+  description: string;
+  category: 'Backend' | 'Frontend' | 'Full Stack' | 'Integration';
+  estimatedHours: number;
+  commonUseCase: string;
+}
+
+// Template metadata for UI display
+export const COMPONENT_TEMPLATES: ComponentTemplateMetadata[] = [
+  {
+    id: ComponentTemplate.CRUD_FEATURE,
+    name: 'CRUD Feature',
+    description: 'Complete create, read, update, delete functionality for an entity',
+    category: 'Full Stack',
+    estimatedHours: 40,
+    commonUseCase: 'User management, product catalog, blog posts',
+  },
+  {
+    id: ComponentTemplate.REST_API,
+    name: 'REST API Endpoints',
+    description: 'Set of RESTful API endpoints with authentication and validation',
+    category: 'Backend',
+    estimatedHours: 24,
+    commonUseCase: 'Mobile app backend, third-party integrations',
+  },
+  {
+    id: ComponentTemplate.USER_AUTH,
+    name: 'User Authentication',
+    description: 'Complete auth flow: signup, login, password reset, session management',
+    category: 'Full Stack',
+    estimatedHours: 48,
+    commonUseCase: 'Any application requiring user accounts',
+  },
+  {
+    id: ComponentTemplate.FORM_WITH_VALIDATION,
+    name: 'Form with Validation',
+    description: 'Multi-step form with client and server validation',
+    category: 'Frontend',
+    estimatedHours: 16,
+    commonUseCase: 'Registration forms, checkout flows, surveys',
+  },
+  {
+    id: ComponentTemplate.DATA_DASHBOARD,
+    name: 'Analytics Dashboard',
+    description: 'Dashboard with charts, filters, and data visualization',
+    category: 'Frontend',
+    estimatedHours: 32,
+    commonUseCase: 'Admin dashboards, reporting tools, metrics display',
+  },
+  {
+    id: ComponentTemplate.FILE_UPLOAD,
+    name: 'File Upload System',
+    description: 'File upload with progress, validation, and cloud storage',
+    category: 'Full Stack',
+    estimatedHours: 24,
+    commonUseCase: 'Document management, image galleries, attachments',
+  },
+  {
+    id: ComponentTemplate.SEARCH_FILTER,
+    name: 'Search & Filter',
+    description: 'Advanced search with filters, sorting, and pagination',
+    category: 'Full Stack',
+    estimatedHours: 20,
+    commonUseCase: 'Product catalogs, content libraries, user directories',
+  },
+  {
+    id: ComponentTemplate.NOTIFICATION_SYSTEM,
+    name: 'Notification System',
+    description: 'Real-time notifications (email, in-app, push)',
+    category: 'Full Stack',
+    estimatedHours: 32,
+    commonUseCase: 'Alerts, messaging, activity feeds',
+  },
+  {
+    id: ComponentTemplate.PAYMENT_INTEGRATION,
+    name: 'Payment Integration',
+    description: 'Payment processing with Stripe/PayPal (checkout, webhooks, receipts)',
+    category: 'Integration',
+    estimatedHours: 40,
+    commonUseCase: 'E-commerce, subscriptions, donations',
+  },
+  {
+    id: ComponentTemplate.ADMIN_PANEL,
+    name: 'Admin Panel',
+    description: 'Admin interface for managing users, content, and settings',
+    category: 'Full Stack',
+    estimatedHours: 48,
+    commonUseCase: 'Content management, user moderation, system configuration',
+  },
+];
+
+export interface ApplyTemplateInput {
+  template: ComponentTemplate;
+  customization: {
+    entityName: string; // e.g., "Product", "User", "Order"
+    projectName: string;
+    additionalRequirements?: string; // Optional custom needs
+  };
+  projectContext?: {
+    existingComponents: Array<{ name: string; type: string }>;
+    techStack?: string; // e.g., "React + Node.js + PostgreSQL"
+  };
+}
+
+export interface ApplyTemplateResult {
+  components: Array<{
+    name: string;
+    description: string;
+    type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK';
+    estimatedHours: number;
+    priority: number;
+    suggestedDependencies: string[];
+  }>;
+  implementationNotes: string;
+  techStackRecommendations?: string;
+}
+
+export async function applyComponentTemplate(input: ApplyTemplateInput): Promise<ApplyTemplateResult> {
+  const client = getBedrockClient();
+
+  const templateInfo = COMPONENT_TEMPLATES.find((t) => t.id === input.template);
+  if (!templateInfo) {
+    throw new Error(`Unknown template: ${input.template}`);
+  }
+
+  const systemPrompt = `You are an expert software architect creating component breakdowns from templates.
+Your job is to take a standard template pattern and adapt it to the user's specific needs.
+
+Create a complete, production-ready breakdown with:
+1. Proper hierarchy (Epic → Features → Stories → Tasks)
+2. Realistic estimates
+3. Correct dependencies
+4. Implementation guidance
+
+Be specific and practical. Include:
+- Database schema considerations
+- API endpoint specifications
+- UI component structure
+- Testing requirements
+- Security considerations
+
+Respond with ONLY valid JSON, no other text.`;
+
+  const techStackInfo = input.projectContext?.techStack
+    ? `Tech Stack: ${input.projectContext.techStack}`
+    : 'Tech Stack: Not specified (use modern best practices)';
+
+  const existingInfo = input.projectContext?.existingComponents?.length
+    ? `
+Existing Components (consider integration):
+${input.projectContext.existingComponents.map((c) => `- ${c.name} (${c.type})`).join('\n')}`
+    : '';
+
+  const userPrompt = `Template: ${templateInfo.name}
+Template Description: ${templateInfo.description}
+Entity/Focus: ${input.customization.entityName}
+Project: ${input.customization.projectName}
+${input.customization.additionalRequirements ? `Additional Requirements: ${input.customization.additionalRequirements}` : ''}
+${techStackInfo}${existingInfo}
+
+Generate a complete component breakdown for this ${templateInfo.name} focused on "${input.customization.entityName}".
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
+- "components": Array of components with { name, description, type, estimatedHours, priority, suggestedDependencies }
+  * Include proper hierarchy: 1 EPIC → 2-4 FEATURES → 3-6 STORIES/TASKS per feature
+  * Each component should have detailed description with acceptance criteria
+  * Use the entity name in component names (e.g., "Product List API", "${input.customization.entityName} Form Validation")
+- "implementationNotes": Detailed implementation guidance (3-5 paragraphs covering database, API, UI, security, testing)
+- "techStackRecommendations": Specific libraries/tools to use (optional, 2-3 sentences)
+
+Example format:
+<<<JSON
+{
+  "components": [...],
+  "implementationNotes": "...",
+  "techStackRecommendations": "..."
+}
+JSON>>>`;
+
+  try {
+    const command = new InvokeModelCommand({
+      modelId: MODEL_ID,
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.4, // Balance creativity with consistency
+      }),
+    });
+
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const content = responseBody.content?.[0]?.text;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    // Parse JSON
+    const jsonContent = extractJsonFromResponse(content);
+    const result = JSON.parse(jsonContent) as ApplyTemplateResult;
+
+    // Validate and sanitize
+    if (!Array.isArray(result.components)) {
+      result.components = [];
+    }
+
+    const validTypes = ['EPIC', 'FEATURE', 'STORY', 'TASK'];
+    result.components = result.components.map((c) => ({
+      name: c.name || 'Unnamed Component',
+      description: c.description || '',
+      type: validTypes.includes(c.type) ? c.type : 'TASK',
+      estimatedHours: Math.max(1, Math.min(200, Number(c.estimatedHours) || 8)),
+      priority: Math.max(1, Math.min(10, Number(c.priority) || 5)),
+      suggestedDependencies: Array.isArray(c.suggestedDependencies) ? c.suggestedDependencies : [],
+    }));
+
+    return result;
+  } catch (error) {
+    console.error('Template application error:', error);
+    if (error instanceof Error) {
+      throw new Error(`Template application failed: ${error.message}`);
+    }
+    throw new Error('Template application failed');
+  }
+}
+
+/**
+ * Component Context Summarization
+ * Takes user-written context and generates a clear, concise "future reader" summary
+ */
+export interface ComponentContextInput {
+  decision: string; // What was decided
+  rationale: string; // Why this approach
+  alternatives?: string; // Alternatives considered
+  componentName: string;
+  componentType: string;
+}
+
+export interface ComponentContextResult {
+  summary: string; // AI-generated summary for future readers
+  keyPoints: string[]; // 3-5 key takeaways
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export async function summarizeComponentContext(
+  input: ComponentContextInput,
+): Promise<ComponentContextResult> {
+  const client = getBedrockClient();
+
+  const systemPrompt = `You are an expert technical writer helping teams document decisions clearly.
+Your job is to read raw decision notes and create a concise, clear summary that helps future readers understand:
+
+1. WHAT was decided (the outcome)
+2. WHY this approach was chosen (the reasoning)
+3. WHAT alternatives were considered (if any)
+
+Guidelines:
+- Write in past tense ("We decided to...", "This approach was chosen because...")
+- Be concise but complete (2-4 paragraphs max)
+- Extract 3-5 key points as bullet points
+- Focus on helping someone 6 months from now understand the context
+- Don't add speculation or information not in the original text
+- Use clear, professional language
+
+Respond with ONLY valid JSON in this format:
+{
+  "summary": "Concise narrative summary",
+  "keyPoints": ["Point 1", "Point 2", "Point 3"]
+}`;
+
+  const userPrompt = `Component: ${input.componentName} (${input.componentType})
+
+Decision:
+${input.decision}
+
+Rationale:
+${input.rationale}
+
+${input.alternatives ? `Alternatives Considered:\n${input.alternatives}` : ''}
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
+- "summary": A concise 2-3 sentence summary of the key points
+
+Example format:
+<<<JSON
+{
+  "summary": "..."
+}
+JSON>>>`;
+
+  try {
+    const response = await client.send(
+      new InvokeModelCommand({
+        modelId: MODEL_ID,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+          anthropic_version: 'bedrock-2023-05-31',
+          max_tokens: 1024,
+          temperature: 0.3, // Lower temperature for consistency
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+        }),
+      }),
+    );
+
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    const content = responseBody.content[0].text;
+
+    // Extract JSON from response
+    const jsonContent = extractJsonFromResponse(content);
+    const result = JSON.parse(jsonContent);
+
+    // Validate and sanitize
+    const summary = String(result.summary || '').trim();
+    const keyPoints = Array.isArray(result.keyPoints)
+      ? result.keyPoints.slice(0, 5).map((p: unknown) => String(p).trim())
+      : [];
+
+    if (!summary) {
+      throw new Error('AI did not generate a valid summary');
+    }
+
+    return {
+      summary,
+      keyPoints,
+      inputTokens: responseBody.usage.input_tokens,
+      outputTokens: responseBody.usage.output_tokens,
+    };
+  } catch (error) {
+    console.error('Context summarization error:', error);
+    if (error instanceof Error) {
+      throw new Error(`Context summarization failed: ${error.message}`);
+    }
+    throw new Error('Context summarization failed');
   }
 }
 
@@ -706,7 +1464,7 @@ Return ONLY the complete HTML document, no explanation or markdown formatting.`;
   try {
     const response = await client.send(
       new InvokeModelCommand({
-        modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        modelId: MODEL_ID,
         contentType: 'application/json',
         accept: 'application/json',
         body: JSON.stringify({
@@ -722,8 +1480,7 @@ Return ONLY the complete HTML document, no explanation or markdown formatting.`;
     const htmlContent = responseBody.content[0].text;
 
     // Extract HTML from markdown code blocks if present
-    const htmlMatch = htmlContent.match(/```(?:html)?\s*([\s\S]*?)\s*```/);
-    const html = htmlMatch ? htmlMatch[1] : htmlContent;
+    const html = extractHtmlFromResponse(htmlContent);
 
     return {
       html,
