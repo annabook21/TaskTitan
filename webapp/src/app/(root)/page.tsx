@@ -15,7 +15,6 @@ export default async function Dashboard() {
         include: {
           Project: {
             include: {
-              Component: true,
               _count: {
                 select: { Component: true },
               },

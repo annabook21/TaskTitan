@@ -140,7 +140,6 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
 
   // Track created items for hierarchy resolution
   const createdItems = new Map<string, string>(); // name -> id
-  const parentQueue: { id: string; parentName: string }[] = [];
   const stats = {
     created: 0,
     skipped: 0,
@@ -194,7 +193,23 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     return 0;
   };
 
-  // First pass: Create all items
+  // Parse all rows first
+  const parsedRows: Array<{
+    rowIndex: number;
+    name: string;
+    description: string | null;
+    type: string;
+    status: string;
+    priority: number;
+    owner: string | null;
+    externalId: string | null;
+    tags: string[];
+    estimatedHours: number | null;
+    parentName: string | null;
+  }> = [];
+
+  const seenNames = new Set<string>();
+
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const name = getValue(row, 'name');
@@ -206,98 +221,139 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     }
 
     // Check for duplicate
-    if (createdItems.has(name)) {
+    if (seenNames.has(name)) {
       stats.skipped++;
       stats.warnings.push(`Row ${i + 1}: Skipped duplicate "${name}"`);
       continue;
     }
+    seenNames.add(name);
 
+    const description = getValue(row, 'description');
+    const type = parseType(getValue(row, 'type'));
+    const status = parseStatus(getValue(row, 'status'));
+    const priority = parsePriority(getValue(row, 'priority'));
+    const owner = getValue(row, 'owner');
+    const externalId = getValue(row, 'externalId');
+    const parentName = getValue(row, 'parentName');
+    const tagsRaw = getValue(row, 'tags');
+    const tags = tagsRaw
+      ? tagsRaw
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
+
+    let estimatedHours: number | null = null;
+    const hoursRaw = getValue(row, 'estimatedHours');
+    if (hoursRaw) {
+      const parsed = parseFloat(hoursRaw);
+      if (!isNaN(parsed)) estimatedHours = parsed;
+    }
+
+    parsedRows.push({
+      rowIndex: i + 1,
+      name,
+      description: description || null,
+      type,
+      status,
+      priority,
+      owner: owner || null,
+      externalId: externalId || null,
+      tags,
+      estimatedHours,
+      parentName: parentName || null,
+    });
+  }
+
+  // Separate into components without parents and with parents
+  const componentsWithoutParents = parsedRows.filter((r) => !r.parentName);
+  const componentsWithParents = parsedRows.filter((r) => r.parentName);
+
+  // Batch create components without parents
+  if (componentsWithoutParents.length > 0) {
     try {
-      const description = getValue(row, 'description');
-      const type = parseType(getValue(row, 'type'));
-      const status = parseStatus(getValue(row, 'status'));
-      const priority = parsePriority(getValue(row, 'priority'));
-      const owner = getValue(row, 'owner');
-      const externalId = getValue(row, 'externalId');
-      const parentName = getValue(row, 'parentName');
-      const tagsRaw = getValue(row, 'tags');
-      const tags = tagsRaw
-        ? tagsRaw
-            .split(',')
-            .map((t) => t.trim())
-            .filter(Boolean)
-        : [];
-
-      let estimatedHours: number | null = null;
-      const hoursRaw = getValue(row, 'estimatedHours');
-      if (hoursRaw) {
-        const parsed = parseFloat(hoursRaw);
-        if (!isNaN(parsed)) estimatedHours = parsed;
-      }
-
-      const component = await prisma.component.create({
-        data: {
-          name,
-          description,
-          type,
-          status,
-          priority,
-          owner,
-          externalId,
-          tags,
-          estimatedHours,
+      await prisma.component.createMany({
+        data: componentsWithoutParents.map((c) => ({
+          name: c.name,
+          description: c.description,
+          type: c.type as any, // Type from parseType is already validated
+          status: c.status as any, // Status from parseStatus is already validated
+          priority: c.priority,
+          owner: c.owner,
+          externalId: c.externalId,
+          tags: c.tags,
+          estimatedHours: c.estimatedHours,
           projectId: targetProjectId,
-          sprintId: autoAssignSprint,
-        },
+          sprintId: autoAssignSprint || null,
+        })),
+        skipDuplicates: true,
       });
 
-      createdItems.set(name, component.id);
-      stats.created++;
+      // Fetch created components to get their IDs
+      const created = await prisma.component.findMany({
+        where: {
+          projectId: targetProjectId,
+          name: { in: componentsWithoutParents.map((c) => c.name) },
+        },
+        select: { id: true, name: true },
+      });
 
-      // Queue for parent resolution
-      if (parentName) {
-        parentQueue.push({ id: component.id, parentName });
-      }
+      created.forEach((c) => {
+        createdItems.set(c.name, c.id);
+      });
+
+      stats.created += created.length;
     } catch (error) {
-      stats.errors.push(`Row ${i + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      stats.errors.push(`Batch create failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  // Second pass: Resolve parent relationships
-  for (const { id, parentName } of parentQueue) {
-    let parentId = createdItems.get(parentName);
+  // Create components with parents (these need parent IDs first)
+  for (const comp of componentsWithParents) {
+    try {
+      let parentId = createdItems.get(comp.parentName!);
 
-    // If parent doesn't exist and we should create it
-    if (!parentId && createMissingParents) {
-      try {
+      // If parent doesn't exist and we should create it
+      if (!parentId && createMissingParents && comp.parentName) {
         const parent = await prisma.component.create({
           data: {
-            name: parentName,
-            type: 'EPIC', // Assume missing parents are epics
+            name: comp.parentName,
+            type: 'EPIC',
             projectId: targetProjectId,
             sprintId: autoAssignSprint,
           },
         });
         parentId = parent.id;
-        createdItems.set(parentName, parentId);
+        createdItems.set(comp.parentName, parentId);
         stats.created++;
-        stats.warnings.push(`Auto-created parent Epic: "${parentName}"`);
-      } catch {
-        stats.warnings.push(`Could not create parent "${parentName}"`);
+        stats.warnings.push(`Auto-created parent Epic: "${comp.parentName}"`);
       }
-    }
 
-    if (parentId) {
-      await prisma.component.update({
-        where: { id },
-        data: { parentId },
+      const component = await prisma.component.create({
+        data: {
+          name: comp.name,
+          description: comp.description,
+          type: comp.type as any,
+          status: comp.status as any,
+          priority: comp.priority,
+          owner: comp.owner,
+          externalId: comp.externalId,
+          tags: comp.tags,
+          estimatedHours: comp.estimatedHours,
+          projectId: targetProjectId,
+          sprintId: autoAssignSprint || null,
+          parentId: parentId || null,
+        },
       });
-    } else {
-      stats.warnings.push(`Parent not found: "${parentName}"`);
+
+      createdItems.set(comp.name, component.id);
+      stats.created++;
+    } catch (error) {
+      stats.errors.push(`Row ${comp.rowIndex}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  // Third pass: Resolve dependencies
+  // Resolve dependencies
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const name = getValue(row, 'name');

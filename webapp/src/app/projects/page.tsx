@@ -18,22 +18,31 @@ export default async function ProjectsPage() {
       _count: {
         select: { Component: true },
       },
-      Component: {
-        select: { status: true },
-      },
     },
     orderBy: { updatedAt: 'desc' },
   });
 
-  // Calculate component stats for each project
+  // Get status counts for all projects in a single aggregated query (more efficient)
+  const statusCounts = await prisma.component.groupBy({
+    by: ['projectId', 'status'],
+    where: {
+      projectId: { in: projects.map((p) => p.id) },
+    },
+    _count: true,
+  });
+
+  // Build status count map for quick lookup
+  const statusCountMap = new Map<string, Record<string, number>>();
+  for (const count of statusCounts) {
+    if (!statusCountMap.has(count.projectId)) {
+      statusCountMap.set(count.projectId, {});
+    }
+    statusCountMap.get(count.projectId)![count.status] = count._count;
+  }
+
+  // Attach status counts to projects
   const projectsWithStats = projects.map((project) => {
-    const componentsByStatus = project.Component.reduce(
-      (acc, c) => {
-        acc[c.status] = (acc[c.status] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
+    const componentsByStatus = statusCountMap.get(project.id) || {};
 
     return {
       ...project,

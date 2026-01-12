@@ -220,18 +220,17 @@ export const applyAIComponents = authActionClient
           },
         });
 
-        // Assign components to this sprint
+        // Assign components to this sprint (batch update for performance)
         const componentIds = sprint.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null);
 
         if (componentIds.length > 0) {
-          await Promise.all(
-            componentIds.map((componentId) =>
-              prisma.component.update({
-                where: { id: componentId },
-                data: { sprintId: createdSprint.id },
-              }),
-            ),
-          );
+          await prisma.component.updateMany({
+            where: {
+              id: { in: componentIds as string[] },
+              projectId,
+            },
+            data: { sprintId: createdSprint.id },
+          });
         }
 
         createdSprints++;
