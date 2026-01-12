@@ -109,7 +109,9 @@ export class Webapp extends Construct {
       new PolicyStatement({
         actions: ['bedrock:InvokeModel'],
         resources: [
-          // Claude Sonnet 4.5 inference profile (cross-region)
+          // Global inference profile (cross-region, 10% cost savings)
+          `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/global.anthropic.claude-sonnet-4-5-*`,
+          // Regional inference profile (cross-region)
           `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/us.anthropic.claude-sonnet-4-5-*`,
           // Also allow the underlying foundation model
           'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-*',
