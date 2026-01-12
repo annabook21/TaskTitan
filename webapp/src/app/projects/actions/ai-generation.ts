@@ -119,12 +119,14 @@ export const applyAIComponents = authActionClient
     // Create components hierarchically: parents first, then children
     // This ensures parentId references are valid when creating child components
     const nameToId = new Map<string, string>();
-    const createdComponents: any[] = [];
+    const createdComponents: Awaited<ReturnType<typeof prisma.component.create>>[] = [];
 
     // First pass: Create all components without parents (top-level EPICs/FEATUREs)
-    for (const c of components) {
-      if (!c.parentName) {
-        const component = await prisma.component.create({
+    // Use Promise.all for parallel creation to improve performance
+    const topLevelComponents = components.filter((c) => !c.parentName);
+    const topLevelResults = await Promise.all(
+      topLevelComponents.map((c) =>
+        prisma.component.create({
           data: {
             name: c.name,
             description: c.description,
@@ -134,30 +136,41 @@ export const applyAIComponents = authActionClient
             estimatedHours: c.estimatedHours,
             parentId: null,
           },
-        });
-        nameToId.set(c.name, component.id);
-        createdComponents.push(component);
-      }
-    }
+        }),
+      ),
+    );
+
+    // Map names to IDs for parent references
+    topLevelResults.forEach((component, index) => {
+      nameToId.set(topLevelComponents[index].name, component.id);
+      createdComponents.push(component);
+    });
 
     // Second pass: Create components with parents (nested FEATUREs/STORies/TASKs)
-    for (const c of components) {
-      if (c.parentName) {
-        const parentId = nameToId.get(c.parentName);
-        const component = await prisma.component.create({
-          data: {
-            name: c.name,
-            description: c.description,
-            type: c.type,
-            projectId,
-            priority: c.priority,
-            estimatedHours: c.estimatedHours,
-            parentId: parentId || null, // If parent not found, create as top-level
-          },
-        });
-        nameToId.set(c.name, component.id);
+    // Use Promise.all for parallel creation to improve performance
+    const childComponents = components.filter((c) => c.parentName);
+    if (childComponents.length > 0) {
+      const childResults = await Promise.all(
+        childComponents.map((c) => {
+          const parentId = nameToId.get(c.parentName!);
+          return prisma.component.create({
+            data: {
+              name: c.name,
+              description: c.description,
+              type: c.type,
+              projectId,
+              priority: c.priority,
+              estimatedHours: c.estimatedHours,
+              parentId: parentId || null, // If parent not found, create as top-level
+            },
+          });
+        }),
+      );
+
+      childResults.forEach((component, index) => {
+        nameToId.set(childComponents[index].name, component.id);
         createdComponents.push(component);
-      }
+      });
     }
 
     // Create dependencies based on suggestions
@@ -186,8 +199,15 @@ export const applyAIComponents = authActionClient
                 requiredComponentId: requiredId,
               },
             })
-            .catch(() => {
-              // Ignore duplicate dependencies
+            .catch((error) => {
+              // Only ignore unique constraint violations (P2002)
+              // Log and re-throw other errors
+              if (error.code === 'P2002') {
+                // Duplicate dependency - safe to ignore
+                return null;
+              }
+              console.error('Error creating dependency:', error);
+              throw error;
             }),
         ),
       );

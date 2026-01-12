@@ -27,6 +27,8 @@ model Activity {
 
   @@index([projectId, createdAt])
   @@index([userId])
+  @@index([type]) // Add index for filtering by activity type
+  @@index([projectId, type]) // Composite index for project + type queries
 }
 
 model Assignment {
@@ -42,38 +44,38 @@ model Assignment {
 }
 
 model Component {
-  id                                                    String                     @id @default(cuid())
+  id                                                    String                   @id @default(cuid())
   name                                                  String
   description                                           String?
-  type                                                  ComponentType              @default(TASK)
+  type                                                  ComponentType            @default(TASK)
   projectId                                             String
   parentId                                              String? // For hierarchy: Epic -> Feature -> Story -> Task
   sprintId                                              String? // null = backlog
-  status                                                ComponentStatus            @default(PLANNING)
-  priority                                              Int                        @default(0)
+  status                                                ComponentStatus          @default(PLANNING)
+  priority                                              Int                      @default(0)
   estimatedHours                                        Float?
   dueDate                                               DateTime?
   owner                                                 String? // Imported owner name (may not match a User)
-  tags                                                  String[]                   @default([])
+  tags                                                  String[]                 @default([])
   externalId                                            String? // For import tracking (e.g., Jira key)
   githubPrUrl                                           String? // GitHub PR URL
   // Component Context (Decision Journal)
-  contextDecision                                       String?                    @db.Text // What was decided
-  contextRationale                                      String?                    @db.Text // Why this approach
-  contextAlternatives                                   String?                    @db.Text // Alternatives considered
+  contextDecision                                       String?                  @db.Text // What was decided
+  contextRationale                                      String?                  @db.Text // Why this approach
+  contextAlternatives                                   String?                  @db.Text // Alternatives considered
   contextLinks                                          String[] // Related links (pasted, not fetched)
-  contextAiSummary                                      String?                    @db.Text // AI-generated "future reader" summary
+  contextAiSummary                                      String?                  @db.Text // AI-generated "future reader" summary
   contextUpdatedAt                                      DateTime? // When context was last updated
   contextUpdatedBy                                      String? // User who last updated context
-  createdAt                                             DateTime                   @default(now())
-  updatedAt                                             DateTime                   @updatedAt
+  createdAt                                             DateTime                 @default(now())
+  updatedAt                                             DateTime                 @updatedAt
   Assignment                                            Assignment[]
-  Project                                               Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  Parent                                                Component?                 @relation("ComponentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  Children                                              Component[]                @relation("ComponentHierarchy")
-  Sprint                                                Sprint?                    @relation(fields: [sprintId], references: [id], onDelete: SetNull)
-  Dependency_Dependency_dependentComponentIdToComponent Dependency[]               @relation("Dependency_dependentComponentIdToComponent")
-  Dependency_Dependency_requiredComponentIdToComponent  Dependency[]               @relation("Dependency_requiredComponentIdToComponent")
+  Project                                               Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Parent                                                Component?               @relation("ComponentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  Children                                              Component[]              @relation("ComponentHierarchy")
+  Sprint                                                Sprint?                  @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  Dependency_Dependency_dependentComponentIdToComponent Dependency[]             @relation("Dependency_dependentComponentIdToComponent")
+  Dependency_Dependency_requiredComponentIdToComponent  Dependency[]             @relation("Dependency_requiredComponentIdToComponent")
   Preview                                               ComponentPreview[]
   StatusHistory                                         ComponentStatusHistory[]
 
@@ -84,6 +86,11 @@ model Component {
   @@index([type])
   @@index([externalId])
   @@index([githubPrUrl])
+  @@index([projectId, status]) // Composite index for project status queries
+  @@index([sprintId, status]) // Composite index for sprint status queries
+  @@index([projectId, type]) // Composite index for project type queries
+  @@index([dueDate]) // Index for filtering by due date
+  @@index([priority, status]) // Index for priority-based queries with status
 }
 
 model Dependency {
@@ -229,23 +236,23 @@ enum SprintStatus {
 
 // Workflow configuration for teams (Pathway B: Workflow Freedom)
 model TeamWorkflowConfig {
-  id                    String   @id @default(cuid())
-  teamId                String   @unique
+  id                   String   @id @default(cuid())
+  teamId               String   @unique
   // WIP Limits (null = unlimited)
-  wipLimitPlanning      Int?
-  wipLimitInProgress    Int?
-  wipLimitBlocked       Int?
-  wipLimitReview        Int?
+  wipLimitPlanning     Int?
+  wipLimitInProgress   Int?
+  wipLimitBlocked      Int?
+  wipLimitReview       Int?
   // Cycle Settings
-  cycleEnabled          Boolean  @default(false)
-  cycleDurationWeeks    Int? // 1, 2, 4, or 6 weeks
-  cycleStartDayOfWeek   Int? // 0=Sunday, 1=Monday, etc.
+  cycleEnabled         Boolean  @default(false)
+  cycleDurationWeeks   Int? // 1, 2, 4, or 6 weeks
+  cycleStartDayOfWeek  Int? // 0=Sunday, 1=Monday, etc.
   // Other Configuration
-  enforceEstimates      Boolean  @default(false)
-  autoArchiveCompleted  Boolean  @default(false)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  Team                  Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  enforceEstimates     Boolean  @default(false)
+  autoArchiveCompleted Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  Team                 Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([teamId])
 }

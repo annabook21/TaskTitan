@@ -12,9 +12,26 @@ export default async function ProjectsPage() {
     where: {
       Team: { Membership: { some: { userId } } },
     },
-    include: {
-      Team: true,
-      User: true,
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      updatedAt: true,
+      // Only load essential Team fields
+      Team: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      // Only load essential User fields
+      User: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
       _count: {
         select: { Component: true },
       },

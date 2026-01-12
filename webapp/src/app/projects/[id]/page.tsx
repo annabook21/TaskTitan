@@ -47,22 +47,66 @@ export default async function ProjectDetailPage({ params }: Props) {
           Sprint: {
             where: { status: { in: ['PLANNING', 'ACTIVE'] } },
             orderBy: { startDate: 'asc' },
+            // Only load essential sprint fields
+            select: {
+              id: true,
+              name: true,
+              goal: true,
+              startDate: true,
+              endDate: true,
+              status: true,
+              capacity: true,
+            },
           },
           WorkflowConfig: true,
         },
       },
       User: true,
       Component: {
+        // Limit to 200 components (reasonable upper bound for UI performance)
+        // Projects with 200+ components should use filtering/pagination
+        take: 200,
         include: {
           Assignment: {
             include: { User: true },
           },
-          Sprint: true,
+          // Only load essential sprint fields
+          Sprint: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+            },
+          },
           Dependency_Dependency_dependentComponentIdToComponent: {
-            include: { Component_Dependency_requiredComponentIdToComponent: true },
+            // Only load essential dependency fields
+            select: {
+              id: true,
+              Component_Dependency_requiredComponentIdToComponent: {
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  type: true,
+                },
+              },
+            },
           },
           Dependency_Dependency_requiredComponentIdToComponent: {
-            include: { Component_Dependency_dependentComponentIdToComponent: true },
+            // Only load essential dependency fields
+            select: {
+              id: true,
+              Component_Dependency_dependentComponentIdToComponent: {
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  type: true,
+                },
+              },
+            },
           },
           Preview: {
             take: 1,

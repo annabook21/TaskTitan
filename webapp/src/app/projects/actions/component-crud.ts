@@ -101,55 +101,64 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
 
   const oldStatus = component.status;
 
-  const updated = await prisma.component.update({
-    where: { id },
-    data: {
-      ...(name && { name }),
-      ...(description !== undefined && { description }),
-      ...(status && { status }),
-      ...(priority !== undefined && { priority }),
-      ...(estimatedHours !== undefined && { estimatedHours }),
-      ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
-    },
-  });
-
-  // Log status change
-  if (status && status !== oldStatus) {
-    // Close previous status history record
-    await prisma.componentStatusHistory.updateMany({
-      where: {
-        componentId: id,
-        status: oldStatus,
-        exitedAt: null,
-      },
+  // Use transaction for atomic status updates with history tracking
+  // This prevents race conditions when multiple status changes occur
+  const updated = await prisma.$transaction(async (tx) => {
+    const updatedComponent = await tx.component.update({
+      where: { id },
       data: {
-        exitedAt: new Date(),
+        ...(name && { name }),
+        ...(description !== undefined && { description }),
+        ...(status && { status }),
+        ...(priority !== undefined && { priority }),
+        ...(estimatedHours !== undefined && { estimatedHours }),
+        ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
       },
     });
 
-    // Create new status history record
-    await prisma.componentStatusHistory.create({
-      data: {
-        componentId: id,
-        status,
-        enteredAt: new Date(),
-      },
-    });
+    // Log status change within transaction
+    if (status && status !== oldStatus) {
+      const now = new Date();
 
-    await prisma.activity.create({
-      data: {
-        type: 'COMPONENT_STATUS_CHANGED',
-        projectId: component.projectId,
-        userId,
-        metadata: {
-          componentName: updated.name,
+      // Close previous status history record
+      await tx.componentStatusHistory.updateMany({
+        where: {
           componentId: id,
-          oldStatus,
-          newStatus: status,
+          status: oldStatus,
+          exitedAt: null,
         },
-      },
-    });
-  }
+        data: {
+          exitedAt: now,
+        },
+      });
+
+      // Create new status history record
+      await tx.componentStatusHistory.create({
+        data: {
+          componentId: id,
+          status,
+          enteredAt: now,
+        },
+      });
+
+      // Log activity
+      await tx.activity.create({
+        data: {
+          type: 'COMPONENT_STATUS_CHANGED',
+          projectId: component.projectId,
+          userId,
+          metadata: {
+            componentName: updatedComponent.name,
+            componentId: id,
+            oldStatus,
+            newStatus: status,
+          },
+        },
+      });
+    }
+
+    return updatedComponent;
+  });
 
   revalidatePath(`/projects/${component.projectId}`);
 

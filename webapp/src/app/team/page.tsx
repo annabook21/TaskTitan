@@ -23,15 +23,33 @@ export default async function TeamPage() {
 
   const memberships = await prisma.membership.findMany({
     where: { userId },
-    include: {
+    select: {
+      role: true,
+      joinedAt: true,
       Team: {
-        include: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
           Membership: {
-            include: { User: true },
+            // Only load first 6 members (5 shown + count)
+            take: 6,
             orderBy: { joinedAt: 'asc' },
+            select: {
+              User: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
           },
-          Project: {
-            select: { id: true },
+          _count: {
+            select: {
+              Membership: true,
+              Project: true,
+            },
           },
         },
       },
@@ -112,9 +130,9 @@ export default async function TeamPage() {
                           {user.name?.[0] || user.email[0].toUpperCase()}
                         </div>
                       ))}
-                      {team.Membership.length > 5 && (
+                      {team._count.Membership > 5 && (
                         <div className="w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-900 flex items-center justify-center text-xs text-slate-400">
-                          +{team.Membership.length - 5}
+                          +{team._count.Membership - 5}
                         </div>
                       )}
                     </div>
@@ -123,11 +141,11 @@ export default async function TeamPage() {
                       <div className="flex items-center gap-4 text-xs text-slate-500">
                         <span className="flex items-center gap-1">
                           <Users className="w-3.5 h-3.5" />
-                          {team.Membership.length} member{team.Membership.length !== 1 ? 's' : ''}
+                          {team._count.Membership} member{team._count.Membership !== 1 ? 's' : ''}
                         </span>
                         <span className="flex items-center gap-1">
                           <FolderKanban className="w-3.5 h-3.5" />
-                          {team.Project.length} project{team.Project.length !== 1 ? 's' : ''}
+                          {team._count.Project} project{team._count.Project !== 1 ? 's' : ''}
                         </span>
                       </div>
                       <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-violet-400 transition-colors" />

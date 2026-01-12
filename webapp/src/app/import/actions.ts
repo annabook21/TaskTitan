@@ -308,52 +308,86 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     }
   }
 
-  // Create components with parents (these need parent IDs first)
+  // Create missing parents first (if needed)
+  const missingParents = new Set<string>();
   for (const comp of componentsWithParents) {
-    try {
-      let parentId = createdItems.get(comp.parentName!);
-
-      // If parent doesn't exist and we should create it
-      if (!parentId && createMissingParents && comp.parentName) {
-        const parent = await prisma.component.create({
-          data: {
-            name: comp.parentName,
-            type: 'EPIC',
-            projectId: targetProjectId,
-            sprintId: autoAssignSprint,
-          },
-        });
-        parentId = parent.id;
-        createdItems.set(comp.parentName, parentId);
-        stats.created++;
-        stats.warnings.push(`Auto-created parent Epic: "${comp.parentName}"`);
-      }
-
-      const component = await prisma.component.create({
-        data: {
-          name: comp.name,
-          description: comp.description,
-          type: comp.type as any,
-          status: comp.status as any,
-          priority: comp.priority,
-          owner: comp.owner,
-          externalId: comp.externalId,
-          tags: comp.tags,
-          estimatedHours: comp.estimatedHours,
-          projectId: targetProjectId,
-          sprintId: autoAssignSprint || null,
-          parentId: parentId || null,
-        },
-      });
-
-      createdItems.set(comp.name, component.id);
-      stats.created++;
-    } catch (error) {
-      stats.errors.push(`Row ${comp.rowIndex}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    if (comp.parentName && !createdItems.has(comp.parentName)) {
+      missingParents.add(comp.parentName);
     }
   }
 
-  // Resolve dependencies
+  if (missingParents.size > 0 && createMissingParents) {
+    try {
+      await prisma.component.createMany({
+        data: Array.from(missingParents).map((name) => ({
+          name,
+          type: 'EPIC',
+          projectId: targetProjectId,
+          sprintId: autoAssignSprint || null,
+        })),
+        skipDuplicates: true,
+      });
+
+      const createdParents = await prisma.component.findMany({
+        where: {
+          projectId: targetProjectId,
+          name: { in: Array.from(missingParents) },
+        },
+        select: { id: true, name: true },
+      });
+
+      createdParents.forEach((p) => {
+        createdItems.set(p.name, p.id);
+        stats.created++;
+        stats.warnings.push(`Auto-created parent Epic: "${p.name}"`);
+      });
+    } catch (error) {
+      stats.errors.push(`Failed to create missing parents: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Batch create components with parents
+  if (componentsWithParents.length > 0) {
+    try {
+      await prisma.component.createMany({
+        data: componentsWithParents.map((c) => ({
+          name: c.name,
+          description: c.description,
+          type: c.type as any,
+          status: c.status as any,
+          priority: c.priority,
+          owner: c.owner,
+          externalId: c.externalId,
+          tags: c.tags,
+          estimatedHours: c.estimatedHours,
+          projectId: targetProjectId,
+          sprintId: autoAssignSprint || null,
+          parentId: createdItems.get(c.parentName!) || null,
+        })),
+        skipDuplicates: true,
+      });
+
+      const created = await prisma.component.findMany({
+        where: {
+          projectId: targetProjectId,
+          name: { in: componentsWithParents.map((c) => c.name) },
+        },
+        select: { id: true, name: true },
+      });
+
+      created.forEach((c) => {
+        createdItems.set(c.name, c.id);
+      });
+
+      stats.created += created.length;
+    } catch (error) {
+      stats.errors.push(`Batch create with parents failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Resolve dependencies - batch create
+  const dependenciesToCreate: Array<{ dependentComponentId: string; requiredComponentId: string }> = [];
+
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const name = getValue(row, 'name');
@@ -370,20 +404,27 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
       .filter(Boolean);
     for (const depName of depNames) {
       const requiredId = createdItems.get(depName);
-      if (requiredId) {
-        try {
-          await prisma.dependency.create({
-            data: {
-              dependentComponentId: componentId,
-              requiredComponentId: requiredId,
-            },
-          });
-        } catch {
-          // Likely duplicate, ignore
-        }
-      } else {
+      if (requiredId && requiredId !== componentId) {
+        dependenciesToCreate.push({
+          dependentComponentId: componentId,
+          requiredComponentId: requiredId,
+        });
+      } else if (!requiredId) {
         stats.warnings.push(`Dependency not found: "${name}" depends on "${depName}"`);
       }
+    }
+  }
+
+  // Batch create dependencies
+  if (dependenciesToCreate.length > 0) {
+    try {
+      await prisma.dependency.createMany({
+        data: dependenciesToCreate,
+        skipDuplicates: true,
+      });
+    } catch (error) {
+      // Log but don't fail the import
+      stats.warnings.push(`Some dependencies could not be created: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
