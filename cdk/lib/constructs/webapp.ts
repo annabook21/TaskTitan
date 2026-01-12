@@ -21,7 +21,7 @@ import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
 export interface WebappProps {
   database: Database;
-  signPayloadHandler: EdgeFunction;
+  signPayloadHandler?: EdgeFunction; // Optional - OAC handles signing natively
   accessLogBucket: Bucket;
   wireframeBucket: Bucket;
   auth: Auth;

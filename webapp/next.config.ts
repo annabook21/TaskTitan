@@ -16,6 +16,7 @@ const nextConfig: NextConfig = {
     parallelServerCompiles: true,
     serverActions: {
       allowedOrigins,
+      bodySizeLimit: '2mb', // Increased from default 1mb to support large AI-generated payloads
     },
   },
   typescript: {

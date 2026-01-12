@@ -58,7 +58,7 @@ export interface CloudFrontLambdaFunctionUrlServiceProps {
    * @default No custom domain.
    */
   certificate?: ICertificate;
-  signPayloadHandler: EdgeFunction;
+  signPayloadHandler?: EdgeFunction; // Optional - OAC handles signing natively
   accessLogBucket: Bucket;
 }
 
@@ -127,13 +127,12 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
             eventType: FunctionEventType.VIEWER_REQUEST,
           },
         ],
-        edgeLambdas: [
-          {
-            functionVersion: signPayloadHandler.versionArn(this),
-            eventType: LambdaEdgeEventType.ORIGIN_REQUEST,
-            includeBody: true,
-          },
-        ],
+        // NOTE: Lambda@Edge signing removed - CloudFront OAC natively handles SigV4 signing
+        // for Lambda Function URLs with IAM auth. The sign-payload Lambda@Edge was causing
+        // signature conflicts on POST requests, especially with large bodies (>1MB) due to
+        // Lambda@Edge body size limits. OAC automatically signs requests correctly without
+        // the 1MB truncation issue.
+        // Ref: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda.html
       },
       // errorResponses: [{ httpStatus: 404, responsePagePath: '/', responseHttpStatus: 200 }],
       logBucket: accessLogBucket,

@@ -154,7 +154,7 @@ export class MainStack extends Stack {
       database,
       hostedZone,
       certificate: props.sharedCertificate,
-      signPayloadHandler: props.signPayloadHandler,
+      // signPayloadHandler removed - CloudFront OAC handles SigV4 signing natively
       accessLogBucket,
       wireframeBucket,
       auth,
