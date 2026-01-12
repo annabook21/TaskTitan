@@ -16,6 +16,8 @@ ENV USER_POOL_ID="dummy"
 ENV AMPLIFY_APP_ORIGIN="https://dummy.example.com"
 ENV COGNITO_DOMAIN="dummy.example.com"
 ENV ALLOWED_ORIGIN_HOST=${ALLOWED_ORIGIN_HOST}
+# Use BUILD_TIMESTAMP to ensure cache invalidation on new deployments
+RUN echo "Build timestamp: ${BUILD_TIMESTAMP}"
 RUN --mount=type=cache,target=/build/.next/cache npm run build
 
 FROM public.ecr.aws/lambda/nodejs:22 AS runner
