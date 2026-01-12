@@ -663,3 +663,78 @@ Analyze these components and select which ones should be included in this sprint
     throw new Error('AI sprint planning failed');
   }
 }
+
+/**
+ * Generate HTML wireframe for a component
+ */
+export interface GenerateWireframeInput {
+  componentName: string;
+  description: string;
+  type: string;
+  dependencies?: string[];
+}
+
+export interface GenerateWireframeResult {
+  html: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export async function generateWireframe(input: GenerateWireframeInput): Promise<GenerateWireframeResult> {
+  const client = getBedrockClient();
+
+  const prompt = `Generate a lightweight HTML wireframe for this component:
+
+Component: ${input.componentName}
+Type: ${input.type}
+Description: ${input.description}
+${input.dependencies?.length ? `Dependencies: ${input.dependencies.join(', ')}` : ''}
+
+Requirements:
+- Single HTML file with inline CSS (Tailwind CDN is acceptable)
+- Use semantic HTML5 elements
+- Include placeholder content and labels
+- Show all major UI sections and interactions
+- Keep it simple - this is a wireframe, not production code
+- Use neutral colors (grays, whites, blacks)
+- Responsive layout (mobile-first)
+- Add placeholder data where relevant
+- Include basic interactivity hints (buttons, forms, etc.)
+
+Return ONLY the complete HTML document, no explanation or markdown formatting.`;
+
+  try {
+    const response = await client.send(
+      new InvokeModelCommand({
+        modelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+          anthropic_version: 'bedrock-2023-05-31',
+          max_tokens: 4096,
+          temperature: 0.5,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      }),
+    );
+
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    const htmlContent = responseBody.content[0].text;
+
+    // Extract HTML from markdown code blocks if present
+    const htmlMatch = htmlContent.match(/```(?:html)?\s*([\s\S]*?)\s*```/);
+    const html = htmlMatch ? htmlMatch[1] : htmlContent;
+
+    return {
+      html,
+      inputTokens: responseBody.usage.input_tokens,
+      outputTokens: responseBody.usage.output_tokens,
+    };
+  } catch (error) {
+    console.error('AI wireframe generation error:', error);
+    if (error instanceof Error) {
+      throw new Error(`Wireframe generation failed: ${error.message}`);
+    }
+    throw new Error('Wireframe generation failed');
+  }
+}

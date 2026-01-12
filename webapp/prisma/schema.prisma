@@ -42,30 +42,32 @@ model Assignment {
 }
 
 model Component {
-  id                                                    String          @id @default(cuid())
+  id                                                    String                     @id @default(cuid())
   name                                                  String
   description                                           String?
-  type                                                  ComponentType   @default(TASK)
+  type                                                  ComponentType              @default(TASK)
   projectId                                             String
   parentId                                              String? // For hierarchy: Epic -> Feature -> Story -> Task
   sprintId                                              String? // null = backlog
-  status                                                ComponentStatus @default(PLANNING)
-  priority                                              Int             @default(0)
+  status                                                ComponentStatus            @default(PLANNING)
+  priority                                              Int                        @default(0)
   estimatedHours                                        Float?
   dueDate                                               DateTime?
   owner                                                 String? // Imported owner name (may not match a User)
-  tags                                                  String[]        @default([])
+  tags                                                  String[]                   @default([])
   externalId                                            String? // For import tracking (e.g., Jira key)
   githubPrUrl                                           String? // GitHub PR URL
-  createdAt                                             DateTime        @default(now())
-  updatedAt                                             DateTime        @updatedAt
+  createdAt                                             DateTime                   @default(now())
+  updatedAt                                             DateTime                   @updatedAt
   Assignment                                            Assignment[]
-  Project                                               Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  Parent                                                Component?      @relation("ComponentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  Children                                              Component[]     @relation("ComponentHierarchy")
-  Sprint                                                Sprint?         @relation(fields: [sprintId], references: [id], onDelete: SetNull)
-  Dependency_Dependency_dependentComponentIdToComponent Dependency[]    @relation("Dependency_dependentComponentIdToComponent")
-  Dependency_Dependency_requiredComponentIdToComponent  Dependency[]    @relation("Dependency_requiredComponentIdToComponent")
+  Project                                               Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Parent                                                Component?                 @relation("ComponentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  Children                                              Component[]                @relation("ComponentHierarchy")
+  Sprint                                                Sprint?                    @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  Dependency_Dependency_dependentComponentIdToComponent Dependency[]               @relation("Dependency_dependentComponentIdToComponent")
+  Dependency_Dependency_requiredComponentIdToComponent  Dependency[]               @relation("Dependency_requiredComponentIdToComponent")
+  Preview                                               ComponentPreview[]
+  StatusHistory                                         ComponentStatusHistory[]
 
   @@index([projectId])
   @@index([parentId])
@@ -145,27 +147,29 @@ model Sprint {
 }
 
 model Team {
-  id          String       @id @default(cuid())
-  name        String
-  description String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  Membership  Membership[]
-  Project     Project[]
-  Sprint      Sprint[]
+  id             String              @id @default(cuid())
+  name           String
+  description    String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  Membership     Membership[]
+  Project        Project[]
+  Sprint         Sprint[]
+  WorkflowConfig TeamWorkflowConfig?
 }
 
 model User {
-  id         String       @id
-  email      String       @unique
-  name       String?
-  avatarUrl  String?
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-  Activity   Activity[]
-  Assignment Assignment[]
-  Membership Membership[]
-  Project    Project[]
+  id               String             @id
+  email            String             @unique
+  name             String?
+  avatarUrl        String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  Activity         Activity[]
+  Assignment       Assignment[]
+  Membership       Membership[]
+  Project          Project[]
+  ComponentPreview ComponentPreview[]
 }
 
 enum ActivityType {
@@ -213,4 +217,65 @@ enum SprintStatus {
   ACTIVE // Currently running
   COMPLETED // Successfully finished
   CANCELLED // Cancelled before completion
+}
+
+// Workflow configuration for teams (Pathway B: Workflow Freedom)
+model TeamWorkflowConfig {
+  id                    String   @id @default(cuid())
+  teamId                String   @unique
+  // WIP Limits (null = unlimited)
+  wipLimitPlanning      Int?
+  wipLimitInProgress    Int?
+  wipLimitBlocked       Int?
+  wipLimitReview        Int?
+  // Cycle Settings
+  cycleEnabled          Boolean  @default(false)
+  cycleDurationWeeks    Int? // 1, 2, 4, or 6 weeks
+  cycleStartDayOfWeek   Int? // 0=Sunday, 1=Monday, etc.
+  // Other Configuration
+  enforceEstimates      Boolean  @default(false)
+  autoArchiveCompleted  Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  Team                  Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+}
+
+// AI-generated wireframe previews for components
+model ComponentPreview {
+  id           String        @id @default(cuid())
+  componentId  String
+  htmlContent  String        @db.Text // Store full HTML wireframe
+  prompt       String        @db.Text // What user requested
+  modelUsed    String        @default("claude-sonnet-4-5")
+  inputTokens  Int?
+  outputTokens Int?
+  status       PreviewStatus @default(PENDING)
+  generatedBy  String
+  createdAt    DateTime      @default(now())
+  Component    Component     @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  User         User          @relation(fields: [generatedBy], references: [id])
+
+  @@index([componentId])
+  @@index([generatedBy])
+}
+
+enum PreviewStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+// Track component status transitions for cycle time analytics
+model ComponentStatusHistory {
+  id          String          @id @default(cuid())
+  componentId String
+  status      ComponentStatus
+  enteredAt   DateTime        @default(now())
+  exitedAt    DateTime?
+  Component   Component       @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@index([componentId])
+  @@index([enteredAt])
 }

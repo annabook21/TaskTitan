@@ -1,4 +1,4 @@
-import { CfnOutput, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { AsyncJob } from './constructs/async-job';
@@ -85,6 +85,22 @@ export class MainStack extends Stack {
       autoDeleteObjects: true,
     });
 
+    // Wireframe export bucket for AI-generated HTML wireframes
+    const wireframeBucket = new Bucket(this, 'WireframeBucket', {
+      encryption: BucketEncryption.S3_MANAGED,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      lifecycleRules: [
+        {
+          id: 'DeleteOldWireframes',
+          enabled: true,
+          expiration: Duration.days(30), // Auto-delete after 30 days to save storage costs
+        },
+      ],
+    });
+
     // VPC Configuration
     // - Default: NAT Gateway (production best practice - managed, HA, auto-scaling)
     // - Optional: NAT Instance for dev/test cost savings
@@ -140,6 +156,7 @@ export class MainStack extends Stack {
       certificate: props.sharedCertificate,
       signPayloadHandler: props.signPayloadHandler,
       accessLogBucket,
+      wireframeBucket,
       auth,
       eventBus,
       asyncJob,
@@ -182,6 +199,11 @@ export class MainStack extends Stack {
     new CfnOutput(this, 'XRayServiceMapUrl', {
       value: `https://${this.region}.console.aws.amazon.com/xray/home?region=${this.region}#/service-map`,
       description: 'X-Ray Service Map for request tracing',
+    });
+
+    new CfnOutput(this, 'WireframeBucketName', {
+      value: wireframeBucket.bucketName,
+      description: 'S3 bucket for AI-generated wireframe exports',
     });
   }
 }

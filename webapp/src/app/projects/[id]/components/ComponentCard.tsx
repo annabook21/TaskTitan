@@ -4,10 +4,12 @@ import { useState } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { updateComponent } from '@/app/projects/actions';
 import { assignComponentToSprint } from '@/app/sprints/actions';
-import { MoreVertical, GitBranch, Clock, User as UserIcon, ChevronDown, Check, Zap, Github } from 'lucide-react';
+import { generatePreviewAction } from './preview-actions';
+import { MoreVertical, GitBranch, Clock, User as UserIcon, ChevronDown, Check, Zap, Github, Sparkles, Eye, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ComponentStatus, User, SprintStatus } from '@prisma/client';
 import AssignmentPanel from './AssignmentPanel';
+import PreviewModal from './PreviewModal';
 
 interface Sprint {
   id: string;
@@ -31,6 +33,7 @@ interface ComponentWithRelations {
   assignments: { user: User }[];
   dependsOn: { requiredComponent: { id: string; name: string } }[];
   dependedOnBy: { dependentComponent: { id: string; name: string } }[];
+  Preview?: { id: string; htmlContent: string }[];
 }
 
 interface Props {
@@ -50,6 +53,7 @@ const statusOptions: { value: ComponentStatus; label: string; color: string }[] 
 export default function ComponentCard({ component, teamMembers, availableSprints }: Props) {
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isSprintOpen, setIsSprintOpen] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   const { execute, isExecuting } = useAction(updateComponent, {
     onSuccess: () => {
@@ -71,6 +75,18 @@ export default function ComponentCard({ component, teamMembers, availableSprints
     },
   });
 
+  const { execute: executeGeneratePreview, isExecuting: isGeneratingPreview } = useAction(generatePreviewAction, {
+    onSuccess: ({ data }) => {
+      if (data?.preview) {
+        toast.success('Wireframe generated!');
+        setShowPreview(true);
+      }
+    },
+    onError: ({ error }) => {
+      toast.error(error.serverError || 'Failed to generate wireframe');
+    },
+  });
+
   const currentStatus = statusOptions.find((s) => s.value === component.status);
 
   const handleStatusChange = (newStatus: ComponentStatus) => {
@@ -81,7 +97,22 @@ export default function ComponentCard({ component, teamMembers, availableSprints
     executeSprint({ componentId: component.id, sprintId });
   };
 
+  const handleGeneratePreview = () => {
+    executeGeneratePreview({ componentId: component.id });
+  };
+
+  const latestPreview = component.Preview?.[0];
+
   return (
+    <>
+      {showPreview && latestPreview && (
+        <PreviewModal
+          htmlContent={latestPreview.htmlContent}
+          componentName={component.name}
+          previewId={latestPreview.id}
+          onClose={() => setShowPreview(false)}
+        />
+      )}
     <div className="component-card group">
       {/* Header */}
       <div className="flex items-start justify-between mb-2">
@@ -106,6 +137,32 @@ export default function ComponentCard({ component, teamMembers, availableSprints
           View Pull Request
         </a>
       )}
+
+      {/* Wireframe Preview */}
+      <div className="mb-2">
+        {latestPreview ? (
+          <button
+            onClick={() => setShowPreview(true)}
+            className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 transition-colors"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            View Wireframe
+          </button>
+        ) : (
+          <button
+            onClick={handleGeneratePreview}
+            disabled={isGeneratingPreview}
+            className="text-xs text-slate-400 hover:text-cyan-400 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+          >
+            {isGeneratingPreview ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5" />
+            )}
+            {isGeneratingPreview ? 'Generating...' : 'Generate Wireframe'}
+          </button>
+        )}
+      </div>
 
       {/* Status Dropdown */}
       <div className="relative mb-3">
@@ -243,5 +300,6 @@ export default function ComponentCard({ component, teamMembers, availableSprints
         </div>
       </div>
     </div>
+    </>
   );
 }

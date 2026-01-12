@@ -180,6 +180,15 @@ export const createComponent = authActionClient.schema(createComponentSchema).ac
     },
   });
 
+  // Create initial status history record
+  await prisma.componentStatusHistory.create({
+    data: {
+      componentId: component.id,
+      status: component.status, // PLANNING by default
+      enteredAt: new Date(),
+    },
+  });
+
   // Log activity
   await prisma.activity.create({
     data: {
@@ -228,6 +237,27 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
 
   // Log status change
   if (status && status !== oldStatus) {
+    // Close previous status history record
+    await prisma.componentStatusHistory.updateMany({
+      where: {
+        componentId: id,
+        status: oldStatus,
+        exitedAt: null,
+      },
+      data: {
+        exitedAt: new Date(),
+      },
+    });
+
+    // Create new status history record
+    await prisma.componentStatusHistory.create({
+      data: {
+        componentId: id,
+        status,
+        enteredAt: new Date(),
+      },
+    });
+
     await prisma.activity.create({
       data: {
         type: 'COMPONENT_STATUS_CHANGED',

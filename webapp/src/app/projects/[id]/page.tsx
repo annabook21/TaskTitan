@@ -48,6 +48,7 @@ export default async function ProjectDetailPage({ params }: Props) {
             where: { status: { in: ['PLANNING', 'ACTIVE'] } },
             orderBy: { startDate: 'asc' },
           },
+          WorkflowConfig: true,
         },
       },
       User: true,
@@ -62,6 +63,11 @@ export default async function ProjectDetailPage({ params }: Props) {
           },
           Dependency_Dependency_requiredComponentIdToComponent: {
             include: { Component_Dependency_dependentComponentIdToComponent: true },
+          },
+          Preview: {
+            take: 1,
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, htmlContent: true },
           },
         },
         orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
@@ -114,6 +120,16 @@ export default async function ProjectDetailPage({ params }: Props) {
   const team = project.Team;
   const teamMembers = team.Membership.map((m) => m.User);
   const activities = project.Activity.map((a) => ({ ...a, user: a.User }));
+  const workflowConfig = team.WorkflowConfig;
+
+  // Get WIP limits for each status
+  const wipLimits = {
+    PLANNING: workflowConfig?.wipLimitPlanning,
+    IN_PROGRESS: workflowConfig?.wipLimitInProgress,
+    BLOCKED: workflowConfig?.wipLimitBlocked,
+    REVIEW: workflowConfig?.wipLimitReview,
+    COMPLETED: null, // No WIP limit for completed
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -163,8 +179,10 @@ export default async function ProjectDetailPage({ params }: Props) {
             </div>
           </div>
 
-          {/* Sprint Timeline */}
-          <SprintTimeline sprints={availableSprints} components={components} teamId={team.id} />
+          {/* Sprint Timeline - only show if cycles are enabled */}
+          {workflowConfig?.cycleEnabled && availableSprints.length > 0 && (
+            <SprintTimeline sprints={availableSprints} components={components} teamId={team.id} />
+          )}
 
           {/* Main Content */}
           <div className="grid lg:grid-cols-4 gap-8">
@@ -212,30 +230,46 @@ export default async function ProjectDetailPage({ params }: Props) {
                   {/* Status Columns */}
                   <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
                     {(Object.entries(componentsByStatus) as [keyof typeof statusConfig, typeof components][]).map(
-                      ([status, statusComponents]) => (
-                        <div key={status} className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <h3
-                              className={`text-sm font-medium flex items-center gap-2 text-${statusConfig[status].color}-400`}
-                            >
-                              <span className={`w-2 h-2 rounded-full bg-${statusConfig[status].color}-500`} />
-                              {statusConfig[status].label}
-                              <span className="text-slate-500 font-normal">({statusComponents.length})</span>
-                            </h3>
-                          </div>
+                      ([status, statusComponents]) => {
+                        const wipLimit = wipLimits[status];
+                        const isOverLimit = wipLimit && statusComponents.length > wipLimit;
 
-                          <div className="space-y-3 min-h-[100px]">
-                            {statusComponents.map((component) => (
-                              <ComponentCard
-                                key={component.id}
-                                component={component}
-                                teamMembers={teamMembers}
-                                availableSprints={availableSprints}
-                              />
-                            ))}
+                        return (
+                          <div key={status} className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <h3
+                                className={`text-sm font-medium flex items-center gap-2 text-${statusConfig[status].color}-400`}
+                              >
+                                <span className={`w-2 h-2 rounded-full bg-${statusConfig[status].color}-500`} />
+                                {statusConfig[status].label}
+                                <span className="text-slate-500 font-normal">({statusComponents.length})</span>
+                                {wipLimit && (
+                                  <span
+                                    className={`text-xs px-1.5 py-0.5 rounded ${
+                                      isOverLimit
+                                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                        : 'bg-slate-700 text-slate-400'
+                                    }`}
+                                  >
+                                    /{wipLimit}
+                                  </span>
+                                )}
+                              </h3>
+                            </div>
+
+                            <div className="space-y-3 min-h-[100px]">
+                              {statusComponents.map((component) => (
+                                <ComponentCard
+                                  key={component.id}
+                                  component={component}
+                                  teamMembers={teamMembers}
+                                  availableSprints={availableSprints}
+                                />
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ),
+                        );
+                      },
                     )}
                   </div>
                 </div>

@@ -23,6 +23,7 @@ export interface WebappProps {
   database: Database;
   signPayloadHandler: EdgeFunction;
   accessLogBucket: Bucket;
+  wireframeBucket: Bucket;
   auth: Auth;
   eventBus: EventBus;
   asyncJob: AsyncJob;
@@ -59,7 +60,7 @@ export class Webapp extends Construct {
   constructor(scope: Construct, id: string, props: WebappProps) {
     super(scope, id);
 
-    const { database, hostedZone, auth, subDomain, eventBus, asyncJob } = props;
+    const { database, hostedZone, auth, subDomain, eventBus, asyncJob, wireframeBucket } = props;
 
     // Use ContainerImageBuild to inject deploy-time values in the build environment
     const image = new ContainerImageBuild(this, 'Build', {
@@ -88,6 +89,7 @@ export class Webapp extends Construct {
         USER_POOL_ID: auth.userPool.userPoolId,
         USER_POOL_CLIENT_ID: auth.client.userPoolClientId,
         ASYNC_JOB_HANDLER_ARN: asyncJob.handler.functionArn,
+        WIREFRAME_BUCKET_NAME: wireframeBucket.bucketName,
         // AWS Powertools configuration for structured logging
         POWERTOOLS_SERVICE_NAME: 'TaskTitanWebapp',
         LOG_LEVEL: 'INFO',
@@ -114,6 +116,9 @@ export class Webapp extends Construct {
         ],
       }),
     );
+
+    // Grant S3 permissions for wireframe exports
+    wireframeBucket.grantReadWrite(handler);
 
     const service = new CloudFrontLambdaFunctionUrlService(this, 'Resource', {
       subDomain,
