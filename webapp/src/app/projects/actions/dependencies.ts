@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 
 // Schemas
@@ -20,21 +20,43 @@ export const addDependency = authActionClient.schema(addDependencySchema).action
   const { userId } = ctx;
 
   if (dependentComponentId === requiredComponentId) {
-    throw new Error('A component cannot depend on itself');
+    throw new MyCustomError('A component cannot depend on itself');
   }
 
-  // Verify both components exist and belong to the same project
+  // Verify both components exist AND user has access through team membership
   const [dependent, required] = await Promise.all([
-    prisma.component.findUnique({ where: { id: dependentComponentId } }),
-    prisma.component.findUnique({ where: { id: requiredComponentId } }),
+    prisma.component.findFirst({
+      where: {
+        id: dependentComponentId,
+        Project: {
+          Team: {
+            Membership: {
+              some: { userId },
+            },
+          },
+        },
+      },
+    }),
+    prisma.component.findFirst({
+      where: {
+        id: requiredComponentId,
+        Project: {
+          Team: {
+            Membership: {
+              some: { userId },
+            },
+          },
+        },
+      },
+    }),
   ]);
 
   if (!dependent || !required) {
-    throw new Error('One or both components not found');
+    throw new MyCustomError('One or both components not found or access denied');
   }
 
   if (dependent.projectId !== required.projectId) {
-    throw new Error('Components must be in the same project');
+    throw new MyCustomError('Components must be in the same project');
   }
 
   const dependency = await prisma.dependency.create({
@@ -72,8 +94,20 @@ export const removeDependency = authActionClient
     const { id } = parsedInput;
     const { userId } = ctx;
 
-    const dependency = await prisma.dependency.findUnique({
-      where: { id },
+    // Verify dependency exists AND user has access to the project
+    const dependency = await prisma.dependency.findFirst({
+      where: {
+        id,
+        Component_Dependency_dependentComponentIdToComponent: {
+          Project: {
+            Team: {
+              Membership: {
+                some: { userId },
+              },
+            },
+          },
+        },
+      },
       include: {
         Component_Dependency_dependentComponentIdToComponent: true,
         Component_Dependency_requiredComponentIdToComponent: true,
@@ -81,7 +115,7 @@ export const removeDependency = authActionClient
     });
 
     if (!dependency) {
-      throw new Error('Dependency not found');
+      throw new MyCustomError('Dependency not found or access denied');
     }
 
     const dependentComponent = dependency.Component_Dependency_dependentComponentIdToComponent;

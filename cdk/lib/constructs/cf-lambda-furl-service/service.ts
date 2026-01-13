@@ -127,12 +127,20 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
             eventType: FunctionEventType.VIEWER_REQUEST,
           },
         ],
-        // NOTE: Lambda@Edge signing removed - CloudFront OAC natively handles SigV4 signing
-        // for Lambda Function URLs with IAM auth. The sign-payload Lambda@Edge was causing
-        // signature conflicts on POST requests, especially with large bodies (>1MB) due to
-        // Lambda@Edge body size limits. OAC automatically signs requests correctly without
-        // the 1MB truncation issue.
-        // Ref: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda.html
+        // Lambda@Edge signing is REQUIRED for Next.js Server Actions POST requests
+        // CloudFront OAC alone cannot properly sign these requests due to the custom
+        // headers (next-action, next-router-state-tree) that Next.js adds.
+        // The sign-payload Lambda@Edge function runs AFTER OAC's initial attempt,
+        // allowing it to properly sign the request with all necessary headers included.
+        edgeLambdas: signPayloadHandler
+          ? [
+              {
+                functionVersion: signPayloadHandler.versionArn(this),
+                eventType: LambdaEdgeEventType.ORIGIN_REQUEST,
+                includeBody: true,
+              },
+            ]
+          : [],
       },
       // errorResponses: [{ httpStatus: 404, responsePagePath: '/', responseHttpStatus: 200 }],
       logBucket: accessLogBucket,

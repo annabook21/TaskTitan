@@ -17,6 +17,9 @@
     ]
   },
   "context": {
+    "domainName": "tasktitan.live",
+    "hostedZoneId": "Z011770293USOPDADH3X",
+    "useNatInstance": false,
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": [

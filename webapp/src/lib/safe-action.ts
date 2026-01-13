@@ -61,7 +61,7 @@ export const authActionClient = actionClient.use(async ({ next }) => {
   });
 
   if (!currentUser) {
-    throw new Error('Session is not valid!');
+    throw new MyCustomError('Session is not valid!');
   }
 
   const user = await prisma.user.findUnique({
@@ -71,7 +71,7 @@ export const authActionClient = actionClient.use(async ({ next }) => {
   });
 
   if (user == null) {
-    throw new Error('user not found');
+    throw new MyCustomError('User not found');
   }
 
   return next({ ctx: { userId: user.id } });

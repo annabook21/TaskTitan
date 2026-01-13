@@ -26,11 +26,11 @@ export class UsEast1Stack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: UsEast1StackProps) {
     super(scope, id, props);
 
-    if (props.domainName) {
+    if (props.domainName && props.hostedZoneId) {
       // Import the existing hosted zone for the custom domain
       const zone = HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
         zoneName: props.domainName,
-        hostedZoneId: 'Z011770293USOPDADH3X',
+        hostedZoneId: props.hostedZoneId,
       });
       this.hostedZone = zone;
 

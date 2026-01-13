@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 
 // Schemas
@@ -35,7 +35,7 @@ export const createProject = authActionClient.schema(createProjectSchema).action
   });
 
   if (!membership) {
-    throw new Error('You are not a member of this team');
+    throw new MyCustomError('You are not a member of this team');
   }
 
   const project = await prisma.project.create({
@@ -79,7 +79,7 @@ export const updateProject = authActionClient.schema(updateProjectSchema).action
   });
 
   if (!project) {
-    throw new Error('Project not found or access denied');
+    throw new MyCustomError('Project not found or access denied');
   }
 
   const updated = await prisma.project.update({
@@ -113,11 +113,11 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
   });
 
   if (!project) {
-    throw new Error('Project not found');
+    throw new MyCustomError('Project not found');
   }
 
   if (String(project.ownerId) !== String(userId)) {
-    throw new Error('Only the project owner can delete it');
+    throw new MyCustomError('Only the project owner can delete it');
   }
 
   try {
@@ -126,7 +126,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
     await prisma.project.delete({ where: { id } });
   } catch (error) {
     console.error('Failed to delete project:', error);
-    throw new Error('Failed to delete project. Please try again.');
+    throw new MyCustomError('Failed to delete project. Please try again.');
   }
 
   revalidatePath('/');

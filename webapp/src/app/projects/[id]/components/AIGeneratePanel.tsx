@@ -157,9 +157,10 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
 
   // Auto-trigger generation when opened automatically
   useEffect(() => {
-    if (autoOpen && hasDescription && isOpen && generatedComponents.length === 0) {
+    if (autoOpen && hasDescription && isOpen && generatedComponents.length === 0 && !isGenerating) {
       handleGenerate();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpen, hasDescription, isOpen]);
 
   if (!isOpen) {

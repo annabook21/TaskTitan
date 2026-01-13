@@ -32,6 +32,11 @@ export class Database extends Construct implements ec2.IConnectable {
         autoMinorVersionUpgrade: true,
       }),
       serverlessV2MinCapacity: 0,
+      // AWS Best Practice: Set max capacity for production workloads
+      // 16 ACU provides headroom for traffic spikes while maintaining cost efficiency
+      // Cost: $0 idle, $1.92/hour at peak, realistic $35-70/month
+      // Reference: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.setting-capacity.html
+      serverlessV2MaxCapacity: 16,
       vpc,
       vpcSubnets: vpc.selectSubnets({ subnets: vpc.isolatedSubnets.concat(vpc.privateSubnets) }),
       storageEncrypted: true,
@@ -109,9 +114,15 @@ export class Database extends Construct implements ec2.IConnectable {
 
   public getLambdaEnvironment(databaseName: string) {
     const conn = this.getConnectionInfo();
-    // Aurora Serverless v2 cold start takes up to 15 seconds
-    // https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections/connection-pool
-    const option = '?pool_timeout=20&connect_timeout=20';
+    // Optimized for Aurora Serverless v2 cold start (up to 15s) + connection overhead
+    // AWS Best Practice: 1 connection per Lambda for serverless workloads
+    // Reference: https://www.prisma.io/docs/orm/prisma-client/deployment/serverless/deploy-to-aws-lambda
+    const option = [
+      'connection_limit=1',      // 1 connection per Lambda (critical for serverless)
+      'pool_timeout=30',         // > 15s cold start + 5s connection
+      'connect_timeout=30',      // Same rationale
+      'socket_timeout=60',       // For long AI operations
+    ].join('&');
     return {
       DATABASE_HOST: conn.host,
       DATABASE_NAME: databaseName,
@@ -120,7 +131,7 @@ export class Database extends Construct implements ec2.IConnectable {
       DATABASE_ENGINE: conn.engine,
       DATABASE_PORT: conn.port,
       DATABASE_OPTION: option,
-      DATABASE_URL: `${conn.engine}://${conn.username}:${conn.password}@${conn.host}:${conn.port}/${databaseName}${option}`,
+      DATABASE_URL: `${conn.engine}://${conn.username}:${conn.password}@${conn.host}:${conn.port}/${databaseName}?${option}`,
     };
   }
 }

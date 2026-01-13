@@ -13,11 +13,17 @@ interface EnvironmentProps {
   useNatInstance?: boolean;
 }
 
+// Read configuration from CDK context (cdk.json or --context flag)
+// This allows deployment to different AWS accounts without hardcoding values
+const domainName = app.node.tryGetContext('domainName');
+const hostedZoneId = app.node.tryGetContext('hostedZoneId');
+const useNatInstance = app.node.tryGetContext('useNatInstance') ?? false;
+
 const props: EnvironmentProps = {
   account: process.env.CDK_DEFAULT_ACCOUNT!,
-  domainName: 'tasktitan.live',
-  hostedZoneId: 'Z011770293USOPDADH3X',
-  useNatInstance: false,
+  domainName,
+  hostedZoneId,
+  useNatInstance,
 };
 
 const virginia = new UsEast1Stack(app, 'TaskTitanUsEast1Stack', {

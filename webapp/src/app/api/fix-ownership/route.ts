@@ -1,18 +1,21 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { requireDevAccess } from '@/lib/dev-guard';
 
 /**
  * Emergency API to fix ownership issues
  * Makes the current user an OWNER of teams where they're a member but not an owner
+ *
+ * Security: Restricted to OWNER role only via dev-guard middleware
  */
 export async function POST(request: Request) {
   try {
-    // Require authentication
+    // OWNER-only access restriction
+    const accessDenied = await requireDevAccess();
+    if (accessDenied) return accessDenied;
+
     const { userId, user } = await getSession();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
     const body = await request.json();
     const { teamId } = body;
@@ -64,6 +67,9 @@ export async function POST(request: Request) {
         Team: true
       }
     });
+
+    // Log privilege escalation for security audit trail
+    console.warn(`⚠️  OWNERSHIP ESCALATION: User ${user?.email} (${userId}) promoted themselves to OWNER of team "${updatedMembership.Team.name}" (${teamId}) from role ${membership.role}`);
 
     return NextResponse.json({
       success: true,

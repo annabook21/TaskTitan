@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 
 // Schemas
@@ -41,7 +41,7 @@ export const createComponent = authActionClient.schema(createComponentSchema).ac
   });
 
   if (!project) {
-    throw new Error('Project not found or access denied');
+    throw new MyCustomError('Project not found or access denied');
   }
 
   const component = await prisma.component.create({
@@ -96,7 +96,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
   });
 
   if (!component) {
-    throw new Error('Component not found or access denied');
+    throw new MyCustomError('Component not found or access denied');
   }
 
   const oldStatus = component.status;

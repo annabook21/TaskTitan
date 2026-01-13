@@ -68,7 +68,9 @@ export class MainStack extends Stack {
 
     // NAT Gateway is production best practice (managed, HA, auto-scaling)
     // Set useNatInstance=true for dev/test environments to save costs
-    const { useNatInstance = false, backupRetentionDays = 7 } = props;
+    // AWS Best Practice: 30-day backup retention for production compliance
+    // Reference: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html
+    const { useNatInstance = false, backupRetentionDays = 30 } = props;
 
     // Use the hosted zone from us-east-1 stack
     // CDK cross-stack references (with crossRegionReferences: true) will handle the Route53 reference

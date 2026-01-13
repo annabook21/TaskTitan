@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 
 /**
@@ -19,13 +19,35 @@ export const assignComponent = authActionClient
     const { componentId, assigneeId } = parsedInput;
     const { userId } = ctx;
 
-    const component = await prisma.component.findUnique({
-      where: { id: componentId },
+    // Verify user has access to project through team membership
+    const component = await prisma.component.findFirst({
+      where: {
+        id: componentId,
+        Project: {
+          Team: {
+            Membership: {
+              some: { userId },
+            },
+          },
+        },
+      },
       include: { Project: true },
     });
 
     if (!component) {
-      throw new Error('Component not found');
+      throw new MyCustomError('Component not found or access denied');
+    }
+
+    // Verify assignee is a member of the team
+    const assigneeMembership = await prisma.membership.findFirst({
+      where: {
+        userId: assigneeId,
+        teamId: component.Project.teamId,
+      },
+    });
+
+    if (!assigneeMembership) {
+      throw new MyCustomError('Assignee is not a member of this team');
     }
 
     const assignment = await prisma.assignment.create({
@@ -67,12 +89,22 @@ export const unassignComponent = authActionClient
     const { componentId, assigneeId } = parsedInput;
     const { userId } = ctx;
 
-    const component = await prisma.component.findUnique({
-      where: { id: componentId },
+    // Verify user has access to project through team membership
+    const component = await prisma.component.findFirst({
+      where: {
+        id: componentId,
+        Project: {
+          Team: {
+            Membership: {
+              some: { userId },
+            },
+          },
+        },
+      },
     });
 
     if (!component) {
-      throw new Error('Component not found');
+      throw new MyCustomError('Component not found or access denied');
     }
 
     await prisma.assignment.delete({

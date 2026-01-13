@@ -1,5 +1,5 @@
 import { Construct } from 'constructs';
-import { CfnOutput, Duration, TimeZone } from 'aws-cdk-lib';
+import { CfnOutput, Duration, Stack, TimeZone } from 'aws-cdk-lib';
 import { Architecture, DockerImageCode, DockerImageFunction, IFunction, Tracing } from 'aws-cdk-lib/aws-lambda';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Database } from './database';
@@ -8,6 +8,7 @@ import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { join } from 'path';
 import { Schedule, ScheduleExpression, ScheduleTargetInput } from 'aws-cdk-lib/aws-scheduler';
 import { LambdaInvoke } from 'aws-cdk-lib/aws-scheduler-targets';
+import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 
 export interface AsyncJobProps {
   readonly database: Database;
@@ -20,6 +21,21 @@ export class AsyncJob extends Construct {
   constructor(scope: Construct, id: string, props: AsyncJobProps) {
     super(scope, id);
     const { database, eventBus } = props;
+
+    // Dead Letter Queue for failed async jobs
+    // AWS Best Practice: Capture failed invocations for debugging and retry
+    // Reference: https://docs.aws.amazon.com/lambda/latest/dg/invocation-async.html#invocation-dlq
+    const deadLetterQueue = new Queue(this, 'DeadLetterQueue', {
+      queueName: `${Stack.of(this).stackName}-AsyncJob-DLQ`,
+      retentionPeriod: Duration.days(14),  // Maximum allowed retention
+      encryption: QueueEncryption.KMS_MANAGED,
+      enforceSSL: true,
+    });
+
+    new CfnOutput(this, 'DLQUrl', {
+      value: deadLetterQueue.queueUrl,
+      description: 'Dead Letter Queue URL for failed async jobs - monitor this queue for failures',
+    });
 
     const handler = new DockerImageFunction(this, 'Handler', {
       code: DockerImageCode.fromImageAsset(join('..', 'webapp'), {
@@ -38,10 +54,16 @@ export class AsyncJob extends Construct {
         LOG_LEVEL: 'INFO',
       },
       vpc: database.cluster.vpc,
-      // limit concurrency to mitigate any possible EDoS attacks
-      reservedConcurrentExecutions: 1,
+      // AWS Best Practice: Set based on downstream capacity
+      // 25 concurrent × 1 Prisma connection = 25 DB connections (safe for Aurora)
+      // Reference: https://docs.aws.amazon.com/lambda/latest/operatorguide/lambda-concurrency.html
+      reservedConcurrentExecutions: 25,
       // X-Ray tracing for async job processing
       tracing: Tracing.ACTIVE,
+      // DLQ configuration for failed async invocations
+      deadLetterQueue: deadLetterQueue,
+      deadLetterQueueEnabled: true,
+      retryAttempts: 2,  // Retry 2 times before sending to DLQ (AWS max)
     });
 
     handler.connections.allowToDefaultPort(database);

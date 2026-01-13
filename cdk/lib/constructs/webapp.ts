@@ -95,7 +95,10 @@ export class Webapp extends Construct {
         LOG_LEVEL: 'INFO',
       },
       vpc: database.cluster.vpc,
-      memorySize: 512,
+      // AWS Best Practice: 1 GB balanced CPU/memory for Next.js SSR
+      // Higher memory = more CPU, potentially faster execution = cost-neutral
+      // Reference: https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html#performance
+      memorySize: 1024,
       architecture: Architecture.ARM_64,
       // X-Ray tracing for request segments - helps identify performance bottlenecks
       tracing: Tracing.ACTIVE,
@@ -105,6 +108,8 @@ export class Webapp extends Construct {
     asyncJob.handler.grantInvoke(handler);
 
     // Grant Bedrock permissions for AI component generation (Claude Sonnet 4.5 via inference profile)
+    // AWS Best Practice: Scope permissions to specific account and vendor
+    // Reference: https://docs.aws.amazon.com/bedrock/latest/userguide/security_iam_id-based-policy-examples.html
     handler.addToRolePolicy(
       new PolicyStatement({
         actions: ['bedrock:InvokeModel'],
@@ -113,8 +118,8 @@ export class Webapp extends Construct {
           `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/global.anthropic.claude-sonnet-4-5-*`,
           // Regional inference profile (cross-region)
           `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/us.anthropic.claude-sonnet-4-5-*`,
-          // Also allow the underlying foundation model
-          'arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-*',
+          // Foundation model scoped to account and Anthropic only
+          `arn:aws:bedrock:*:${Stack.of(this).account}:foundation-model/anthropic.claude-*`,
         ],
       }),
     );

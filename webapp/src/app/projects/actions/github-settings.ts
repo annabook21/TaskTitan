@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 
 // Schema
@@ -38,7 +38,7 @@ export const updateProjectGitHubSettings = authActionClient
     });
 
     if (!project) {
-      throw new Error('Project not found or insufficient permissions');
+      throw new MyCustomError('Project not found or insufficient permissions');
     }
 
     const updated = await prisma.project.update({

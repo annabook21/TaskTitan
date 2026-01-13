@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { generateComponents, isAIConfigured } from '@/lib/ai';
 
@@ -50,7 +50,7 @@ export const generateAIComponents = authActionClient
 
     // Check if AI is configured
     if (!isAIConfigured()) {
-      throw new Error('AI features require an OpenAI API key. Please configure OPENAI_API_KEY in your environment.');
+      throw new MyCustomError('AI features require an OpenAI API key. Please configure OPENAI_API_KEY in your environment.');
     }
 
     // Get the project
@@ -67,11 +67,11 @@ export const generateAIComponents = authActionClient
     });
 
     if (!project) {
-      throw new Error('Project not found or access denied');
+      throw new MyCustomError('Project not found or access denied');
     }
 
     if (!project.description || project.description.trim().length < 20) {
-      throw new Error('Please add a detailed project description (at least 20 characters) to generate components');
+      throw new MyCustomError('Please add a detailed project description (at least 20 characters) to generate components');
     }
 
     const existingNames = project.Component.map((c: { name: string }) => c.name);
@@ -105,7 +105,7 @@ export const applyAIComponents = authActionClient
     });
 
     if (!project) {
-      throw new Error('Project not found or access denied');
+      throw new MyCustomError('Project not found or access denied');
     }
 
     // Update project description if enhanced description provided

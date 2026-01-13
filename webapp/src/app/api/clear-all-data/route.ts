@@ -1,18 +1,21 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { requireDevAccess } from '@/lib/dev-guard';
 
 /**
  * DANGER: This endpoint clears ALL data from the database
  * Only use this in development!
+ *
+ * Security: Restricted to OWNER role only via dev-guard middleware
  */
 export async function POST(request: Request) {
   try {
-    // Require authentication
+    // OWNER-only access restriction
+    const accessDenied = await requireDevAccess();
+    if (accessDenied) return accessDenied;
+
     const { userId, user } = await getSession();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
     const body = await request.json();
 

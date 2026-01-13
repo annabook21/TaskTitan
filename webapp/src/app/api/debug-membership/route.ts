@@ -1,14 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { requireDevAccess } from '@/lib/dev-guard';
 
+/**
+ * Debug endpoint for membership and ownership troubleshooting
+ *
+ * Security: Restricted to OWNER role only via dev-guard middleware
+ */
 export async function GET() {
   try {
-    // Require authentication
+    // OWNER-only access restriction
+    const accessDenied = await requireDevAccess();
+    if (accessDenied) return accessDenied;
+
     const { userId, user } = await getSession();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
     // Get current user's full details
     const currentUser = await prisma.user.findUnique({
