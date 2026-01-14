@@ -3,30 +3,20 @@
 exports[`Snapshot test 1`] = `
 {
   "Outputs": {
-    "HostedZoneId": {
-      "Description": "Route53 Hosted Zone ID - update your domain nameservers to these",
+    "LegacySignPayloadHandlerFunctionVersionExport": {
       "Export": {
-        "Name": "TaskTitanUsEast1Stack-HostedZoneId",
+        "Name": "TaskTitanUsEast1Stack:ExportsOutputRefSignPayloadHandlerFunctionVersionF9FE430AFB7A5BC1",
       },
       "Value": {
-        "Ref": "HostedZoneDB99F866",
+        "Ref": "SignPayloadHandlerFnCurrentVersionREDACTED",
       },
     },
-    "NameServers": {
-      "Description": "Route53 Name Servers - configure these at your domain registrar",
+    "SignPayloadHandlerVersionArn": {
       "Export": {
-        "Name": "TaskTitanUsEast1Stack-NameServers",
+        "Name": "TaskTitanUsEast1Stack-SignPayloadHandlerVersionArn",
       },
       "Value": {
-        "Fn::Join": [
-          ",",
-          {
-            "Fn::GetAtt": [
-              "HostedZoneDB99F866",
-              "NameServers",
-            ],
-          },
-        ],
+        "Ref": "SignPayloadHandlerFnCurrentVersionREDACTED",
       },
     },
   },
@@ -38,137 +28,17 @@ exports[`Snapshot test 1`] = `
     },
   },
   "Resources": {
-    "CertificateV29EE77EAF": {
+    "SignPayloadHandlerFnCurrentVersionREDACTED": {
       "Properties": {
-        "DomainName": "*.example.com",
-        "DomainValidationOptions": [
-          {
-            "DomainName": "example.com",
-            "HostedZoneId": {
-              "Ref": "HostedZoneDB99F866",
-            },
-          },
-        ],
-        "SubjectAlternativeNames": [
-          "example.com",
-        ],
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": "TaskTitanUsEast1Stack/CertificateV2",
-          },
-        ],
-        "ValidationMethod": "DNS",
+        "FunctionName": {
+          "Ref": "SignPayloadHandlerFnDDFF6B33",
+        },
       },
-      "Type": "AWS::CertificateManager::Certificate",
+      "Type": "AWS::Lambda::Version",
     },
-    "CustomCrossRegionExportWriterCustomResourceProviderHandlerD8786E8A": {
+    "SignPayloadHandlerFnDDFF6B33": {
       "DependsOn": [
-        "CustomCrossRegionExportWriterCustomResourceProviderRoleC951B1E1",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "REDACTED",
-        },
-        "Handler": "__entrypoint__.handler",
-        "MemorySize": 128,
-        "Role": {
-          "Fn::GetAtt": [
-            "CustomCrossRegionExportWriterCustomResourceProviderRoleC951B1E1",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs22.x",
-        "Timeout": 900,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "CustomCrossRegionExportWriterCustomResourceProviderRoleC951B1E1": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-          },
-        ],
-        "Policies": [
-          {
-            "PolicyDocument": {
-              "Statement": [
-                {
-                  "Action": [
-                    "ssm:DeleteParameters",
-                    "ssm:ListTagsForResource",
-                    "ssm:GetParameters",
-                    "ssm:PutParameter",
-                  ],
-                  "Effect": "Allow",
-                  "Resource": [
-                    {
-                      "Fn::Join": [
-                        "",
-                        [
-                          "arn:",
-                          {
-                            "Ref": "AWS::Partition",
-                          },
-                          ":ssm:us-west-2:123456789012:parameter/cdk/exports/*",
-                        ],
-                      ],
-                    },
-                  ],
-                },
-              ],
-              "Version": "2012-10-17",
-            },
-            "PolicyName": "Inline",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "ExportsWriteruswest209BD44F0A7CF058B": {
-      "DeletionPolicy": "Delete",
-      "Properties": {
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "CustomCrossRegionExportWriterCustomResourceProviderHandlerD8786E8A",
-            "Arn",
-          ],
-        },
-        "WriterProps": {
-          "exports": {
-            "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E": {
-              "Ref": "SignPayloadHandlerFunctionVersionF9FE430A",
-            },
-          },
-          "region": "us-west-2",
-        },
-      },
-      "Type": "Custom::CrossRegionExportWriter",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "HostedZoneDB99F866": {
-      "Properties": {
-        "Name": "example.com.",
-      },
-      "Type": "AWS::Route53::HostedZone",
-    },
-    "SignPayloadHandlerCFEAA14C": {
-      "DependsOn": [
-        "SignPayloadHandlerServiceRole29261232",
+        "SignPayloadHandlerFnServiceRole9A9CBA5E",
       ],
       "Properties": {
         "Code": {
@@ -178,7 +48,7 @@ exports[`Snapshot test 1`] = `
         "Handler": "index.handler",
         "Role": {
           "Fn::GetAtt": [
-            "SignPayloadHandlerServiceRole29261232",
+            "SignPayloadHandlerFnServiceRole9A9CBA5E",
             "Arn",
           ],
         },
@@ -186,24 +56,7 @@ exports[`Snapshot test 1`] = `
       },
       "Type": "AWS::Lambda::Function",
     },
-    "SignPayloadHandlerCurrentVersionREDACTED": {
-      "Properties": {
-        "FunctionName": {
-          "Ref": "SignPayloadHandlerCFEAA14C",
-        },
-      },
-      "Type": "AWS::Lambda::Version",
-    },
-    "SignPayloadHandlerFunctionVersionF9FE430A": {
-      "Properties": {
-        "Type": "String",
-        "Value": {
-          "Ref": "SignPayloadHandlerCurrentVersionREDACTED",
-        },
-      },
-      "Type": "AWS::SSM::Parameter",
-    },
-    "SignPayloadHandlerServiceRole29261232": {
+    "SignPayloadHandlerFnServiceRole9A9CBA5E": {
       "Properties": {
         "AssumeRolePolicyDocument": {
           "Statement": [
@@ -276,6 +129,12 @@ exports[`Snapshot test 2`] = `
 {
   "Description": "TaskTitan - Serverless 3-Tier Application for Component-Based Project Planning",
   "Outputs": {
+    "AsyncJobDLQUrlDA38FD69": {
+      "Description": "Dead Letter Queue URL for failed async jobs - monitor this queue for failures",
+      "Value": {
+        "Ref": "AsyncJobDeadLetterQueueCA49DDA5",
+      },
+    },
     "AsyncJobHandlerArnCA46B385": {
       "Value": {
         "Fn::GetAtt": [
@@ -469,6 +328,12 @@ exports[`Snapshot test 2`] = `
     "MonitoringDashboardUrl": {
       "Description": "CloudWatch Monitoring Dashboard URL",
       "Value": "https://us-west-2.console.aws.amazon.com/cloudwatch/home?region=us-west-2#dashboards:name=TaskTitan-Monitoring",
+    },
+    "WireframeBucketName": {
+      "Description": "S3 bucket for AI-generated wireframe exports",
+      "Value": {
+        "Ref": "WireframeBucket0DCD1679",
+      },
     },
     "XRayServiceMapUrl": {
       "Description": "X-Ray Service Map for request tracing",
@@ -755,6 +620,49 @@ exports[`Snapshot test 2`] = `
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "AsyncJobDeadLetterQueueCA49DDA5": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "KmsMasterKeyId": "alias/aws/sqs",
+        "MessageRetentionPeriod": 1209600,
+        "QueueName": "TaskTitanStack-AsyncJob-DLQ",
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "AsyncJobDeadLetterQueuePolicyEB5A242F": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AsyncJobDeadLetterQueueCA49DDA5",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Queues": [
+          {
+            "Ref": "AsyncJobDeadLetterQueueCA49DDA5",
+          },
+        ],
+      },
+      "Type": "AWS::SQS::QueuePolicy",
+    },
     "AsyncJobHandler438266BD": {
       "DependsOn": [
         "AsyncJobHandlerServiceRoleDefaultPolicy0B2DEDB5",
@@ -773,6 +681,14 @@ exports[`Snapshot test 2`] = `
         "Code": {
           "ImageUri": {
             "Fn::Sub": "REDACTED",
+          },
+        },
+        "DeadLetterConfig": {
+          "TargetArn": {
+            "Fn::GetAtt": [
+              "AsyncJobDeadLetterQueueCA49DDA5",
+              "Arn",
+            ],
           },
         },
         "Environment": {
@@ -796,7 +712,7 @@ exports[`Snapshot test 2`] = `
               ],
             },
             "DATABASE_NAME": "main",
-            "DATABASE_OPTION": "?pool_timeout=20&connect_timeout=20",
+            "DATABASE_OPTION": "connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
             "DATABASE_PASSWORD": {
               "Fn::Join": [
                 "",
@@ -845,7 +761,7 @@ exports[`Snapshot test 2`] = `
                       "Endpoint.Port",
                     ],
                   },
-                  "/main?pool_timeout=20&connect_timeout=20",
+                  "/main?connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
                 ],
               ],
             },
@@ -884,9 +800,9 @@ exports[`Snapshot test 2`] = `
             "async-job-runner.handler",
           ],
         },
-        "MemorySize": 256,
+        "MemorySize": 1024,
         "PackageType": "Image",
-        "ReservedConcurrentExecutions": 1,
+        "ReservedConcurrentExecutions": 25,
         "Role": {
           "Fn::GetAtt": [
             "AsyncJobHandlerServiceRoleFE9F530F",
@@ -920,6 +836,24 @@ exports[`Snapshot test 2`] = `
         },
       },
       "Type": "AWS::Lambda::Function",
+    },
+    "AsyncJobHandlerEventInvokeConfig1311040B": {
+      "DependsOn": [
+        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
+        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
+        "VpcPrivateSubnet2DefaultRoute060D2087",
+        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
+        "VpcPrivateSubnet3DefaultRoute94B74F0D",
+        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
+      ],
+      "Properties": {
+        "FunctionName": {
+          "Ref": "AsyncJobHandler438266BD",
+        },
+        "MaximumRetryAttempts": 2,
+        "Qualifier": "$LATEST",
+      },
+      "Type": "AWS::Lambda::EventInvokeConfig",
     },
     "AsyncJobHandlerSecurityGroupF59812E6": {
       "DependsOn": [
@@ -958,6 +892,16 @@ exports[`Snapshot test 2`] = `
         "PolicyDocument": {
           "Statement": [
             {
+              "Action": "sqs:SendMessage",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AsyncJobDeadLetterQueueCA49DDA5",
+                  "Arn",
+                ],
+              },
+            },
+            {
               "Action": [
                 "xray:PutTraceSegments",
                 "xray:PutTelemetryRecords",
@@ -995,6 +939,15 @@ exports[`Snapshot test 2`] = `
               ],
               "Effect": "Allow",
               "Resource": "*",
+            },
+            {
+              "Action": "bedrock:InvokeModel",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:bedrock:us-west-2:123456789012:inference-profile/global.anthropic.claude-sonnet-4-5-*",
+                "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-*",
+                "arn:aws:bedrock:*:123456789012:foundation-model/anthropic.claude-*",
+              ],
             },
           ],
           "Version": "2012-10-17",
@@ -1229,7 +1182,7 @@ exports[`Snapshot test 2`] = `
       "Type": "AWS::IAM::Policy",
     },
     "AuthUserPool8115E87F": {
-      "DeletionPolicy": "Delete",
+      "DeletionPolicy": "Retain",
       "Properties": {
         "AccountRecoverySetting": {
           "RecoveryMechanisms": [
@@ -1271,7 +1224,7 @@ exports[`Snapshot test 2`] = `
         },
       },
       "Type": "AWS::Cognito::UserPool",
-      "UpdateReplacePolicy": "Delete",
+      "UpdateReplacePolicy": "Retain",
     },
     "AuthUserPoolClientC635291F": {
       "Properties": {
@@ -1561,80 +1514,6 @@ exports[`Snapshot test 2`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
-    "CustomCrossRegionExportReaderCustomResourceProviderHandler46647B68": {
-      "DependsOn": [
-        "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-west-2",
-          "S3Key": "REDACTED",
-        },
-        "Handler": "__entrypoint__.handler",
-        "MemorySize": 128,
-        "Role": {
-          "Fn::GetAtt": [
-            "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs22.x",
-        "Timeout": 900,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-          },
-        ],
-        "Policies": [
-          {
-            "PolicyDocument": {
-              "Statement": [
-                {
-                  "Action": [
-                    "ssm:AddTagsToResource",
-                    "ssm:RemoveTagsFromResource",
-                    "ssm:GetParameters",
-                  ],
-                  "Effect": "Allow",
-                  "Resource": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":ssm:us-west-2:123456789012:parameter/cdk/exports/TaskTitanStack/*",
-                      ],
-                    ],
-                  },
-                },
-              ],
-              "Version": "2012-10-17",
-            },
-            "PolicyName": "Inline",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
     "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F": {
       "DependsOn": [
         "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
@@ -1820,7 +1699,7 @@ exports[`Snapshot test 2`] = `
     "DatabaseCluster5B53A178": {
       "DeletionPolicy": "Snapshot",
       "Properties": {
-        "BackupRetentionPeriod": 7,
+        "BackupRetentionPeriod": 30,
         "CopyTagsToSnapshot": true,
         "DBClusterParameterGroupName": {
           "Ref": "DatabaseParameterGroup2A921026",
@@ -1828,7 +1707,7 @@ exports[`Snapshot test 2`] = `
         "DBSubnetGroupName": {
           "Ref": "DatabaseClusterSubnets5540150D",
         },
-        "DeletionProtection": false,
+        "DeletionProtection": true,
         "EnableCloudwatchLogsExports": [
           "postgresql",
         ],
@@ -1861,7 +1740,7 @@ exports[`Snapshot test 2`] = `
         "Port": 5432,
         "PreferredBackupWindow": "03:00-04:00",
         "ServerlessV2ScalingConfiguration": {
-          "MaxCapacity": 2,
+          "MaxCapacity": 16,
           "MinCapacity": 0,
         },
         "StorageEncrypted": true,
@@ -2126,7 +2005,7 @@ exports[`Snapshot test 2`] = `
         "Parameters": {
           "idle_session_timeout": "60000",
           "log_min_duration_statement": "1000",
-          "log_statement": "all",
+          "log_statement": "mod",
         },
       },
       "Type": "AWS::RDS::DBClusterParameterGroup",
@@ -2267,26 +2146,6 @@ exports[`Snapshot test 2`] = `
       },
       "Type": "AWS::AppSync::ChannelNamespace",
     },
-    "ExportsReader8B249524": {
-      "DeletionPolicy": "Delete",
-      "Properties": {
-        "ReaderProps": {
-          "imports": {
-            "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E": "{{resolve:ssm:/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E}}",
-          },
-          "prefix": "TaskTitanStack",
-          "region": "us-west-2",
-        },
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "CustomCrossRegionExportReaderCustomResourceProviderHandler46647B68",
-            "Arn",
-          ],
-        },
-      },
-      "Type": "Custom::CrossRegionExportReader",
-      "UpdateReplacePolicy": "Delete",
-    },
     "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A": {
       "DependsOn": [
         "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRoleDefaultPolicyADDA7DEB",
@@ -2359,91 +2218,6 @@ exports[`Snapshot test 2`] = `
         "Roles": [
           {
             "Ref": "LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aServiceRole9741ECFB",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
-    },
-    "LookupVersionArnc866fe1e562282c03a84cbd5707b63ea2bac7dc432628C1A59": {
-      "DeletionPolicy": "Delete",
-      "DependsOn": [
-        "LookupVersionArnc866fe1e562282c03a84cbd5707b63ea2bac7dc432CustomResourcePolicy7EFD761D",
-      ],
-      "Properties": {
-        "Create": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"SSM","action":"getParameter","parameters":{"Name":"",
-              {
-                "Fn::GetAtt": [
-                  "ExportsReader8B249524",
-                  "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E",
-                ],
-              },
-              ""},"physicalResourceId":{"id":"1577836800000"},"region":"us-east-1"}",
-            ],
-          ],
-        },
-        "InstallLatestAwsSdk": true,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
-            "Arn",
-          ],
-        },
-        "Update": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"SSM","action":"getParameter","parameters":{"Name":"",
-              {
-                "Fn::GetAtt": [
-                  "ExportsReader8B249524",
-                  "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E",
-                ],
-              },
-              ""},"physicalResourceId":{"id":"1577836800000"},"region":"us-east-1"}",
-            ],
-          ],
-        },
-      },
-      "Type": "Custom::AWS",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "LookupVersionArnc866fe1e562282c03a84cbd5707b63ea2bac7dc432CustomResourcePolicy7EFD761D": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "ssm:GetParameter",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":ssm:us-east-1:123456789012:parameter/",
-                    {
-                      "Fn::GetAtt": [
-                        "ExportsReader8B249524",
-                        "/cdk/exports/TaskTitanStack/TaskTitanUsEast1Stackuseast1RefSignPayloadHandlerFunctionVersionF9FE430AFE7A082E",
-                      ],
-                    },
-                  ],
-                ],
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "LookupVersionArnc866fe1e562282c03a84cbd5707b63ea2bac7dc432CustomResourcePolicy7EFD761D",
-        "Roles": [
-          {
-            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
           },
         ],
       },
@@ -3322,15 +3096,23 @@ exports.handler = async function (event, context) {
               "Ref": "WebappSharedCachePolicy14FEE4A0",
             },
             "Compress": true,
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "WebappSetForwardedHost1DDF27A9",
+                    "FunctionARN",
+                  ],
+                },
+              },
+            ],
             "LambdaFunctionAssociations": [
               {
                 "EventType": "origin-request",
                 "IncludeBody": true,
                 "LambdaFunctionARN": {
-                  "Fn::GetAtt": [
-                    "LookupVersionArnc866fe1e562282c03a84cbd5707b63ea2bac7dc432628C1A59",
-                    "Parameter.Value",
-                  ],
+                  "Fn::ImportValue": "TaskTitanUsEast1Stack-SignPayloadHandlerVersionArn",
                 },
               },
             ],
@@ -3414,7 +3196,7 @@ exports.handler = async function (event, context) {
                   "Dns.Http",
                 ],
               },
-              " --build-arg NEXT_PUBLIC_AWS_REGION=us-west-2 --platform linux/arm64 --output type=image,name=",
+              " --build-arg NEXT_PUBLIC_AWS_REGION=us-west-2 --build-arg BUILD_TIMESTAMP=2020-01-01T00:00:00.000Z --platform linux/arm64 --output type=image,name=",
               {
                 "Fn::Select": [
                   4,
@@ -3748,7 +3530,7 @@ exports.handler = async function (event, context) {
               ],
             },
             "DATABASE_NAME": "main",
-            "DATABASE_OPTION": "?pool_timeout=20&connect_timeout=20",
+            "DATABASE_OPTION": "connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
             "DATABASE_PASSWORD": {
               "Fn::Join": [
                 "",
@@ -3797,7 +3579,7 @@ exports.handler = async function (event, context) {
                       "Endpoint.Port",
                     ],
                   },
-                  "/main?pool_timeout=20&connect_timeout=20",
+                  "/main?connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
                 ],
               ],
             },
@@ -3821,9 +3603,12 @@ exports.handler = async function (event, context) {
             "USER_POOL_ID": {
               "Ref": "AuthUserPool8115E87F",
             },
+            "WIREFRAME_BUCKET_NAME": {
+              "Ref": "WireframeBucket0DCD1679",
+            },
           },
         },
-        "MemorySize": 512,
+        "MemorySize": 1024,
         "PackageType": "Image",
         "Role": {
           "Fn::GetAtt": [
@@ -3858,6 +3643,107 @@ exports.handler = async function (event, context) {
         },
       },
       "Type": "AWS::Lambda::Function",
+    },
+    "WebappHandlerAliaslive1E539745": {
+      "DependsOn": [
+        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
+        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
+        "VpcPrivateSubnet2DefaultRoute060D2087",
+        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
+        "VpcPrivateSubnet3DefaultRoute94B74F0D",
+        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
+      ],
+      "Properties": {
+        "FunctionName": {
+          "Ref": "WebappHandler8DD158A3",
+        },
+        "FunctionVersion": {
+          "Fn::GetAtt": [
+            "WebappHandlerCurrentVersionREDACTED",
+            "Version",
+          ],
+        },
+        "Name": "live",
+        "ProvisionedConcurrencyConfig": {
+          "ProvisionedConcurrentExecutions": 5,
+        },
+      },
+      "Type": "AWS::Lambda::Alias",
+    },
+    "WebappHandlerAliasliveAliasScalingTarget6B7804A5": {
+      "DependsOn": [
+        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
+        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
+        "VpcPrivateSubnet2DefaultRoute060D2087",
+        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
+        "VpcPrivateSubnet3DefaultRoute94B74F0D",
+        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
+      ],
+      "Properties": {
+        "MaxCapacity": 50,
+        "MinCapacity": 5,
+        "ResourceId": {
+          "Fn::Join": [
+            "",
+            [
+              "function:",
+              {
+                "Fn::Select": [
+                  6,
+                  {
+                    "Fn::Split": [
+                      ":",
+                      {
+                        "Ref": "WebappHandlerAliaslive1E539745",
+                      },
+                    ],
+                  },
+                ],
+              },
+              ":live",
+            ],
+          ],
+        },
+        "RoleARN": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":iam::123456789012:role/aws-service-role/lambda.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_LambdaConcurrency",
+            ],
+          ],
+        },
+        "ScalableDimension": "lambda:function:ProvisionedConcurrency",
+        "ServiceNamespace": "lambda",
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+    },
+    "WebappHandlerAliasliveAliasScalingTargetTracking56DB273E": {
+      "DependsOn": [
+        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
+        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
+        "VpcPrivateSubnet2DefaultRoute060D2087",
+        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
+        "VpcPrivateSubnet3DefaultRoute94B74F0D",
+        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
+      ],
+      "Properties": {
+        "PolicyName": "TaskTitanStackWebappHandlerAliasliveAliasScalingTargetTrackingD85BBB99",
+        "PolicyType": "TargetTrackingScaling",
+        "ScalingTargetId": {
+          "Ref": "WebappHandlerAliasliveAliasScalingTarget6B7804A5",
+        },
+        "TargetTrackingScalingPolicyConfiguration": {
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "LambdaProvisionedConcurrencyUtilization",
+          },
+          "TargetValue": 0.7,
+        },
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
     },
     "WebappHandlerCurrentVersionREDACTED": {
       "DependsOn": [
@@ -4021,8 +3907,46 @@ exports.handler = async function (event, context) {
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
               "Resource": [
+                "arn:aws:bedrock:us-west-2:123456789012:inference-profile/global.anthropic.claude-sonnet-4-5-*",
                 "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-*",
-                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-*",
+                "arn:aws:bedrock:*:123456789012:foundation-model/anthropic.claude-*",
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "WireframeBucket0DCD1679",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "WireframeBucket0DCD1679",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -4102,7 +4026,7 @@ exports.handler = async function (event, context) {
               ],
             },
             "DATABASE_NAME": "main",
-            "DATABASE_OPTION": "?pool_timeout=20&connect_timeout=20",
+            "DATABASE_OPTION": "connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
             "DATABASE_PASSWORD": {
               "Fn::Join": [
                 "",
@@ -4151,7 +4075,7 @@ exports.handler = async function (event, context) {
                       "Endpoint.Port",
                     ],
                   },
-                  "/main?pool_timeout=20&connect_timeout=20",
+                  "/main?connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
                 ],
               ],
             },
@@ -4417,16 +4341,43 @@ exports.handler = async function (event, context) {
       },
       "Type": "AWS::SSM::Parameter",
     },
+    "WebappSetForwardedHost1DDF27A9": {
+      "Properties": {
+        "AutoPublish": true,
+        "FunctionCode": "// CloudFront Function to set x-forwarded-host for Next.js Server Actions
+// This ensures the correct host header is available to the application
+
+function handler(event) {
+  var request = event.request;
+  var host = request.headers.host ? request.headers.host.value : '';
+
+  // Set x-forwarded-host header for Next.js to properly handle server actions
+  request.headers['x-forwarded-host'] = { value: host };
+
+  return request;
+}
+",
+        "FunctionConfig": {
+          "Comment": "us-west-2TaskTitanStackWeSetForwardedHost3336E812",
+          "Runtime": "cloudfront-js-1.0",
+        },
+        "Name": "us-west-2TaskTitanStackWeSetForwardedHost3336E812",
+      },
+      "Type": "AWS::CloudFront::Function",
+    },
     "WebappSharedCachePolicy14FEE4A0": {
       "Properties": {
         "CachePolicyConfig": {
           "DefaultTTL": 0,
-          "MaxTTL": 31536000,
+          "MaxTTL": 60,
           "MinTTL": 0,
           "Name": "TaskTitanStackWebappSharedCachePolicyD7F98D59-us-west-2",
           "ParametersInCacheKeyAndForwardedToOrigin": {
             "CookiesConfig": {
-              "CookieBehavior": "all",
+              "CookieBehavior": "whitelist",
+              "Cookies": [
+                "CognitoIdentityServiceProvider.*",
+              ],
             },
             "EnableAcceptEncodingBrotli": true,
             "EnableAcceptEncodingGzip": true,
@@ -4441,7 +4392,7 @@ exports.handler = async function (event, context) {
               ],
             },
             "QueryStringsConfig": {
-              "QueryStringBehavior": "all",
+              "QueryStringBehavior": "none",
             },
           },
         },
@@ -4545,6 +4496,148 @@ exports.handler = async function (event, context) {
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "WireframeBucket0DCD1679": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 30,
+              "Id": "DeleteOldWireframes",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "Tags": [
+          {
+            "Key": "aws-cdk:auto-delete-objects",
+            "Value": "true",
+          },
+        ],
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "WireframeBucketAutoDeleteObjectsCustomResource56F7E234": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "WireframeBucketPolicy0A60F5F1",
+      ],
+      "Properties": {
+        "BucketName": {
+          "Ref": "WireframeBucket0DCD1679",
+        },
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "Custom::S3AutoDeleteObjects",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "WireframeBucketPolicy0A60F5F1": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "WireframeBucket0DCD1679",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "WireframeBucket0DCD1679",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "WireframeBucket0DCD1679",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:PutBucketPolicy",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::GetAtt": [
+                    "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+                    "Arn",
+                  ],
+                },
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "WireframeBucket0DCD1679",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "WireframeBucket0DCD1679",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
   },
   "Rules": {
