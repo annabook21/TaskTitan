@@ -15,6 +15,7 @@ export interface EdgeFunctionProps {
 
 export class EdgeFunction extends Construct {
   private readonly functionVersionParameter: StringParameter;
+  public readonly lambdaVersion: IVersion;
 
   constructor(scope: Construct, id: string, props: EdgeFunctionProps) {
     super(scope, id);
@@ -27,7 +28,7 @@ export class EdgeFunction extends Construct {
       runtime: Runtime.NODEJS_22_X,
       entry: props.entryPath,
     });
-    handler.currentVersion;
+    this.lambdaVersion = handler.currentVersion;
     this.functionVersionParameter = new StringParameter(this, 'FunctionVersion', {
       stringValue: handler.currentVersion.edgeArn,
     });

@@ -14,6 +14,7 @@ import {
   buildSprintSuggestionPrompt,
   buildSprintPlanningPrompt,
 } from '../prompts/sprint-planning';
+import { logger } from '@/lib/logger';
 import type { SprintSuggestion, SprintPlanningResult, SprintPlanningComponent } from '../types';
 
 /**
@@ -61,7 +62,7 @@ export async function suggestSprintDetails(
       reasoning: result.reasoning || 'AI-generated suggestion',
     };
   } catch (error) {
-    console.error('AI sprint suggestion error:', error);
+    logger.error('AI sprint suggestion error', { error });
     // Return sensible defaults on error
     return {
       name: `Sprint ${sprintNumber}`,
@@ -132,7 +133,7 @@ export async function planSprint(
 
     return result;
   } catch (error) {
-    console.error('AI sprint planning error:', error);
+    logger.error('AI sprint planning error', { error });
     if (error instanceof Error) {
       throw new Error(`AI sprint planning failed: ${error.message}`);
     }

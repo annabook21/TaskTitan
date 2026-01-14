@@ -14,6 +14,7 @@ import {
   buildImportCleanupPrompt,
   buildImportMappingPrompt,
 } from '../prompts/import-analysis';
+import { logger } from '@/lib/logger';
 import type { CleanupResult, CleanedRow, ImportMappingResult, ColumnMapping } from '../types';
 
 /**
@@ -76,7 +77,7 @@ export async function cleanupImportData(
         }
       }
     } catch (error) {
-      console.error('AI cleanup batch error:', error);
+      logger.error('AI cleanup batch error', { error });
       // Keep original on error
       for (const row of batch) {
         allResults.push({ original: row, cleaned: row, changes: [] });
@@ -154,7 +155,7 @@ export async function analyzeImportData(
 
     return result;
   } catch (error) {
-    console.error('AI import analysis error:', error);
+    logger.error('AI import analysis error', { error });
     // Return basic mappings based on common patterns
     return {
       mappings: headers.map((h) => {

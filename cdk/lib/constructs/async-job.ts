@@ -43,7 +43,7 @@ export class AsyncJob extends Construct {
         platform: Platform.LINUX_ARM64,
         file: 'job.Dockerfile',
       }),
-      memorySize: 256,
+      memorySize: 1024, // Increased for AI operations (Bedrock SDK + JSON parsing)
       timeout: Duration.minutes(10),
       architecture: Architecture.ARM_64,
       environment: {
@@ -72,7 +72,22 @@ export class AsyncJob extends Construct {
     handler.addToRolePolicy(
       new PolicyStatement({
         actions: ['translate:TranslateText', 'comprehend:DetectDominantLanguage'],
-        resources: ['*'],
+        resources: ['*'], // These services don't support resource-level permissions
+      }),
+    );
+
+    // Add Bedrock permissions for AI features in async jobs
+    handler.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['bedrock:InvokeModel'],
+        resources: [
+          // Global inference profile (10% cost savings)
+          `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/global.anthropic.claude-sonnet-4-5-*`,
+          // Regional inference profile (fallback)
+          `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/us.anthropic.claude-sonnet-4-5-*`,
+          // Foundation model access
+          `arn:aws:bedrock:*:${Stack.of(this).account}:foundation-model/anthropic.claude-*`,
+        ],
       }),
     );
 

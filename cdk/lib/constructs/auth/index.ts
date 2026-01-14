@@ -86,7 +86,7 @@ export class Auth extends Construct {
         username: false,
         email: true,
       },
-      removalPolicy: RemovalPolicy.DESTROY,
+      removalPolicy: RemovalPolicy.RETAIN, // Protect user data in production
     });
 
     const client = userPool.addClient(`Client`, {

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws ec2 detach-internet-gateway:*)",
+      "Bash(aws ec2 delete-internet-gateway:*)"
+    ]
+  }
+}

@@ -14,13 +14,18 @@ import {
 } from 'aws-cdk-lib/aws-ec2';
 import { HostedZone, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { Version } from 'aws-cdk-lib/aws-lambda';
 import { Webapp } from './constructs/webapp';
-import { EdgeFunction } from './constructs/cf-lambda-furl-service/edge-function';
+// import { EdgeFunction } from './constructs/cf-lambda-furl-service/edge-function';
 import { EventBus } from './constructs/event-bus/';
 import { Monitoring } from './constructs/monitoring';
 
 interface MainStackProps extends StackProps {
-  readonly signPayloadHandler: EdgeFunction;
+  /**
+   * Lambda@Edge function VERSION ARN used to sign Next.js Server Actions requests.
+   * Exported from `TaskTitanUsEast1Stack` via a stable export name.
+   */
+  readonly signPayloadHandlerVersionArn: string;
 
   /**
    * Custom domain name for the webapp and Cognito.
@@ -150,13 +155,20 @@ export class MainStack extends Stack {
     // LOGIC TIER: Async job processing
     const asyncJob = new AsyncJob(this, 'AsyncJob', { database: database, eventBus });
 
+    // Import the Lambda@Edge function version via stable ARN export
+    const signPayloadHandlerVersion = Version.fromVersionArn(
+      this,
+      'SignPayloadHandlerVersion',
+      props.signPayloadHandlerVersionArn,
+    );
+
     // PRESENTATION TIER: Next.js webapp on Lambda + CloudFront (HTTPS by default)
     // AI component generation uses Amazon Bedrock (Claude) - no API keys needed!
     const webapp = new Webapp(this, 'Webapp', {
       database,
       hostedZone,
       certificate: props.sharedCertificate,
-      // signPayloadHandler removed - CloudFront OAC handles SigV4 signing natively
+      signPayloadHandlerVersion,
       accessLogBucket,
       wireframeBucket,
       auth,

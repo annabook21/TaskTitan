@@ -45,8 +45,8 @@ export class Database extends Construct implements ec2.IConnectable {
         retention: Duration.days(backupRetentionDays),
         preferredWindow: '03:00-04:00', // 3-4 AM UTC
       },
-      // Enable deletion protection for production (can be overridden)
-      deletionProtection: false,
+      // Enable deletion protection for production
+      deletionProtection: true,
       // Exclude some more special characters from password string to avoid from URI encoding issue
       // see: https://www.prisma.io/docs/orm/reference/connection-urls#special-characters
       credentials: rds.Credentials.fromUsername(engine.defaultUsername ?? 'admin', {
@@ -57,8 +57,9 @@ export class Database extends Construct implements ec2.IConnectable {
         parameters: {
           // Close idle connection after 60 seconds for Aurora auto-pause
           idle_session_timeout: '60000',
-          // Enable logging for structured log analysis
-          log_statement: 'all',
+          // Log only data modifications (not all statements) for production
+          // Use 'all' for development/debugging, 'mod' or 'ddl' for production
+          log_statement: 'mod',
           log_min_duration_statement: '1000', // Log queries taking > 1 second
         },
       }),

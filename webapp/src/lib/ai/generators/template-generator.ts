@@ -13,6 +13,7 @@ import {
   TEMPLATE_APPLICATION_SYSTEM_PROMPT,
   buildTemplateApplicationPrompt,
 } from '../prompts/template';
+import { logger } from '@/lib/logger';
 import type { ApplyTemplateInput, ApplyTemplateResult } from '../types';
 
 /**
@@ -72,7 +73,7 @@ export async function applyComponentTemplate(input: ApplyTemplateInput): Promise
 
     return result;
   } catch (error) {
-    console.error('Template application error:', error);
+    logger.error('Template application error', { error });
     if (error instanceof Error) {
       throw new Error(`Template application failed: ${error.message}`);
     }

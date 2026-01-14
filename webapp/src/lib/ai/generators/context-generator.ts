@@ -9,6 +9,7 @@ import { getBedrockClient } from '../bedrock-client';
 import { MODEL_ID } from '../config';
 import { extractJsonFromResponse } from '../utils/response-parsing';
 import { CONTEXT_SUMMARY_SYSTEM_PROMPT, buildContextSummaryPrompt } from '../prompts/context-summary';
+import { logger } from '@/lib/logger';
 import type { ComponentContextInput, ComponentContextResult } from '../types';
 
 /**
@@ -62,7 +63,7 @@ export async function summarizeComponentContext(
       outputTokens: responseBody.usage.output_tokens,
     };
   } catch (error) {
-    console.error('Context summarization error:', error);
+    logger.error('Context summarization error', { error });
     if (error instanceof Error) {
       throw new Error(`Context summarization failed: ${error.message}`);
     }

@@ -1,8 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import { Certificate, CertificateValidation, ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { HostedZone, IHostedZone } from 'aws-cdk-lib/aws-route53';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import { experimental } from 'aws-cdk-lib/aws-cloudfront';
 import { Construct } from 'constructs';
-import { EdgeFunction } from './constructs/cf-lambda-furl-service/edge-function';
 import { join } from 'path';
 
 interface UsEast1StackProps extends cdk.StackProps {
@@ -21,7 +22,7 @@ export class UsEast1Stack extends cdk.Stack {
    * undefined if domainName is not set.
    */
   public readonly certificate: ICertificate | undefined = undefined;
-  public readonly signPayloadHandler: EdgeFunction;
+  public readonly signPayloadHandler: experimental.EdgeFunction;
 
   constructor(scope: Construct, id: string, props: UsEast1StackProps) {
     super(scope, id, props);
@@ -54,10 +55,28 @@ export class UsEast1Stack extends cdk.Stack {
       this.certificate = cert;
     }
 
-    const signPayloadHandler = new EdgeFunction(this, 'SignPayloadHandler', {
-      entryPath: join(__dirname, 'constructs', 'cf-lambda-furl-service', 'lambda', 'sign-payload.ts'),
+    // Lambda@Edge requires compiled JavaScript (index.js is pre-compiled from sign-payload.ts)
+    const signPayloadHandler = new experimental.EdgeFunction(this, 'SignPayloadHandler', {
+      runtime: Runtime.NODEJS_22_X,
+      handler: 'index.handler',
+      code: cdk.aws_lambda.Code.fromAsset(join(__dirname, 'constructs', 'cf-lambda-furl-service', 'lambda')),
     });
 
     this.signPayloadHandler = signPayloadHandler;
+
+    // Stable export for the Edge Lambda Version ARN.
+    // Main stack imports this value rather than relying on CDK's auto-generated cross-stack exports
+    // (which can change when construct internals change).
+    new cdk.CfnOutput(this, 'SignPayloadHandlerVersionArn', {
+      value: signPayloadHandler.currentVersion.functionArn,
+      exportName: `${this.stackName}-SignPayloadHandlerVersionArn`,
+    });
+
+    // Legacy export name retained to avoid CloudFormation "cannot delete export in use" failures
+    // when updating stacks that still reference the older auto-generated export.
+    new cdk.CfnOutput(this, 'LegacySignPayloadHandlerFunctionVersionExport', {
+      value: signPayloadHandler.currentVersion.functionArn,
+      exportName: `${this.stackName}:ExportsOutputRefSignPayloadHandlerFunctionVersionF9FE430AFB7A5BC1`,
+    });
   }
 }

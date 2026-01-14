@@ -1,6 +1,6 @@
 import { Construct } from 'constructs';
 import { Duration } from 'aws-cdk-lib';
-import { FunctionUrlAuthType, Function, InvokeMode } from 'aws-cdk-lib/aws-lambda';
+import { FunctionUrlAuthType, Function, InvokeMode, IVersion } from 'aws-cdk-lib/aws-lambda';
 import {
   AllowedMethods,
   CacheCookieBehavior,
@@ -15,7 +15,6 @@ import {
   OriginRequestPolicy,
   SecurityPolicyProtocol,
 } from 'aws-cdk-lib/aws-cloudfront';
-import { experimental } from 'aws-cdk-lib/aws-cloudfront';
 import { FunctionUrlOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { ARecord, IHostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
@@ -59,7 +58,7 @@ export interface CloudFrontLambdaFunctionUrlServiceProps {
    * @default No custom domain.
    */
   certificate?: ICertificate;
-  signPayloadHandler?: experimental.EdgeFunction; // Optional - OAC handles signing natively
+  signPayloadHandlerVersion?: IVersion; // Optional - OAC handles signing natively
   accessLogBucket: Bucket;
 }
 
@@ -76,7 +75,7 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
 
   constructor(scope: Construct, id: string, props: CloudFrontLambdaFunctionUrlServiceProps) {
     super(scope, id);
-    const { handler, serviceName, subDomain, hostedZone, certificate, accessLogBucket, signPayloadHandler } = props;
+    const { handler, serviceName, subDomain, hostedZone, certificate, accessLogBucket, signPayloadHandlerVersion } = props;
     let domainName = '';
     if (hostedZone) {
       domainName = subDomain ? `${subDomain}.${hostedZone.zoneName}` : hostedZone.zoneName;
@@ -92,7 +91,9 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
     });
 
     const cachePolicy = new CachePolicy(this, 'SharedCachePolicy', {
-      queryStringBehavior: CacheQueryStringBehavior.all(),
+      // Avoid cache-key explosion from Next.js RSC query params (e.g. `_rsc`).
+      // Note: forwarding is controlled by OriginRequestPolicy; this only affects caching keys.
+      queryStringBehavior: CacheQueryStringBehavior.none(),
       headerBehavior: CacheHeaderBehavior.allowList(
         // CachePolicy.USE_ORIGIN_CACHE_CONTROL_HEADERS_QUERY_STRINGS contains Host header here,
         // making it impossible to use with API Gateway
@@ -103,6 +104,10 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
         'X-Method-Override',
       ),
       defaultTtl: Duration.seconds(0),
+      // Keep SSR uncached by default, but allow explicit origin Cache-Control (e.g. s-maxage=30 on 302s)
+      // to be honored up to this max TTL.
+      minTtl: Duration.seconds(0),
+      maxTtl: Duration.seconds(60),
       // CRITICAL FIX: Forward only essential Amplify auth cookies, not ALL cookies
       // This prevents hitting Lambda's 6MB payload limit during authentication
       // Amplify stores tokens in cookies prefixed with "CognitoIdentityServiceProvider"
@@ -139,10 +144,10 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
         // headers (next-action, next-router-state-tree) that Next.js adds.
         // The sign-payload Lambda@Edge function runs AFTER OAC's initial attempt,
         // allowing it to properly sign the request with all necessary headers included.
-        edgeLambdas: signPayloadHandler
+        edgeLambdas: signPayloadHandlerVersion
           ? [
               {
-                functionVersion: signPayloadHandler.currentVersion,
+                functionVersion: signPayloadHandlerVersion,
                 eventType: LambdaEdgeEventType.ORIGIN_REQUEST,
                 includeBody: true,
               },

@@ -13,6 +13,7 @@ import {
   getBreakdownSystemPrompt,
   buildBreakdownPrompt,
 } from '../prompts/breakdown';
+import { logger } from '@/lib/logger';
 import type { ComponentBreakdownInput, ComponentBreakdownResult } from '../types';
 
 /**
@@ -72,7 +73,7 @@ export async function suggestComponentBreakdown(
 
     return result;
   } catch (error) {
-    console.error('Component breakdown suggestion error:', error);
+    logger.error('Component breakdown suggestion error', { error });
     if (error instanceof Error) {
       throw new Error(`Breakdown suggestion failed: ${error.message}`);
     }

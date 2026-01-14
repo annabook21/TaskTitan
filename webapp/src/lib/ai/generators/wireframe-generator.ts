@@ -9,6 +9,7 @@ import { getBedrockClient } from '../bedrock-client';
 import { MODEL_ID } from '../config';
 import { extractHtmlFromResponse } from '../utils/response-parsing';
 import { buildWireframePrompt } from '../prompts/wireframe-generation';
+import { logger } from '@/lib/logger';
 import type { GenerateWireframeInput, GenerateWireframeResult } from '../types';
 
 /**
@@ -46,7 +47,7 @@ export async function generateWireframe(input: GenerateWireframeInput): Promise<
       outputTokens: responseBody.usage.output_tokens,
     };
   } catch (error) {
-    console.error('AI wireframe generation error:', error);
+    logger.error('AI wireframe generation error', { error });
     if (error instanceof Error) {
       throw new Error(`Wireframe generation failed: ${error.message}`);
     }

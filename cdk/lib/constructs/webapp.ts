@@ -1,13 +1,13 @@
 import { IgnoreMode, Duration, CfnOutput, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import { DockerImageFunction, DockerImageCode, Architecture, Tracing } from 'aws-cdk-lib/aws-lambda';
+import { DockerImageFunction, DockerImageCode, Architecture, Tracing, IVersion } from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { readFileSync } from 'fs';
 import { CloudFrontLambdaFunctionUrlService } from './cf-lambda-furl-service/service';
 import { ARecord, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { Database } from './database';
-import { EdgeFunction } from './cf-lambda-furl-service/edge-function';
+// import { EdgeFunction } from './cf-lambda-furl-service/edge-function';
 import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { Auth } from './auth/';
 import { ContainerImageBuild } from 'deploy-time-build';
@@ -21,7 +21,7 @@ import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
 export interface WebappProps {
   database: Database;
-  signPayloadHandler?: EdgeFunction; // Optional - OAC handles signing natively
+  signPayloadHandlerVersion?: IVersion; // Optional - OAC handles signing natively
   accessLogBucket: Bucket;
   wireframeBucket: Bucket;
   auth: Auth;
@@ -104,6 +104,7 @@ export class Webapp extends Construct {
       tracing: Tracing.ACTIVE,
     });
     this.handler = handler;
+
     handler.connections.allowToDefaultPort(database);
     asyncJob.handler.grantInvoke(handler);
 
@@ -134,7 +135,28 @@ export class Webapp extends Construct {
       hostedZone,
       certificate: props.certificate,
       accessLogBucket: props.accessLogBucket,
-      signPayloadHandler: props.signPayloadHandler,
+      signPayloadHandlerVersion: props.signPayloadHandlerVersion,
+    });
+
+    // Provisioned Concurrency reduces cold starts by keeping Lambda environments pre-initialized.
+    // We keep a higher baseline warm and use auto scaling to avoid cold starts during traffic bursts.
+    // IMPORTANT: Must be added AFTER CloudFront service to avoid circular dependency
+    // Reference: https://docs.aws.amazon.com/lambda/latest/dg/provisioned-concurrency.html
+    // IMPORTANT: Create the alias as a child of the function to preserve the existing
+    // CloudFormation logical ID shape (avoids "Alias already exists" failures).
+    const liveAlias = handler.addAlias('live', {
+      // High baseline to make auth redirects consistently fast
+      provisionedConcurrentExecutions: 5,
+    });
+
+    // Auto scale provisioned concurrency based on utilization.
+    // This reduces spillover (cold starts) during bursts while keeping baseline cost predictable.
+    const pcScaling = liveAlias.addAutoScaling({
+      minCapacity: 5,
+      maxCapacity: 50,
+    });
+    pcScaling.scaleOnUtilization({
+      utilizationTarget: 0.7,
     });
     this.baseUrl = service.url;
     this.aRecord = service.aRecord;

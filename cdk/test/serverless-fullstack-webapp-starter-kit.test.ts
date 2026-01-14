@@ -19,6 +19,9 @@ test('Snapshot test', () => {
     crossRegionReferences: true,
     domainName: props.domainName,
   });
+
+  const signPayloadHandlerVersionArn = cdk.Fn.importValue(`${virginia.stackName}-SignPayloadHandlerVersionArn`);
+
   const mainStack = new MainStack(app, 'TaskTitanStack', {
     env: {
       account: props.account,
@@ -27,7 +30,7 @@ test('Snapshot test', () => {
     crossRegionReferences: true,
     sharedCertificate: virginia.certificate,
     domainName: props.domainName,
-    signPayloadHandler: virginia.signPayloadHandler,
+    signPayloadHandlerVersionArn,
   });
   const virginiaTemplate = Template.fromStack(virginia);
   const mainTemplate = Template.fromStack(mainStack);

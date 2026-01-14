@@ -12,6 +12,7 @@ import {
   NATURAL_LANGUAGE_SYSTEM_PROMPT,
   buildNaturalLanguagePrompt,
 } from '../prompts/natural-language';
+import { logger } from '@/lib/logger';
 import type { NaturalLanguageComponentInput, NaturalLanguageComponentResult } from '../types';
 
 /**
@@ -64,7 +65,7 @@ export async function createComponentFromNaturalLanguage(
 
     return result;
   } catch (error) {
-    console.error('Natural language component creation error:', error);
+    logger.error('Natural language component creation error', { error });
     if (error instanceof Error) {
       throw new Error(`Component creation failed: ${error.message}`);
     }

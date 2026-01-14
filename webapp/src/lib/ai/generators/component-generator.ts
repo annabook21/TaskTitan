@@ -12,6 +12,7 @@ import {
   COMPONENT_GENERATION_SYSTEM_PROMPT,
   buildComponentGenerationPrompt,
 } from '../prompts/component-generation';
+import { logger } from '@/lib/logger';
 import type { AIGenerationResult } from '../types';
 
 /**
@@ -88,7 +89,7 @@ export async function generateComponents(
 
     return result;
   } catch (error) {
-    console.error('AI generation error:', error);
+    logger.error('AI generation error', { error });
     if (error instanceof Error) {
       // Check for common Bedrock errors
       if (error.name === 'AccessDeniedException') {

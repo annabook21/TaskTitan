@@ -50,7 +50,7 @@ export const generateAIComponents = authActionClient
 
     // Check if AI is configured
     if (!isAIConfigured()) {
-      throw new MyCustomError('AI features require an OpenAI API key. Please configure OPENAI_API_KEY in your environment.');
+      throw new MyCustomError('AI features require Amazon Bedrock access in your AWS account.');
     }
 
     // Get the project
