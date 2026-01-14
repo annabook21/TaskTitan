@@ -15,13 +15,14 @@ import {
   OriginRequestPolicy,
   SecurityPolicyProtocol,
 } from 'aws-cdk-lib/aws-cloudfront';
+import { experimental } from 'aws-cdk-lib/aws-cloudfront';
 import { FunctionUrlOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { ARecord, IHostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
-import { EdgeFunction } from './edge-function';
+// import { EdgeFunction } from './edge-function';
 import { AwsCustomResource, PhysicalResourceId, AwsCustomResourcePolicy } from 'aws-cdk-lib/custom-resources';
 import { join } from 'path';
 import { readFileSync } from 'fs';
@@ -58,7 +59,7 @@ export interface CloudFrontLambdaFunctionUrlServiceProps {
    * @default No custom domain.
    */
   certificate?: ICertificate;
-  signPayloadHandler?: EdgeFunction; // Optional - OAC handles signing natively
+  signPayloadHandler?: experimental.EdgeFunction; // Optional - OAC handles signing natively
   accessLogBucket: Bucket;
 }
 
@@ -102,7 +103,13 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
         'X-Method-Override',
       ),
       defaultTtl: Duration.seconds(0),
-      cookieBehavior: CacheCookieBehavior.all(),
+      // CRITICAL FIX: Forward only essential Amplify auth cookies, not ALL cookies
+      // This prevents hitting Lambda's 6MB payload limit during authentication
+      // Amplify stores tokens in cookies prefixed with "CognitoIdentityServiceProvider"
+      // Reference: https://github.com/nextauthjs/next-auth/issues/7215
+      cookieBehavior: CacheCookieBehavior.allowList(
+        'CognitoIdentityServiceProvider.*', // Amplify auth tokens (idToken, accessToken, refreshToken)
+      ),
       enableAcceptEncodingBrotli: true,
       enableAcceptEncodingGzip: true,
     });
@@ -135,7 +142,7 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
         edgeLambdas: signPayloadHandler
           ? [
               {
-                functionVersion: signPayloadHandler.versionArn(this),
+                functionVersion: signPayloadHandler.currentVersion,
                 eventType: LambdaEdgeEventType.ORIGIN_REQUEST,
                 includeBody: true,
               },
