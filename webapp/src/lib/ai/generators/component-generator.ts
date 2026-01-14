@@ -8,10 +8,7 @@ import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { getBedrockClient } from '../bedrock-client';
 import { MODEL_ID } from '../config';
 import { extractJsonFromResponse } from '../utils/response-parsing';
-import {
-  COMPONENT_GENERATION_SYSTEM_PROMPT,
-  buildComponentGenerationPrompt,
-} from '../prompts/component-generation';
+import { COMPONENT_GENERATION_SYSTEM_PROMPT, buildComponentGenerationPrompt } from '../prompts/component-generation';
 import { logger } from '@/lib/logger';
 import type { AIGenerationResult } from '../types';
 

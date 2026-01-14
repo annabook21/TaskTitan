@@ -20,8 +20,7 @@ const updateContextSchema = z.object({
 export const updateComponentContextAction = authActionClient
   .schema(updateContextSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { componentId, contextDecision, contextRationale, contextAlternatives, contextLinks } =
-      parsedInput;
+    const { componentId, contextDecision, contextRationale, contextAlternatives, contextLinks } = parsedInput;
     const { userId } = ctx;
 
     // Verify user has access to this component

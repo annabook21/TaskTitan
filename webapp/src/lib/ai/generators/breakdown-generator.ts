@@ -8,11 +8,7 @@ import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { getBedrockClient } from '../bedrock-client';
 import { MODEL_ID } from '../config';
 import { extractJsonFromResponse } from '../utils/response-parsing';
-import {
-  buildBreakdownSystemPrompt,
-  getBreakdownSystemPrompt,
-  buildBreakdownPrompt,
-} from '../prompts/breakdown';
+import { buildBreakdownSystemPrompt, getBreakdownSystemPrompt, buildBreakdownPrompt } from '../prompts/breakdown';
 import { logger } from '@/lib/logger';
 import type { ComponentBreakdownInput, ComponentBreakdownResult } from '../types';
 
@@ -21,9 +17,7 @@ import type { ComponentBreakdownInput, ComponentBreakdownResult } from '../types
  * When viewing an Epic, suggests Feature breakdowns
  * When viewing a Feature, suggests Story implementations
  */
-export async function suggestComponentBreakdown(
-  input: ComponentBreakdownInput,
-): Promise<ComponentBreakdownResult> {
+export async function suggestComponentBreakdown(input: ComponentBreakdownInput): Promise<ComponentBreakdownResult> {
   const client = getBedrockClient();
 
   // Determine target type based on parent

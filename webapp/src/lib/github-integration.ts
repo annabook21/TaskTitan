@@ -68,10 +68,7 @@ interface ProjectWithSettings {
 /**
  * Handle pull_request webhook event from GitHub
  */
-export async function handlePullRequestEvent(
-  payload: PullRequestPayload,
-  project: ProjectWithSettings,
-): Promise<void> {
+export async function handlePullRequestEvent(payload: PullRequestPayload, project: ProjectWithSettings): Promise<void> {
   // Only process closed PRs that were merged
   if (payload.action !== 'closed' || !payload.pull_request.merged) {
     logger.info('Ignoring non-merged PR event', {

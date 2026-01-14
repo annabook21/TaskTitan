@@ -154,7 +154,9 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings }
             <li>Paste the secret</li>
             <li>Select &quot;Pull requests&quot; event</li>
             <li>Save the webhook</li>
-            <li>Reference components in PR title/body with #COMP-{'{'} componentId{'}'}</li>
+            <li>
+              Reference components in PR title/body with #COMP-{'{'} componentId{'}'}
+            </li>
           </ol>
         </div>
 

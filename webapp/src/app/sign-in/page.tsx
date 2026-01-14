@@ -16,18 +16,23 @@ export default function SignInPage() {
 
         {/* Floating orbs with improved animation */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-cyan-500/20 rounded-full blur-3xl animate-float" />
-        <div
-          className="absolute bottom-1/4 right-1/4 w-[32rem] h-[32rem] bg-violet-500/15 rounded-full blur-3xl animate-float-delayed"
-        />
-        <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[28rem] h-[28rem] bg-emerald-500/10 rounded-full blur-3xl animate-float-slow"
-        />
+        <div className="absolute bottom-1/4 right-1/4 w-[32rem] h-[32rem] bg-violet-500/15 rounded-full blur-3xl animate-float-delayed" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[28rem] h-[28rem] bg-emerald-500/10 rounded-full blur-3xl animate-float-slow" />
 
         {/* Sparkle effects */}
         <div className="absolute top-20 left-20 w-2 h-2 bg-cyan-400 rounded-full animate-twinkle" />
-        <div className="absolute top-40 right-32 w-1.5 h-1.5 bg-violet-400 rounded-full animate-twinkle" style={{ animationDelay: '0.5s' }} />
-        <div className="absolute bottom-32 left-40 w-1 h-1 bg-emerald-400 rounded-full animate-twinkle" style={{ animationDelay: '1s' }} />
-        <div className="absolute top-1/3 right-20 w-1.5 h-1.5 bg-cyan-300 rounded-full animate-twinkle" style={{ animationDelay: '1.5s' }} />
+        <div
+          className="absolute top-40 right-32 w-1.5 h-1.5 bg-violet-400 rounded-full animate-twinkle"
+          style={{ animationDelay: '0.5s' }}
+        />
+        <div
+          className="absolute bottom-32 left-40 w-1 h-1 bg-emerald-400 rounded-full animate-twinkle"
+          style={{ animationDelay: '1s' }}
+        />
+        <div
+          className="absolute top-1/3 right-20 w-1.5 h-1.5 bg-cyan-300 rounded-full animate-twinkle"
+          style={{ animationDelay: '1.5s' }}
+        />
 
         {/* Content */}
         <div className="relative z-10 flex flex-col justify-center px-12 xl:px-20 animate-fade-in">
@@ -56,13 +61,14 @@ export default function SignInPage() {
           </h1>
 
           <p className="text-xl text-slate-300 mb-4 max-w-lg leading-relaxed">
-            AI-powered project planning that preserves <span className="text-cyan-400 font-semibold">context</span>, eliminates{' '}
-            <span className="text-violet-400 font-semibold">conflicts</span>, and keeps teams{' '}
+            AI-powered project planning that preserves <span className="text-cyan-400 font-semibold">context</span>,
+            eliminates <span className="text-violet-400 font-semibold">conflicts</span>, and keeps teams{' '}
             <span className="text-emerald-400 font-semibold">aligned</span>.
           </p>
 
           <p className="text-sm text-slate-500 mb-12 max-w-lg">
-            The first PM tool that documents <span className="italic">why</span> decisions were made, not just <span className="italic">what</span> needs doing.
+            The first PM tool that documents <span className="italic">why</span> decisions were made, not just{' '}
+            <span className="italic">what</span> needs doing.
           </p>
 
           {/* Feature cards with enhanced design */}
@@ -139,9 +145,7 @@ export default function SignInPage() {
 
           {/* Welcome text with improved styling */}
           <div className="text-center lg:text-left mb-10">
-            <h2 className="text-4xl font-bold text-white mb-3 tracking-tight">
-              Welcome back
-            </h2>
+            <h2 className="text-4xl font-bold text-white mb-3 tracking-tight">Welcome back</h2>
             <p className="text-lg text-slate-400">
               Continue building <span className="text-violet-400">intelligent</span> projects
             </p>
@@ -208,9 +212,7 @@ export default function SignInPage() {
                 </span>{' '}
                 during sign-in.
               </p>
-              <p className="text-xs text-slate-500 mt-3">
-                Free tier includes unlimited projects and AI features
-              </p>
+              <p className="text-xs text-slate-500 mt-3">Free tier includes unlimited projects and AI features</p>
             </div>
           </div>
 
@@ -225,7 +227,10 @@ export default function SignInPage() {
                 Documentation
               </Link>
               <span className="text-slate-700">•</span>
-              <a href="mailto:support@tasktitan.live" className="text-sm text-slate-500 hover:text-cyan-400 transition-colors">
+              <a
+                href="mailto:support@tasktitan.live"
+                className="text-sm text-slate-500 hover:text-cyan-400 transition-colors"
+              >
                 Support
               </a>
             </div>
@@ -267,9 +272,13 @@ function FeatureCard({
       style={{ animationDelay: `${delay}ms`, animationFillMode: 'both' }}
     >
       {/* Subtle glow effect */}
-      <div className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-xl`} />
+      <div
+        className={`absolute inset-0 rounded-2xl bg-gradient-to-br ${gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-xl`}
+      />
 
-      <div className={`relative flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br ${iconGradient} border border-${iconColor.replace('text-', '')}/30 flex items-center justify-center ${iconColor} group-hover:scale-110 group-hover:rotate-6 transition-all duration-300 shadow-lg`}>
+      <div
+        className={`relative flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br ${iconGradient} border border-${iconColor.replace('text-', '')}/30 flex items-center justify-center ${iconColor} group-hover:scale-110 group-hover:rotate-6 transition-all duration-300 shadow-lg`}
+      >
         {icon}
       </div>
       <div className="relative">

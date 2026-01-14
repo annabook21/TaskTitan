@@ -29,26 +29,29 @@ export async function POST(request: Request) {
       where: {
         userId_teamId: {
           userId,
-          teamId
-        }
+          teamId,
+        },
       },
       include: {
-        Team: true
-      }
+        Team: true,
+      },
     });
 
     if (!membership) {
-      return NextResponse.json({
-        error: 'You are not a member of this team',
-        teamId
-      }, { status: 403 });
+      return NextResponse.json(
+        {
+          error: 'You are not a member of this team',
+          teamId,
+        },
+        { status: 403 },
+      );
     }
 
     if (membership.role === 'OWNER') {
       return NextResponse.json({
         message: 'You are already an OWNER of this team',
         team: membership.Team.name,
-        role: membership.role
+        role: membership.role,
       });
     }
 
@@ -57,19 +60,21 @@ export async function POST(request: Request) {
       where: {
         userId_teamId: {
           userId,
-          teamId
-        }
+          teamId,
+        },
       },
       data: {
-        role: 'OWNER'
+        role: 'OWNER',
       },
       include: {
-        Team: true
-      }
+        Team: true,
+      },
     });
 
     // Log privilege escalation for security audit trail
-    console.warn(`⚠️  OWNERSHIP ESCALATION: User ${user?.email} (${userId}) promoted themselves to OWNER of team "${updatedMembership.Team.name}" (${teamId}) from role ${membership.role}`);
+    console.warn(
+      `⚠️  OWNERSHIP ESCALATION: User ${user?.email} (${userId}) promoted themselves to OWNER of team "${updatedMembership.Team.name}" (${teamId}) from role ${membership.role}`,
+    );
 
     return NextResponse.json({
       success: true,
@@ -78,13 +83,15 @@ export async function POST(request: Request) {
       previousRole: membership.role,
       newRole: updatedMembership.role,
       userId,
-      userEmail: user?.email
+      userEmail: user?.email,
     });
-
   } catch (error) {
     console.error('Fix ownership error:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : 'Failed to fix ownership'
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : 'Failed to fix ownership',
+      },
+      { status: 500 },
+    );
   }
 }

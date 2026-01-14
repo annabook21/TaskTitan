@@ -65,11 +65,10 @@ export const handler = async (event) => {
           sprints: sprints.count,
           projects: projects.count,
           memberships: memberships.count,
-          teams: teams.count
-        }
-      })
+          teams: teams.count,
+        },
+      }),
     };
-
   } catch (error) {
     console.error('❌ Error during cleanup:', error);
     await prisma.$disconnect();
@@ -78,15 +77,15 @@ export const handler = async (event) => {
       statusCode: 500,
       body: JSON.stringify({
         success: false,
-        error: error.message
-      })
+        error: error.message,
+      }),
     };
   }
 };
 
 // If running directly (not in Lambda)
 if (import.meta.url === `file://${process.argv[1]}`) {
-  handler({}).then(result => {
+  handler({}).then((result) => {
     console.log('\nResult:', result);
     process.exit(result.statusCode === 200 ? 0 : 1);
   });

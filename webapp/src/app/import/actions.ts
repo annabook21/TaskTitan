@@ -342,7 +342,9 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
         stats.warnings.push(`Auto-created parent Epic: "${p.name}"`);
       });
     } catch (error) {
-      stats.errors.push(`Failed to create missing parents: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      stats.errors.push(
+        `Failed to create missing parents: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 
@@ -381,7 +383,9 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
 
       stats.created += created.length;
     } catch (error) {
-      stats.errors.push(`Batch create with parents failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      stats.errors.push(
+        `Batch create with parents failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 
@@ -424,7 +428,9 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
       });
     } catch (error) {
       // Log but don't fail the import
-      stats.warnings.push(`Some dependencies could not be created: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      stats.warnings.push(
+        `Some dependencies could not be created: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 

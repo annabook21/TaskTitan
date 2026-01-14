@@ -9,9 +9,13 @@ const httpEndpoint = process.env.EVENT_HTTP_ENDPOINT!;
 const region = process.env.AWS_REGION!;
 
 // Validation schema for event channel names (alphanumeric, hyphens, underscores)
-const channelNameSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/, {
-  message: 'Channel name must contain only alphanumeric characters, hyphens, and underscores',
-});
+const channelNameSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[a-zA-Z0-9_-]+$/, {
+    message: 'Channel name must contain only alphanumeric characters, hyphens, and underscores',
+  });
 
 // Maximum payload size (1MB to prevent memory issues)
 const MAX_PAYLOAD_SIZE = 1024 * 1024;

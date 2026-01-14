@@ -48,21 +48,18 @@ export default function ComponentContextPanel({ component }: Props) {
     },
   });
 
-  const { execute: generateSummary, isExecuting: isGenerating } = useAction(
-    generateContextSummaryAction,
-    {
-      onSuccess: ({ data }) => {
-        if (data?.keyPoints) {
-          setKeyPoints(data.keyPoints);
-          setShowKeyPoints(true);
-          toast.success('AI summary generated');
-        }
-      },
-      onError: ({ error }) => {
-        toast.error(error.serverError || 'Failed to generate summary');
-      },
+  const { execute: generateSummary, isExecuting: isGenerating } = useAction(generateContextSummaryAction, {
+    onSuccess: ({ data }) => {
+      if (data?.keyPoints) {
+        setKeyPoints(data.keyPoints);
+        setShowKeyPoints(true);
+        toast.success('AI summary generated');
+      }
     },
-  );
+    onError: ({ error }) => {
+      toast.error(error.serverError || 'Failed to generate summary');
+    },
+  });
 
   const { execute: clearContext, isExecuting: isClearing } = useAction(clearComponentContextAction, {
     onSuccess: () => {
@@ -264,11 +261,7 @@ export default function ComponentContextPanel({ component }: Props) {
               disabled={isGenerating}
               className="text-xs px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-lg text-violet-300 flex items-center gap-1.5 transition-colors disabled:opacity-50"
             >
-              {isGenerating ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="w-3.5 h-3.5" />
-              )}
+              {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               {isGenerating ? 'Generating...' : 'Generate AI Summary'}
             </button>
             <button

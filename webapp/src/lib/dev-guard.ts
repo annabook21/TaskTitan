@@ -30,19 +30,13 @@ import { prisma } from '@/lib/prisma';
 export async function requireDevAccess() {
   // Block in production unless explicitly allowed via environment variable
   if (process.env.NODE_ENV === 'production' && !process.env.ALLOW_DEV_ENDPOINTS) {
-    return NextResponse.json(
-      { error: 'Endpoint disabled in production' },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: 'Endpoint disabled in production' }, { status: 404 });
   }
 
   const { userId } = await getSession();
 
   if (!userId) {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   // Verify user has OWNER role in at least one team
@@ -67,7 +61,7 @@ export async function requireDevAccess() {
         error: 'Forbidden: OWNER role required',
         reason: 'This endpoint requires team owner permissions for safety',
       },
-      { status: 403 }
+      { status: 403 },
     );
   }
 

@@ -18,10 +18,7 @@ async function getBaseHandler() {
 }
 
 // Wrap with timing instrumentation
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ slug: string }> },
-): Promise<NextResponse> {
+export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }): Promise<NextResponse> {
   const start = performance.now();
   const { slug } = await context.params;
 

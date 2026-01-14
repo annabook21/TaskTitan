@@ -11,14 +11,14 @@ async function checkData() {
   });
 
   console.log('Teams and Projects:');
-  teams.forEach(team => {
+  teams.forEach((team) => {
     console.log(`\nTeam: ${team.name} (${team.id})`);
     console.log(`  Memberships: ${team.Membership.length}`);
-    team.Membership.forEach(m => {
+    team.Membership.forEach((m) => {
       console.log(`    - User ${m.userId}: ${m.role}`);
     });
     console.log(`  Projects: ${team.Project.length}`);
-    team.Project.forEach(p => {
+    team.Project.forEach((p) => {
       console.log(`    - ${p.name} (owner: ${p.ownerId})`);
     });
   });

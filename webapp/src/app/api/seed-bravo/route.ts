@@ -6,28 +6,100 @@ import type { ComponentType, ComponentStatus } from '@prisma/client';
 // Team Bravo - Larger development team (12 members)
 const bravoUsers = [
   // Engineering Leadership
-  { id: 'bravo-lisa-martinez-001', email: 'lisa.martinez@bravo.tasktitan.dev', name: 'Lisa Martinez', role: 'OWNER' as const, title: 'Engineering Manager' },
-  { id: 'bravo-david-kim-002', email: 'david.kim@bravo.tasktitan.dev', name: 'David Kim', role: 'ADMIN' as const, title: 'Tech Lead' },
+  {
+    id: 'bravo-lisa-martinez-001',
+    email: 'lisa.martinez@bravo.tasktitan.dev',
+    name: 'Lisa Martinez',
+    role: 'OWNER' as const,
+    title: 'Engineering Manager',
+  },
+  {
+    id: 'bravo-david-kim-002',
+    email: 'david.kim@bravo.tasktitan.dev',
+    name: 'David Kim',
+    role: 'ADMIN' as const,
+    title: 'Tech Lead',
+  },
 
   // Senior Engineers
-  { id: 'bravo-rachel-patel-003', email: 'rachel.patel@bravo.tasktitan.dev', name: 'Rachel Patel', role: 'MEMBER' as const, title: 'Senior Backend Engineer' },
-  { id: 'bravo-tom-anderson-004', email: 'tom.anderson@bravo.tasktitan.dev', name: 'Tom Anderson', role: 'MEMBER' as const, title: 'Senior Frontend Engineer' },
+  {
+    id: 'bravo-rachel-patel-003',
+    email: 'rachel.patel@bravo.tasktitan.dev',
+    name: 'Rachel Patel',
+    role: 'MEMBER' as const,
+    title: 'Senior Backend Engineer',
+  },
+  {
+    id: 'bravo-tom-anderson-004',
+    email: 'tom.anderson@bravo.tasktitan.dev',
+    name: 'Tom Anderson',
+    role: 'MEMBER' as const,
+    title: 'Senior Frontend Engineer',
+  },
 
   // Mid-Level Engineers
-  { id: 'bravo-sofia-cruz-005', email: 'sofia.cruz@bravo.tasktitan.dev', name: 'Sofia Cruz', role: 'MEMBER' as const, title: 'Full Stack Engineer' },
-  { id: 'bravo-mike-johnson-006', email: 'mike.johnson@bravo.tasktitan.dev', name: 'Mike Johnson', role: 'MEMBER' as const, title: 'DevOps Engineer' },
-  { id: 'bravo-nina-wong-007', email: 'nina.wong@bravo.tasktitan.dev', name: 'Nina Wong', role: 'MEMBER' as const, title: 'Frontend Engineer' },
+  {
+    id: 'bravo-sofia-cruz-005',
+    email: 'sofia.cruz@bravo.tasktitan.dev',
+    name: 'Sofia Cruz',
+    role: 'MEMBER' as const,
+    title: 'Full Stack Engineer',
+  },
+  {
+    id: 'bravo-mike-johnson-006',
+    email: 'mike.johnson@bravo.tasktitan.dev',
+    name: 'Mike Johnson',
+    role: 'MEMBER' as const,
+    title: 'DevOps Engineer',
+  },
+  {
+    id: 'bravo-nina-wong-007',
+    email: 'nina.wong@bravo.tasktitan.dev',
+    name: 'Nina Wong',
+    role: 'MEMBER' as const,
+    title: 'Frontend Engineer',
+  },
 
   // Junior Engineers
-  { id: 'bravo-chris-brown-008', email: 'chris.brown@bravo.tasktitan.dev', name: 'Chris Brown', role: 'MEMBER' as const, title: 'Junior Backend Engineer' },
-  { id: 'bravo-maya-singh-009', email: 'maya.singh@bravo.tasktitan.dev', name: 'Maya Singh', role: 'MEMBER' as const, title: 'Junior Frontend Engineer' },
+  {
+    id: 'bravo-chris-brown-008',
+    email: 'chris.brown@bravo.tasktitan.dev',
+    name: 'Chris Brown',
+    role: 'MEMBER' as const,
+    title: 'Junior Backend Engineer',
+  },
+  {
+    id: 'bravo-maya-singh-009',
+    email: 'maya.singh@bravo.tasktitan.dev',
+    name: 'Maya Singh',
+    role: 'MEMBER' as const,
+    title: 'Junior Frontend Engineer',
+  },
 
   // QA & Design
-  { id: 'bravo-alex-rodriguez-010', email: 'alex.rodriguez@bravo.tasktitan.dev', name: 'Alex Rodriguez', role: 'MEMBER' as const, title: 'QA Engineer' },
-  { id: 'bravo-emma-taylor-011', email: 'emma.taylor@bravo.tasktitan.dev', name: 'Emma Taylor', role: 'MEMBER' as const, title: 'UX/UI Designer' },
+  {
+    id: 'bravo-alex-rodriguez-010',
+    email: 'alex.rodriguez@bravo.tasktitan.dev',
+    name: 'Alex Rodriguez',
+    role: 'MEMBER' as const,
+    title: 'QA Engineer',
+  },
+  {
+    id: 'bravo-emma-taylor-011',
+    email: 'emma.taylor@bravo.tasktitan.dev',
+    name: 'Emma Taylor',
+    role: 'MEMBER' as const,
+    title: 'UX/UI Designer',
+  },
 
   // Product
-  { id: 'bravo-jordan-lee-012', email: 'jordan.lee@bravo.tasktitan.dev', name: 'Jordan Lee', role: 'VIEWER' as const, title: 'Product Manager' },
+  {
+    id: 'bravo-jordan-lee-012',
+    email: 'jordan.lee@bravo.tasktitan.dev',
+    name: 'Jordan Lee',
+    role: 'VIEWER' as const,
+    title: 'Product Manager',
+  },
 ];
 
 interface ComponentData {
@@ -55,219 +127,240 @@ interface ProjectData {
 const projects: ProjectData[] = [
   {
     name: 'Customer Portal',
-    description: 'Public-facing customer experience: authentication, product browsing, and search. Target: Q1 2026 launch.',
+    description:
+      'Public-facing customer experience: authentication, product browsing, and search. Target: Q1 2026 launch.',
     components: [
-  {
-    name: 'User Authentication & Authorization',
-    description: 'Complete authentication system with role-based access control, social login, and security features',
-    type: 'EPIC',
-    status: 'IN_PROGRESS',
-    priority: 10,
-    estimatedHours: 160,
-    assignees: ['bravo-david-kim-002', 'bravo-rachel-patel-003'],
-    contextDecision: 'Implement JWT-based authentication with refresh tokens stored in httpOnly cookies. Use NextAuth.js v5 for social providers and custom credentials.',
-    contextRationale: 'JWT tokens provide stateless authentication suitable for our serverless architecture. NextAuth.js offers battle-tested OAuth integrations and handles security best practices. HttpOnly cookies prevent XSS attacks while refresh tokens enable long-lived sessions without compromising security.',
-    contextAlternatives: 'Considered session-based auth (requires Redis/database overhead), Cognito (vendor lock-in), Auth0 (costly at scale), and Clerk (new, less proven). Passport.js was too low-level for our timeline.',
-    contextLinks: ['https://next-auth.js.org/v5/getting-started', 'https://owasp.org/www-project-top-ten/'],
-    children: [
       {
-        name: 'OAuth Integration (Google, GitHub)',
-        description: 'Implement social login with Google and GitHub using NextAuth.js providers',
-        type: 'FEATURE',
+        name: 'User Authentication & Authorization',
+        description:
+          'Complete authentication system with role-based access control, social login, and security features',
+        type: 'EPIC',
         status: 'IN_PROGRESS',
-        priority: 9,
-        estimatedHours: 40,
-        assignees: ['bravo-rachel-patel-003'],
-        children: [
-          {
-            name: 'Configure NextAuth.js providers',
-            description: 'Set up Google and GitHub OAuth providers with proper scopes and callbacks',
-            type: 'STORY',
-            status: 'COMPLETED',
-            priority: 9,
-            estimatedHours: 8,
-            assignees: ['bravo-rachel-patel-003'],
-          },
-          {
-            name: 'Implement account linking',
-            description: 'Allow users to link multiple OAuth providers to single account',
-            type: 'STORY',
-            status: 'IN_PROGRESS',
-            priority: 8,
-            estimatedHours: 16,
-            assignees: ['bravo-rachel-patel-003'],
-          },
-          {
-            name: 'Add OAuth error handling',
-            description: 'Handle OAuth failures, expired tokens, and revoked permissions gracefully',
-            type: 'TASK',
-            status: 'PLANNING',
-            priority: 7,
-            estimatedHours: 8,
-            assignees: ['bravo-chris-brown-008'],
-          },
-        ],
-      },
-      {
-        name: 'Role-Based Access Control (RBAC)',
-        description: 'Implement fine-grained permissions system with role inheritance',
-        type: 'FEATURE',
-        status: 'PLANNING',
-        priority: 8,
-        estimatedHours: 50,
-        assignees: ['bravo-david-kim-002'],
-        contextDecision: 'Use CASL (isomorphic-authorization) for attribute-based access control with predefined roles (Admin, Manager, Developer, Viewer) and custom permissions per resource.',
-        contextRationale: 'CASL provides type-safe, declarative permissions that work on both frontend and backend. It supports complex rules like "managers can edit projects they own" without hard-coding logic. The library is lightweight (3KB gzipped) and has excellent TypeScript support.',
-        contextAlternatives: 'Considered casbin (too enterprise/complex), custom implementation (reinventing wheel, security risks), and OSO (new, small community). AWS IAM policies were too rigid for our multi-tenant needs.',
-        children: [
-          {
-            name: 'Define permission schema',
-            description: 'Create CASL rules for all resources (projects, components, teams)',
-            type: 'STORY',
-            status: 'PLANNING',
-            priority: 8,
-            estimatedHours: 12,
-            assignees: ['bravo-david-kim-002'],
-          },
-          {
-            name: 'Implement server-side middleware',
-            description: 'Add permission checks to all API routes and server actions',
-            type: 'STORY',
-            status: 'PLANNING',
-            priority: 9,
-            estimatedHours: 20,
-            assignees: ['bravo-rachel-patel-003'],
-          },
-          {
-            name: 'Build admin role management UI',
-            description: 'Interface for assigning roles and viewing permissions matrix',
-            type: 'STORY',
-            status: 'PLANNING',
-            priority: 7,
-            estimatedHours: 18,
-            assignees: ['bravo-nina-wong-007'],
-          },
-        ],
-      },
-    ],
-  },
-  {
-    name: 'Product Catalog & Inventory Management',
-    description: 'Comprehensive product management system with categories, variants, and real-time inventory tracking',
-    type: 'EPIC',
-    status: 'PLANNING',
-    priority: 9,
-    estimatedHours: 200,
-    assignees: ['bravo-tom-anderson-004', 'bravo-sofia-cruz-005'],
-    contextDecision: 'Build a flexible product variant system using PostgreSQL JSON columns for attributes (size, color, etc.) with separate SKU tracking. Implement optimistic inventory locking with Redis.',
-    contextRationale: 'JSON columns allow unlimited custom attributes without schema migrations for each product type. This is critical for an e-commerce platform with diverse products. Redis provides fast distributed locking to prevent overselling during high traffic (Black Friday scenarios). PostgreSQL handles transactional integrity.',
-    contextAlternatives: 'Considered EAV model (too many joins, slow queries), separate tables per product type (rigid, hard to query across types), MongoDB (loses ACID guarantees for inventory), and Elasticsearch primary storage (not designed for writes).',
-    contextLinks: ['https://www.postgresql.org/docs/current/datatype-json.html', 'https://redis.io/docs/manual/patterns/distributed-locks/'],
-    children: [
-      {
-        name: 'Product Variant System',
-        description: 'Support products with multiple variants (sizes, colors, materials) with independent pricing/inventory',
-        type: 'FEATURE',
-        status: 'PLANNING',
-        priority: 9,
-        estimatedHours: 60,
-        assignees: ['bravo-sofia-cruz-005'],
-        children: [
-          {
-            name: 'Design variant database schema',
-            description: 'Prisma schema for Product, Variant, AttributeType, AttributeValue with proper relations',
-            type: 'STORY',
-            status: 'PLANNING',
-            priority: 10,
-            estimatedHours: 12,
-            assignees: ['bravo-sofia-cruz-005'],
-          },
-          {
-            name: 'Build variant selection UI',
-            description: 'Dynamic form that generates variant picker based on attribute types (dropdowns, swatches)',
-            type: 'STORY',
-            status: 'PLANNING',
-            priority: 8,
-            estimatedHours: 24,
-            assignees: ['bravo-nina-wong-007', 'bravo-emma-taylor-011'],
-          },
-          {
-            name: 'Implement variant pricing rules',
-            description: 'Support base price + variant-specific adjustments with bulk discount rules',
-            type: 'TASK',
-            status: 'PLANNING',
-            priority: 7,
-            estimatedHours: 16,
-            assignees: ['bravo-chris-brown-008'],
-          },
-        ],
-      },
-      {
-        name: 'Real-Time Inventory Tracking',
-        description: 'Distributed inventory management with overselling prevention and low-stock alerts',
-        type: 'FEATURE',
-        status: 'PLANNING',
         priority: 10,
-        estimatedHours: 70,
-        assignees: ['bravo-rachel-patel-003', 'bravo-mike-johnson-006'],
+        estimatedHours: 160,
+        assignees: ['bravo-david-kim-002', 'bravo-rachel-patel-003'],
+        contextDecision:
+          'Implement JWT-based authentication with refresh tokens stored in httpOnly cookies. Use NextAuth.js v5 for social providers and custom credentials.',
+        contextRationale:
+          'JWT tokens provide stateless authentication suitable for our serverless architecture. NextAuth.js offers battle-tested OAuth integrations and handles security best practices. HttpOnly cookies prevent XSS attacks while refresh tokens enable long-lived sessions without compromising security.',
+        contextAlternatives:
+          'Considered session-based auth (requires Redis/database overhead), Cognito (vendor lock-in), Auth0 (costly at scale), and Clerk (new, less proven). Passport.js was too low-level for our timeline.',
+        contextLinks: ['https://next-auth.js.org/v5/getting-started', 'https://owasp.org/www-project-top-ten/'],
         children: [
           {
-            name: 'Implement Redis inventory locks',
-            description: 'Distributed locking mechanism to reserve inventory during checkout process',
-            type: 'STORY',
-            status: 'PLANNING',
-            priority: 10,
-            estimatedHours: 20,
-            assignees: ['bravo-rachel-patel-003'],
-          },
-          {
-            name: 'Build inventory adjustment API',
-            description: 'Endpoints for restocking, returns, and manual adjustments with audit trail',
-            type: 'STORY',
-            status: 'PLANNING',
+            name: 'OAuth Integration (Google, GitHub)',
+            description: 'Implement social login with Google and GitHub using NextAuth.js providers',
+            type: 'FEATURE',
+            status: 'IN_PROGRESS',
             priority: 9,
-            estimatedHours: 18,
-            assignees: ['bravo-chris-brown-008'],
+            estimatedHours: 40,
+            assignees: ['bravo-rachel-patel-003'],
+            children: [
+              {
+                name: 'Configure NextAuth.js providers',
+                description: 'Set up Google and GitHub OAuth providers with proper scopes and callbacks',
+                type: 'STORY',
+                status: 'COMPLETED',
+                priority: 9,
+                estimatedHours: 8,
+                assignees: ['bravo-rachel-patel-003'],
+              },
+              {
+                name: 'Implement account linking',
+                description: 'Allow users to link multiple OAuth providers to single account',
+                type: 'STORY',
+                status: 'IN_PROGRESS',
+                priority: 8,
+                estimatedHours: 16,
+                assignees: ['bravo-rachel-patel-003'],
+              },
+              {
+                name: 'Add OAuth error handling',
+                description: 'Handle OAuth failures, expired tokens, and revoked permissions gracefully',
+                type: 'TASK',
+                status: 'PLANNING',
+                priority: 7,
+                estimatedHours: 8,
+                assignees: ['bravo-chris-brown-008'],
+              },
+            ],
           },
           {
-            name: 'Create low-stock alert system',
-            description: 'Background job that triggers alerts when inventory falls below threshold',
-            type: 'STORY',
+            name: 'Role-Based Access Control (RBAC)',
+            description: 'Implement fine-grained permissions system with role inheritance',
+            type: 'FEATURE',
             status: 'PLANNING',
-            priority: 7,
-            estimatedHours: 16,
-            assignees: ['bravo-mike-johnson-006'],
-          },
-          {
-            name: 'Add inventory sync dashboard',
-            description: 'Real-time view of stock levels across all warehouses with CSV export',
-            type: 'TASK',
-            status: 'PLANNING',
-            priority: 6,
-            estimatedHours: 16,
-            assignees: ['bravo-maya-singh-009'],
+            priority: 8,
+            estimatedHours: 50,
+            assignees: ['bravo-david-kim-002'],
+            contextDecision:
+              'Use CASL (isomorphic-authorization) for attribute-based access control with predefined roles (Admin, Manager, Developer, Viewer) and custom permissions per resource.',
+            contextRationale:
+              'CASL provides type-safe, declarative permissions that work on both frontend and backend. It supports complex rules like "managers can edit projects they own" without hard-coding logic. The library is lightweight (3KB gzipped) and has excellent TypeScript support.',
+            contextAlternatives:
+              'Considered casbin (too enterprise/complex), custom implementation (reinventing wheel, security risks), and OSO (new, small community). AWS IAM policies were too rigid for our multi-tenant needs.',
+            children: [
+              {
+                name: 'Define permission schema',
+                description: 'Create CASL rules for all resources (projects, components, teams)',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 8,
+                estimatedHours: 12,
+                assignees: ['bravo-david-kim-002'],
+              },
+              {
+                name: 'Implement server-side middleware',
+                description: 'Add permission checks to all API routes and server actions',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 9,
+                estimatedHours: 20,
+                assignees: ['bravo-rachel-patel-003'],
+              },
+              {
+                name: 'Build admin role management UI',
+                description: 'Interface for assigning roles and viewing permissions matrix',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 7,
+                estimatedHours: 18,
+                assignees: ['bravo-nina-wong-007'],
+              },
+            ],
           },
         ],
       },
       {
-        name: 'Advanced Product Search',
-        description: 'Full-text search with filters, facets, and autocomplete using Elasticsearch',
-        type: 'FEATURE',
+        name: 'Product Catalog & Inventory Management',
+        description:
+          'Comprehensive product management system with categories, variants, and real-time inventory tracking',
+        type: 'EPIC',
         status: 'PLANNING',
-        priority: 8,
-        estimatedHours: 50,
-        assignees: ['bravo-sofia-cruz-005'],
-        contextDecision: 'Use Elasticsearch for product search instead of PostgreSQL full-text search. Sync data from Postgres using Debezium CDC (change data capture) to maintain single source of truth.',
-        contextRationale: 'Elasticsearch provides sub-50ms search with typo tolerance, faceted navigation (filter by brand, price, category), and relevance ranking. Debezium ensures eventual consistency without dual-writes. PostgreSQL full-text search lacks advanced features like fuzzy matching and aggregations at scale.',
-        contextAlternatives: 'Considered Algolia (expensive, $500+/month), Meilisearch (newer, smaller community, limited faceting), PostgreSQL tsvector (slow for large catalogs, limited features), and Typesense (good but less mature tooling).',
+        priority: 9,
+        estimatedHours: 200,
+        assignees: ['bravo-tom-anderson-004', 'bravo-sofia-cruz-005'],
+        contextDecision:
+          'Build a flexible product variant system using PostgreSQL JSON columns for attributes (size, color, etc.) with separate SKU tracking. Implement optimistic inventory locking with Redis.',
+        contextRationale:
+          'JSON columns allow unlimited custom attributes without schema migrations for each product type. This is critical for an e-commerce platform with diverse products. Redis provides fast distributed locking to prevent overselling during high traffic (Black Friday scenarios). PostgreSQL handles transactional integrity.',
+        contextAlternatives:
+          'Considered EAV model (too many joins, slow queries), separate tables per product type (rigid, hard to query across types), MongoDB (loses ACID guarantees for inventory), and Elasticsearch primary storage (not designed for writes).',
+        contextLinks: [
+          'https://www.postgresql.org/docs/current/datatype-json.html',
+          'https://redis.io/docs/manual/patterns/distributed-locks/',
+        ],
+        children: [
+          {
+            name: 'Product Variant System',
+            description:
+              'Support products with multiple variants (sizes, colors, materials) with independent pricing/inventory',
+            type: 'FEATURE',
+            status: 'PLANNING',
+            priority: 9,
+            estimatedHours: 60,
+            assignees: ['bravo-sofia-cruz-005'],
+            children: [
+              {
+                name: 'Design variant database schema',
+                description: 'Prisma schema for Product, Variant, AttributeType, AttributeValue with proper relations',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 10,
+                estimatedHours: 12,
+                assignees: ['bravo-sofia-cruz-005'],
+              },
+              {
+                name: 'Build variant selection UI',
+                description:
+                  'Dynamic form that generates variant picker based on attribute types (dropdowns, swatches)',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 8,
+                estimatedHours: 24,
+                assignees: ['bravo-nina-wong-007', 'bravo-emma-taylor-011'],
+              },
+              {
+                name: 'Implement variant pricing rules',
+                description: 'Support base price + variant-specific adjustments with bulk discount rules',
+                type: 'TASK',
+                status: 'PLANNING',
+                priority: 7,
+                estimatedHours: 16,
+                assignees: ['bravo-chris-brown-008'],
+              },
+            ],
+          },
+          {
+            name: 'Real-Time Inventory Tracking',
+            description: 'Distributed inventory management with overselling prevention and low-stock alerts',
+            type: 'FEATURE',
+            status: 'PLANNING',
+            priority: 10,
+            estimatedHours: 70,
+            assignees: ['bravo-rachel-patel-003', 'bravo-mike-johnson-006'],
+            children: [
+              {
+                name: 'Implement Redis inventory locks',
+                description: 'Distributed locking mechanism to reserve inventory during checkout process',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 10,
+                estimatedHours: 20,
+                assignees: ['bravo-rachel-patel-003'],
+              },
+              {
+                name: 'Build inventory adjustment API',
+                description: 'Endpoints for restocking, returns, and manual adjustments with audit trail',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 9,
+                estimatedHours: 18,
+                assignees: ['bravo-chris-brown-008'],
+              },
+              {
+                name: 'Create low-stock alert system',
+                description: 'Background job that triggers alerts when inventory falls below threshold',
+                type: 'STORY',
+                status: 'PLANNING',
+                priority: 7,
+                estimatedHours: 16,
+                assignees: ['bravo-mike-johnson-006'],
+              },
+              {
+                name: 'Add inventory sync dashboard',
+                description: 'Real-time view of stock levels across all warehouses with CSV export',
+                type: 'TASK',
+                status: 'PLANNING',
+                priority: 6,
+                estimatedHours: 16,
+                assignees: ['bravo-maya-singh-009'],
+              },
+            ],
+          },
+          {
+            name: 'Advanced Product Search',
+            description: 'Full-text search with filters, facets, and autocomplete using Elasticsearch',
+            type: 'FEATURE',
+            status: 'PLANNING',
+            priority: 8,
+            estimatedHours: 50,
+            assignees: ['bravo-sofia-cruz-005'],
+            contextDecision:
+              'Use Elasticsearch for product search instead of PostgreSQL full-text search. Sync data from Postgres using Debezium CDC (change data capture) to maintain single source of truth.',
+            contextRationale:
+              'Elasticsearch provides sub-50ms search with typo tolerance, faceted navigation (filter by brand, price, category), and relevance ranking. Debezium ensures eventual consistency without dual-writes. PostgreSQL full-text search lacks advanced features like fuzzy matching and aggregations at scale.',
+            contextAlternatives:
+              'Considered Algolia (expensive, $500+/month), Meilisearch (newer, smaller community, limited faceting), PostgreSQL tsvector (slow for large catalogs, limited features), and Typesense (good but less mature tooling).',
+          },
+        ],
       },
-    ],
-  },
     ],
   },
   {
     name: 'Checkout & Orders',
-    description: 'Shopping cart, payment processing, and order management. Depends on Customer Portal for auth. Target: Q2 2026.',
+    description:
+      'Shopping cart, payment processing, and order management. Depends on Customer Portal for auth. Target: Q2 2026.',
     components: [
       {
         name: 'Shopping Cart & Checkout',
@@ -286,10 +379,16 @@ const projects: ProjectData[] = [
             priority: 10,
             estimatedHours: 60,
             assignees: ['bravo-tom-anderson-004'],
-            contextDecision: 'Use Stripe Payment Intents API with client-side Elements for PCI compliance. Enable automatic payment method collection (cards, wallets, BNPL) via Payment Element.',
-            contextRationale: 'Stripe Payment Intents handle 3D Secure authentication flows automatically and support Strong Customer Authentication (SCA) required in EU. Payment Element adapts UI based on customer location and shows relevant payment methods. We avoid storing card data and Stripe handles PCI compliance (Level 1 certified).',
-            contextAlternatives: 'Considered PayPal (lower conversion rates, higher fees), Square (limited international), Braintree (more complex API, PayPal-owned), and Adyen (enterprise pricing, overkill for MVP).',
-            contextLinks: ['https://stripe.com/docs/payments/payment-intents', 'https://stripe.com/docs/security/guide'],
+            contextDecision:
+              'Use Stripe Payment Intents API with client-side Elements for PCI compliance. Enable automatic payment method collection (cards, wallets, BNPL) via Payment Element.',
+            contextRationale:
+              'Stripe Payment Intents handle 3D Secure authentication flows automatically and support Strong Customer Authentication (SCA) required in EU. Payment Element adapts UI based on customer location and shows relevant payment methods. We avoid storing card data and Stripe handles PCI compliance (Level 1 certified).',
+            contextAlternatives:
+              'Considered PayPal (lower conversion rates, higher fees), Square (limited international), Braintree (more complex API, PayPal-owned), and Adyen (enterprise pricing, overkill for MVP).',
+            contextLinks: [
+              'https://stripe.com/docs/payments/payment-intents',
+              'https://stripe.com/docs/security/guide',
+            ],
           },
           {
             name: 'Guest Checkout Flow',
@@ -353,7 +452,8 @@ const projects: ProjectData[] = [
   },
   {
     name: 'Admin Dashboard',
-    description: 'Internal tools for operations team: analytics, customer support, and inventory management. Target: Q2 2026.',
+    description:
+      'Internal tools for operations team: analytics, customer support, and inventory management. Target: Q2 2026.',
     components: [
       {
         name: 'Admin Dashboard & Analytics',
@@ -597,7 +697,10 @@ export async function POST() {
   } catch (error) {
     console.error('Bravo seed error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Seed failed', stack: error instanceof Error ? error.stack : undefined },
+      {
+        error: error instanceof Error ? error.message : 'Seed failed',
+        stack: error instanceof Error ? error.stack : undefined,
+      },
       { status: 500 },
     );
   }

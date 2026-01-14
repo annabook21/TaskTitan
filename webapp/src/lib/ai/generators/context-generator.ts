@@ -16,9 +16,7 @@ import type { ComponentContextInput, ComponentContextResult } from '../types';
  * Component Context Summarization
  * Takes user-written context and generates a clear, concise "future reader" summary
  */
-export async function summarizeComponentContext(
-  input: ComponentContextInput,
-): Promise<ComponentContextResult> {
+export async function summarizeComponentContext(input: ComponentContextInput): Promise<ComponentContextResult> {
   const client = getBedrockClient();
 
   const userPrompt = buildContextSummaryPrompt(input);

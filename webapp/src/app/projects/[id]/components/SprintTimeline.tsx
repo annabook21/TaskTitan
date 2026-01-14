@@ -63,10 +63,7 @@ export default function SprintTimeline({ sprints, components, teamId }: Props) {
           const startDate = new Date(sprint.startDate);
           const endDate = new Date(sprint.endDate);
           const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-          const daysElapsed = Math.max(
-            0,
-            Math.ceil((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)),
-          );
+          const daysElapsed = Math.max(0, Math.ceil((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
           const daysRemaining = Math.max(0, Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
           const timeProgress = sprint.status === 'ACTIVE' ? Math.min(100, (daysElapsed / totalDays) * 100) : 0;
 
@@ -171,9 +168,7 @@ export default function SprintTimeline({ sprints, components, teamId }: Props) {
                     {completedHours}
                     <span className="text-xs text-slate-500 font-normal">/{totalHours}h</span>
                   </div>
-                  {sprint.capacity && (
-                    <div className="text-xs text-slate-500 mt-1">Cap: {sprint.capacity}h</div>
-                  )}
+                  {sprint.capacity && <div className="text-xs text-slate-500 mt-1">Cap: {sprint.capacity}h</div>}
                 </div>
 
                 {/* Components */}

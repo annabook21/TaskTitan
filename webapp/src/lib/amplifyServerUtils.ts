@@ -99,7 +99,7 @@ type RunWithArgs<TResult> = Omit<BaseRunWithArgs, 'operation'> & {
 
 export async function runWithAmplifyServerContext<TResult>(args: RunWithArgs<TResult>): Promise<TResult> {
   const runner = await getRunner();
-  return (runner.runWithAmplifyServerContext(args as unknown as BaseRunWithArgs) as unknown) as Promise<TResult>;
+  return runner.runWithAmplifyServerContext(args as unknown as BaseRunWithArgs) as unknown as Promise<TResult>;
 }
 
 export async function createAuthRouteHandlers(

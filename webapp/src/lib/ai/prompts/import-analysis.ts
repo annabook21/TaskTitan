@@ -24,10 +24,7 @@ Return ONLY valid JSON with the cleaned data.`;
 /**
  * Generates user prompt for import data cleanup
  */
-export function buildImportCleanupPrompt(
-  batch: Record<string, string>[],
-  fieldMap: Map<string, string>,
-): string {
+export function buildImportCleanupPrompt(batch: Record<string, string>[], fieldMap: Map<string, string>): string {
   return `Clean up these ${batch.length} rows.
 
 Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY a valid JSON array of objects with:

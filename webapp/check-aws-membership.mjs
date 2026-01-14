@@ -14,10 +14,10 @@ export async function handler(event) {
       include: {
         Membership: {
           include: {
-            Team: { select: { id: true, name: true } }
-          }
+            Team: { select: { id: true, name: true } },
+          },
         },
-        Project: { select: { id: true, name: true } }
+        Project: { select: { id: true, name: true } },
       },
     });
 
@@ -26,41 +26,41 @@ export async function handler(event) {
       include: {
         Membership: {
           where: { role: 'OWNER' },
-          include: { User: { select: { email: true, id: true } } }
-        }
-      }
+          include: { User: { select: { email: true, id: true } } },
+        },
+      },
     });
 
     const result = {
-      users: users.map(u => ({
+      users: users.map((u) => ({
         id: u.id,
         email: u.email,
         name: u.name,
-        memberships: u.Membership.map(m => ({
+        memberships: u.Membership.map((m) => ({
           team: m.Team.name,
           teamId: m.Team.id,
-          role: m.role
+          role: m.role,
         })),
-        ownedProjects: u.Project.length
+        ownedProjects: u.Project.length,
       })),
-      teams: teams.map(t => ({
+      teams: teams.map((t) => ({
         id: t.id,
         name: t.name,
-        owners: t.Membership.map(m => ({
+        owners: t.Membership.map((m) => ({
           email: m.User.email,
-          userId: m.User.id
-        }))
-      }))
+          userId: m.User.id,
+        })),
+      })),
     };
 
     return {
       statusCode: 200,
-      body: JSON.stringify(result, null, 2)
+      body: JSON.stringify(result, null, 2),
     };
   } catch (error) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({ error: error.message }),
     };
   } finally {
     await prisma.$disconnect();

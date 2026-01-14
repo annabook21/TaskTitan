@@ -21,9 +21,12 @@ export async function POST(request: Request) {
 
     // Require explicit confirmation
     if (body.confirm !== true) {
-      return NextResponse.json({
-        error: 'Confirmation required. Send { "confirm": true } to proceed.'
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: 'Confirmation required. Send { "confirm": true } to proceed.',
+        },
+        { status: 400 },
+      );
     }
 
     console.log(`🗑️  User ${user?.email} (${userId}) initiated database clear`);
@@ -75,15 +78,17 @@ export async function POST(request: Request) {
         sprints: sprints.count,
         projects: projects.count,
         memberships: memberships.count,
-        teams: teams.count
+        teams: teams.count,
       },
-      note: 'You can now create new teams and projects from scratch with proper ownership.'
+      note: 'You can now create new teams and projects from scratch with proper ownership.',
     });
-
   } catch (error) {
     console.error('Clear database error:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : 'Failed to clear database'
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : 'Failed to clear database',
+      },
+      { status: 500 },
+    );
   }
 }

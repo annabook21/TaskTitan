@@ -75,7 +75,7 @@ export const generatePreviewAction = authActionClient
         description: component.description || '',
         type: component.type,
         dependencies: component.Dependency_Dependency_dependentComponentIdToComponent.map(
-          (d) => d.Component_Dependency_requiredComponentIdToComponent.name
+          (d) => d.Component_Dependency_requiredComponentIdToComponent.name,
         ),
       });
 
@@ -187,7 +187,7 @@ export const exportWireframeAction = authActionClient
             previewId: preview.id,
             generatedBy: preview.generatedBy,
           },
-        })
+        }),
       );
 
       // Generate signed URL (expires in 1 hour - best practice from research)
@@ -197,7 +197,7 @@ export const exportWireframeAction = authActionClient
           Bucket: bucketName,
           Key: key,
         }),
-        { expiresIn: 3600 } // 1 hour
+        { expiresIn: 3600 }, // 1 hour
       );
 
       logger.info('Wireframe exported successfully', {

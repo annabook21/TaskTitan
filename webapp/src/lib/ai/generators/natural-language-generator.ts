@@ -8,10 +8,7 @@ import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { getBedrockClient } from '../bedrock-client';
 import { MODEL_ID } from '../config';
 import { extractJsonFromResponse } from '../utils/response-parsing';
-import {
-  NATURAL_LANGUAGE_SYSTEM_PROMPT,
-  buildNaturalLanguagePrompt,
-} from '../prompts/natural-language';
+import { NATURAL_LANGUAGE_SYSTEM_PROMPT, buildNaturalLanguagePrompt } from '../prompts/natural-language';
 import { logger } from '@/lib/logger';
 import type { NaturalLanguageComponentInput, NaturalLanguageComponentResult } from '../types';
 

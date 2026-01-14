@@ -71,7 +71,9 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
       for (const depName of component.suggestedDependencies) {
         // Dependency is in a later sprint (not in this sprint or earlier sprints)
         if (!sprintComponentNames.has(depName) && !earlierComponents.has(depName)) {
-          const laterSprint = generatedSprints.findIndex((s, idx) => idx > sprintIndex && s.componentNames.includes(depName));
+          const laterSprint = generatedSprints.findIndex(
+            (s, idx) => idx > sprintIndex && s.componentNames.includes(depName),
+          );
           if (laterSprint !== -1) {
             warnings.push(`${compName} depends on ${depName} (Sprint ${laterSprint + 1})`);
           }
@@ -336,8 +338,8 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
                         <TrendingUp className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-green-400" />
                         <div>
                           <span className="text-slate-300 font-medium">Smart capacity planning:</span> Sprints include a
-                          20% buffer for meetings, code review, testing, and unexpected issues. Target 70-80% utilization
-                          for healthy velocity.
+                          20% buffer for meetings, code review, testing, and unexpected issues. Target 70-80%
+                          utilization for healthy velocity.
                         </div>
                       </div>
                     </div>
@@ -349,7 +351,9 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
                           .reduce((sum, c) => sum + c.estimatedHours, 0);
 
                         const crossSprintDeps = getCrossSprintDependencies(sprint, index);
-                        const utilizationPercent = sprint.capacity ? Math.round((sprintHours / sprint.capacity) * 100) : 0;
+                        const utilizationPercent = sprint.capacity
+                          ? Math.round((sprintHours / sprint.capacity) * 100)
+                          : 0;
                         const bufferHours = sprint.capacity ? sprint.capacity - sprintHours : 0;
 
                         return (

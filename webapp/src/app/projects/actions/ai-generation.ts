@@ -71,7 +71,9 @@ export const generateAIComponents = authActionClient
     }
 
     if (!project.description || project.description.trim().length < 20) {
-      throw new MyCustomError('Please add a detailed project description (at least 20 characters) to generate components');
+      throw new MyCustomError(
+        'Please add a detailed project description (at least 20 characters) to generate components',
+      );
     }
 
     const existingNames = project.Component.map((c: { name: string }) => c.name);

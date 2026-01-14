@@ -11,9 +11,11 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: process.env.DATABASE_URL || 'postgresql://postgres:FdNm.qIMTjyv9Q5fU.rE3H2JjvveN-@localhost:5433/postgres?schema=public'
-    }
-  }
+      url:
+        process.env.DATABASE_URL ||
+        'postgresql://postgres:FdNm.qIMTjyv9Q5fU.rE3H2JjvveN-@localhost:5433/postgres?schema=public',
+    },
+  },
 });
 
 async function main() {
@@ -24,19 +26,19 @@ async function main() {
     include: {
       Membership: {
         include: {
-          Team: { select: { id: true, name: true } }
-        }
-      }
-    }
+          Team: { select: { id: true, name: true } },
+        },
+      },
+    },
   });
 
   console.log('📋 Current users and memberships:');
-  users.forEach(user => {
+  users.forEach((user) => {
     console.log(`\n👤 ${user.email} (ID: ${user.id})`);
     if (user.Membership.length === 0) {
       console.log('   ⚠️  Not a member of any team');
     } else {
-      user.Membership.forEach(m => {
+      user.Membership.forEach((m) => {
         const icon = m.role === 'OWNER' ? '👑' : m.role === 'ADMIN' ? '🛡️' : '👤';
         console.log(`   ${icon} ${m.Team.name}: ${m.role}`);
       });
@@ -48,9 +50,9 @@ async function main() {
     where: { name: { contains: 'Alpha', mode: 'insensitive' } },
     include: {
       Membership: {
-        include: { User: true }
-      }
-    }
+        include: { User: true },
+      },
+    },
   });
 
   if (!teamAlpha) {
@@ -60,13 +62,13 @@ async function main() {
 
   console.log(`\n\n🏢 Found team: ${teamAlpha.name} (${teamAlpha.id})`);
   console.log('Current members:');
-  teamAlpha.Membership.forEach(m => {
+  teamAlpha.Membership.forEach((m) => {
     const icon = m.role === 'OWNER' ? '👑' : m.role === 'ADMIN' ? '🛡️' : '👤';
     console.log(`   ${icon} ${m.User.email}: ${m.role}`);
   });
 
   // Find users who are members but not owners
-  const nonOwners = teamAlpha.Membership.filter(m => m.role !== 'OWNER');
+  const nonOwners = teamAlpha.Membership.filter((m) => m.role !== 'OWNER');
 
   if (nonOwners.length === 0) {
     console.log('\n✅ All members are already owners or team has no non-owner members.');
@@ -74,7 +76,7 @@ async function main() {
   }
 
   console.log(`\n\n🔧 Found ${nonOwners.length} non-owner member(s):`);
-  nonOwners.forEach(m => console.log(`   - ${m.User.email} (${m.role})`));
+  nonOwners.forEach((m) => console.log(`   - ${m.User.email} (${m.role})`));
 
   console.log('\n❓ Do you want to make these users OWNERs? (This script will update the first user)');
   console.log('   If you want to proceed, uncomment the update code below and run again.\n');
