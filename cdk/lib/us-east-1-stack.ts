@@ -46,7 +46,6 @@ export class UsEast1Stack extends cdk.Stack {
       // The root domain A record is created in MainStack pointing to CloudFront (serving the webapp).
       // The Auth construct adds an explicit dependency to ensure proper ordering.
 
-
       const cert = new Certificate(this, 'CertificateV2', {
         domainName: `*.${zone.zoneName}`,
         validation: CertificateValidation.fromDns(zone),

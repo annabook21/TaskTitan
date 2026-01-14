@@ -49,7 +49,7 @@ const signPayloadHandlerVersionArn =
 new MainStack(app, 'TaskTitanStack', {
   env: {
     account: props.account,
-    region: 'us-east-1',  // Deploy to us-east-1 (same as Lambda@Edge)
+    region: 'us-east-1', // Deploy to us-east-1 (same as Lambda@Edge)
   },
   sharedCertificate: virginia.certificate,
   hostedZone: virginia.hostedZone,

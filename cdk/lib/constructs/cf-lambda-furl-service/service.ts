@@ -75,7 +75,8 @@ export class CloudFrontLambdaFunctionUrlService extends Construct {
 
   constructor(scope: Construct, id: string, props: CloudFrontLambdaFunctionUrlServiceProps) {
     super(scope, id);
-    const { handler, serviceName, subDomain, hostedZone, certificate, accessLogBucket, signPayloadHandlerVersion } = props;
+    const { handler, serviceName, subDomain, hostedZone, certificate, accessLogBucket, signPayloadHandlerVersion } =
+      props;
     let domainName = '';
     if (hostedZone) {
       domainName = subDomain ? `${subDomain}.${hostedZone.zoneName}` : hostedZone.zoneName;

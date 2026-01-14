@@ -27,7 +27,7 @@ export class AsyncJob extends Construct {
     // Reference: https://docs.aws.amazon.com/lambda/latest/dg/invocation-async.html#invocation-dlq
     const deadLetterQueue = new Queue(this, 'DeadLetterQueue', {
       queueName: `${Stack.of(this).stackName}-AsyncJob-DLQ`,
-      retentionPeriod: Duration.days(14),  // Maximum allowed retention
+      retentionPeriod: Duration.days(14), // Maximum allowed retention
       encryption: QueueEncryption.KMS_MANAGED,
       enforceSSL: true,
     });
@@ -63,7 +63,7 @@ export class AsyncJob extends Construct {
       // DLQ configuration for failed async invocations
       deadLetterQueue: deadLetterQueue,
       deadLetterQueueEnabled: true,
-      retryAttempts: 2,  // Retry 2 times before sending to DLQ (AWS max)
+      retryAttempts: 2, // Retry 2 times before sending to DLQ (AWS max)
     });
 
     handler.connections.allowToDefaultPort(database);

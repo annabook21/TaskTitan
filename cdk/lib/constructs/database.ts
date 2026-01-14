@@ -119,10 +119,10 @@ export class Database extends Construct implements ec2.IConnectable {
     // AWS Best Practice: 1 connection per Lambda for serverless workloads
     // Reference: https://www.prisma.io/docs/orm/prisma-client/deployment/serverless/deploy-to-aws-lambda
     const option = [
-      'connection_limit=1',      // 1 connection per Lambda (critical for serverless)
-      'pool_timeout=30',         // > 15s cold start + 5s connection
-      'connect_timeout=30',      // Same rationale
-      'socket_timeout=60',       // For long AI operations
+      'connection_limit=1', // 1 connection per Lambda (critical for serverless)
+      'pool_timeout=30', // > 15s cold start + 5s connection
+      'connect_timeout=30', // Same rationale
+      'socket_timeout=60', // For long AI operations
     ].join('&');
     return {
       DATABASE_HOST: conn.host,
