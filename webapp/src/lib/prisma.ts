@@ -13,8 +13,15 @@ function getDatabaseUrl(): string {
     return process.env.DATABASE_URL;
   }
 
-  const { DATABASE_HOST, DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD, DATABASE_ENGINE, DATABASE_PORT, DATABASE_OPTION } =
-    process.env;
+  const {
+    DATABASE_HOST,
+    DATABASE_NAME,
+    DATABASE_USER,
+    DATABASE_PASSWORD,
+    DATABASE_ENGINE,
+    DATABASE_PORT,
+    DATABASE_OPTION,
+  } = process.env;
 
   if (DATABASE_HOST && DATABASE_NAME && DATABASE_USER && DATABASE_PASSWORD) {
     const engine = DATABASE_ENGINE || 'postgresql';

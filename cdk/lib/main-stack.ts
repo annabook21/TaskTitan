@@ -173,9 +173,7 @@ export class MainStack extends Stack {
     // Note: Webapp metrics now come from ECS/CloudWatch Container Insights, not Lambda
     new Monitoring(this, 'Monitoring', {
       applicationName: 'TaskTitan',
-      lambdaFunctions: [
-        { name: 'AsyncJob', fn: asyncJob.handler },
-      ],
+      lambdaFunctions: [{ name: 'AsyncJob', fn: asyncJob.handler }],
       databaseCluster: database.cluster,
     });
 

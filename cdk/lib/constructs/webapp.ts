@@ -192,11 +192,7 @@ export class Webapp extends Construct {
     });
 
     // Allow Fargate to connect to database
-    database.connections.allowFrom(
-      fargateService.service,
-      Port.tcp(5432),
-      'Allow Fargate to access Aurora PostgreSQL',
-    );
+    database.connections.allowFrom(fargateService.service, Port.tcp(5432), 'Allow Fargate to access Aurora PostgreSQL');
 
     // Configure ALB target group health check
     fargateService.targetGroup.configureHealthCheck({
