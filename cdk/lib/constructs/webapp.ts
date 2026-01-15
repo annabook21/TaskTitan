@@ -26,8 +26,8 @@ import {
   SecurityPolicyProtocol,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { LoadBalancerV2Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Port } from 'aws-cdk-lib/aws-ec2';
+import { ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 
 export interface WebappProps {
   database: Database;
@@ -90,14 +90,10 @@ export class Webapp extends Construct {
       },
     });
 
-    // CloudWatch Log Group for container logs
-    const logGroup = new LogGroup(this, 'LogGroup', {
-      retention: RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
-
-    // Get database connection info for container environment
-    const dbEnv = database.getLambdaEnvironment('main');
+    // Get database environment and secrets for ECS
+    // AWS Best Practice: Use Secrets Manager injection for sensitive values
+    const dbEnv = database.getEcsEnvironment('main');
+    const dbSecrets = database.getEcsSecrets();
 
     // Compute the domain name for AMPLIFY_APP_ORIGIN
     // For custom domain: use the domain name directly
@@ -132,19 +128,14 @@ export class Webapp extends Construct {
         image: ContainerImage.fromDockerImageAsset(image),
         containerPort: 3000,
         enableLogging: true,
-        logDriver: logGroup
-          ? undefined // Let the pattern create one with our settings applied separately
-          : undefined,
+        secrets: dbSecrets,
         environment: {
-          // Database configuration
+          // Database configuration (non-sensitive values only)
           DATABASE_HOST: dbEnv.DATABASE_HOST,
           DATABASE_NAME: dbEnv.DATABASE_NAME,
-          DATABASE_USER: dbEnv.DATABASE_USER,
-          DATABASE_PASSWORD: dbEnv.DATABASE_PASSWORD,
           DATABASE_ENGINE: dbEnv.DATABASE_ENGINE,
           DATABASE_PORT: dbEnv.DATABASE_PORT,
           DATABASE_OPTION: dbEnv.DATABASE_OPTION,
-          DATABASE_URL: dbEnv.DATABASE_URL,
           // Auth configuration
           COGNITO_DOMAIN: auth.domainName,
           USER_POOL_ID: auth.userPool.userPoolId,
@@ -162,7 +153,7 @@ export class Webapp extends Construct {
           ...(domainName ? { AMPLIFY_APP_ORIGIN: `https://${domainName}` } : {}),
         },
       },
-      // ALB is internal - CloudFront will be the public endpoint
+      // ALB is public but protected by CloudFront origin header validation
       publicLoadBalancer: true,
       // AWS Best Practice: Enable circuit breaker for safe deployments
       // Reference: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-circuit-breaker.html
@@ -190,6 +181,7 @@ export class Webapp extends Construct {
     fargateService.targetGroup.configureHealthCheck({
       path: '/api/health',
       interval: Duration.seconds(30),
+      timeout: Duration.seconds(10),
       healthyThresholdCount: 2,
       unhealthyThresholdCount: 3,
     });
@@ -234,6 +226,11 @@ export class Webapp extends Construct {
     // Grant Lambda invoke for async jobs
     asyncJob.handler.grantInvoke(fargateService.taskDefinition.taskRole);
 
+    // AWS Best Practice: Origin verification header to prevent direct ALB access
+    // This ensures traffic only comes through CloudFront, not directly to the ALB
+    const originVerifyHeader = 'X-Origin-Verify';
+    const originVerifyValue = `TaskTitan-${Stack.of(this).account}-${Stack.of(this).region}`;
+
     // CloudFront Distribution for global edge caching and HTTPS
     // IMPORTANT: Uses nested construct 'Resource/Resource' to match old CloudFormation logical ID
     // (old CloudFrontLambdaFunctionUrlService used ID 'Resource' inside Webapp).
@@ -245,6 +242,9 @@ export class Webapp extends Construct {
       defaultBehavior: {
         origin: new LoadBalancerV2Origin(fargateService.loadBalancer, {
           protocolPolicy: OriginProtocolPolicy.HTTP_ONLY,
+          customHeaders: {
+            [originVerifyHeader]: originVerifyValue,
+          },
         }),
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: AllowedMethods.ALLOW_ALL,
@@ -261,6 +261,26 @@ export class Webapp extends Construct {
       logBucket: props.accessLogBucket,
       logFilePrefix: 'webapp/',
     });
+
+    // Configure ALB listener to validate origin header
+    // Requests without the correct header will receive 403 Forbidden
+    fargateService.listener.addAction('ValidateOrigin', {
+      priority: 1,
+      conditions: [ListenerCondition.httpHeader(originVerifyHeader, [originVerifyValue])],
+      action: ListenerAction.forward([fargateService.targetGroup]),
+    });
+    // Change default action to return 403 for requests without the header
+    const cfnListener = fargateService.listener.node.defaultChild as import('aws-cdk-lib/aws-elasticloadbalancingv2').CfnListener;
+    cfnListener.defaultActions = [
+      {
+        type: 'fixed-response',
+        fixedResponseConfig: {
+          statusCode: '403',
+          contentType: 'text/plain',
+          messageBody: 'Forbidden',
+        },
+      },
+    ];
 
     // Set baseUrl based on domain configuration
     if (hostedZone) {

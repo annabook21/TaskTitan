@@ -1,5 +1,6 @@
 import { CfnOutput, Duration, Stack, Token } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
@@ -133,6 +134,38 @@ export class Database extends Construct implements ec2.IConnectable {
       DATABASE_PORT: conn.port,
       DATABASE_OPTION: option,
       DATABASE_URL: `${conn.engine}://${conn.username}:${conn.password}@${conn.host}:${conn.port}/${databaseName}?${option}`,
+    };
+  }
+
+  /**
+   * Returns ECS secret references for secure credential injection.
+   * AWS Best Practice: Use Secrets Manager with ECS secret injection instead of plain environment variables.
+   * Secrets are injected at container startup and not visible in task definitions or CloudWatch logs.
+   */
+  public getEcsSecrets(): { [key: string]: ecs.Secret } {
+    return {
+      DATABASE_PASSWORD: ecs.Secret.fromSecretsManager(this.secret, 'password'),
+      DATABASE_USER: ecs.Secret.fromSecretsManager(this.secret, 'username'),
+    };
+  }
+
+  /**
+   * Returns non-sensitive database environment variables for ECS tasks.
+   * Use with getEcsSecrets() for complete database configuration.
+   */
+  public getEcsEnvironment(databaseName: string) {
+    const option = [
+      'connection_limit=10', // ECS can handle more connections than Lambda
+      'pool_timeout=30',
+      'connect_timeout=30',
+      'socket_timeout=60',
+    ].join('&');
+    return {
+      DATABASE_HOST: this.cluster.clusterEndpoint.hostname,
+      DATABASE_NAME: databaseName,
+      DATABASE_ENGINE: 'postgresql',
+      DATABASE_PORT: Token.asString(this.cluster.clusterEndpoint.port),
+      DATABASE_OPTION: option,
     };
   }
 }

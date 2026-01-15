@@ -2,11 +2,14 @@ import { UpdateUserPoolClientCommandInput } from '@aws-sdk/client-cognito-identi
 import { CfnOutput, CfnResource, CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
+  AccountRecovery,
   CfnManagedLoginBranding,
+  CfnUserPool,
   ManagedLoginVersion,
   UserPool,
   UserPoolClient,
   UserPoolDomain,
+  VerificationEmailStyle,
 } from 'aws-cdk-lib/aws-cognito';
 import { Code, Runtime, SingletonFunction } from 'aws-cdk-lib/aws-lambda';
 import { CnameRecord, IHostedZone } from 'aws-cdk-lib/aws-route53';
@@ -89,11 +92,36 @@ export class Auth extends Construct {
         username: false,
         email: true,
       },
+      // AWS Best Practice: Email-only account recovery prevents phone-based attacks
+      accountRecovery: AccountRecovery.EMAIL_ONLY,
+      // Require email attribute for all users
+      standardAttributes: {
+        email: {
+          required: true,
+          mutable: true,
+        },
+      },
+      // Custom verification email
+      userVerification: {
+        emailSubject: 'Verify your TaskTitan account',
+        emailBody: 'Your TaskTitan verification code is {####}',
+        emailStyle: VerificationEmailStyle.CODE,
+      },
       removalPolicy: RemovalPolicy.RETAIN, // Protect user data in production
     });
 
+    // Enable advanced security mode to prevent account enumeration attacks
+    // This hides whether an email exists during sign-in/password reset
+    const cfnUserPool = userPool.node.defaultChild as CfnUserPool;
+    cfnUserPool.userPoolAddOns = {
+      advancedSecurityMode: 'ENFORCED',
+    };
+
     const client = userPool.addClient(`Client`, {
       idTokenValidity: Duration.days(1),
+      accessTokenValidity: Duration.hours(1),
+      refreshTokenValidity: Duration.days(30),
+      enableTokenRevocation: true,
       authFlows: {
         userPassword: true,
         userSrp: true,

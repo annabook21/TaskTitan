@@ -129,6 +129,14 @@ exports[`Snapshot test 2`] = `
 {
   "Description": "TaskTitan - Serverless 3-Tier Application for Component-Based Project Planning",
   "Outputs": {
+    "ALBDnsName": {
+      "Value": {
+        "Fn::GetAtt": [
+          "WebappFargateLB8978807F",
+          "DNSName",
+        ],
+      },
+    },
     "AsyncJobDLQUrlDA38FD69": {
       "Description": "Dead Letter Queue URL for failed async jobs - monitor this queue for failures",
       "Value": {
@@ -328,6 +336,30 @@ exports[`Snapshot test 2`] = `
     "MonitoringDashboardUrl": {
       "Description": "CloudWatch Monitoring Dashboard URL",
       "Value": "https://us-west-2.console.aws.amazon.com/cloudwatch/home?region=us-west-2#dashboards:name=TaskTitan-Monitoring",
+    },
+    "WebappFargateLoadBalancerDNS62B3E8F8": {
+      "Value": {
+        "Fn::GetAtt": [
+          "WebappFargateLB8978807F",
+          "DNSName",
+        ],
+      },
+    },
+    "WebappFargateServiceURLD5B08B70": {
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "http://",
+            {
+              "Fn::GetAtt": [
+                "WebappFargateLB8978807F",
+                "DNSName",
+              ],
+            },
+          ],
+        ],
+      },
     },
     "WireframeBucketName": {
       "Description": "S3 bucket for AI-generated wireframe exports",
@@ -1187,12 +1219,8 @@ exports[`Snapshot test 2`] = `
         "AccountRecoverySetting": {
           "RecoveryMechanisms": [
             {
-              "Name": "verified_phone_number",
-              "Priority": 1,
-            },
-            {
               "Name": "verified_email",
-              "Priority": 2,
+              "Priority": 1,
             },
           ],
         },
@@ -1202,8 +1230,8 @@ exports[`Snapshot test 2`] = `
         "AutoVerifiedAttributes": [
           "email",
         ],
-        "EmailVerificationMessage": "The verification code to your new account is {####}",
-        "EmailVerificationSubject": "Verify your new account",
+        "EmailVerificationMessage": "Your TaskTitan verification code is {####}",
+        "EmailVerificationSubject": "Verify your TaskTitan account",
         "Policies": {
           "PasswordPolicy": {
             "MinimumLength": 8,
@@ -1212,14 +1240,24 @@ exports[`Snapshot test 2`] = `
             "RequireUppercase": true,
           },
         },
+        "Schema": [
+          {
+            "Mutable": true,
+            "Name": "email",
+            "Required": true,
+          },
+        ],
         "SmsVerificationMessage": "The verification code to your new account is {####}",
+        "UserPoolAddOns": {
+          "AdvancedSecurityMode": "ENFORCED",
+        },
         "UsernameAttributes": [
           "email",
         ],
         "VerificationMessageTemplate": {
           "DefaultEmailOption": "CONFIRM_WITH_CODE",
-          "EmailMessage": "The verification code to your new account is {####}",
-          "EmailSubject": "Verify your new account",
+          "EmailMessage": "Your TaskTitan verification code is {####}",
+          "EmailSubject": "Verify your TaskTitan account",
           "SmsMessage": "The verification code to your new account is {####}",
         },
       },
@@ -1228,6 +1266,7 @@ exports[`Snapshot test 2`] = `
     },
     "AuthUserPoolClientC635291F": {
       "Properties": {
+        "AccessTokenValidity": 60,
         "AllowedOAuthFlows": [
           "code",
         ],
@@ -1242,6 +1281,7 @@ exports[`Snapshot test 2`] = `
         "CallbackURLs": [
           "http://localhost/dummy",
         ],
+        "EnableTokenRevocation": true,
         "ExplicitAuthFlows": [
           "ALLOW_USER_PASSWORD_AUTH",
           "ALLOW_USER_SRP_AUTH",
@@ -1251,11 +1291,14 @@ exports[`Snapshot test 2`] = `
         "LogoutURLs": [
           "http://localhost/dummy",
         ],
+        "RefreshTokenValidity": 43200,
         "SupportedIdentityProviders": [
           "COGNITO",
         ],
         "TokenValidityUnits": {
+          "AccessToken": "minutes",
           "IdToken": "minutes",
+          "RefreshToken": "minutes",
         },
         "UserPoolId": {
           "Ref": "AuthUserPool8115E87F",
@@ -1277,242 +1320,6 @@ exports[`Snapshot test 2`] = `
         },
       },
       "Type": "AWS::Cognito::UserPoolDomain",
-    },
-    "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64C13E3549": {
-      "Properties": {
-        "Artifacts": {
-          "Type": "NO_ARTIFACTS",
-        },
-        "Cache": {
-          "Type": "NO_CACHE",
-        },
-        "EncryptionKey": "alias/aws/s3",
-        "Environment": {
-          "ComputeType": "BUILD_GENERAL1_SMALL",
-          "Image": "aws/codebuild/amazonlinux2-aarch64-standard:3.0",
-          "ImagePullCredentialsType": "CODEBUILD",
-          "PrivilegedMode": true,
-          "Type": "ARM_CONTAINER",
-        },
-        "ServiceRole": {
-          "Fn::GetAtt": [
-            "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64RoleC5F7BBFE",
-            "Arn",
-          ],
-        },
-        "Source": {
-          "BuildSpec": "{
-  "version": "0.2",
-  "phases": {
-    "build": {
-      "commands": [
-        "current_dir=$(pwd)",
-        "echo \\"$input\\"",
-        "mkdir workdir",
-        "cd workdir",
-        "aws s3 cp \\"$sourceS3Url\\" temp.zip",
-        "unzip temp.zip",
-        "ls -la",
-        "aws ecr get-login-password | docker login --username AWS --password-stdin $repositoryAuthUri",
-        "aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws",
-        "docker buildx create --use",
-        "docker buildx ls",
-        "eval \\"$buildCommand\\""
-      ]
-    },
-    "post_build": {
-      "commands": [
-        "echo Build completed on \`date\`",
-        "\\nSTATUS='SUCCESS'\\nif [ $CODEBUILD_BUILD_SUCCEEDING -ne 1 ] # Test if the build is failing\\nthen\\nSTATUS='FAILED'\\nREASON=\\"ContainerImageBuild failed. See CloudWatch Log stream for the detailed reason: \\nhttps://$AWS_REGION.console.aws.amazon.com/cloudwatch/home?region=$AWS_REGION#logsV2:log-groups/log-group/\\\\$252Faws\\\\$252Fcodebuild\\\\$252F$projectName/log-events/$CODEBUILD_LOG_PATH\\"\\nfi\\ncat <<EOF > payload.json\\n{\\n  \\"StackId\\": \\"$stackId\\",\\n  \\"RequestId\\": \\"$requestId\\",\\n  \\"LogicalResourceId\\":\\"$logicalResourceId\\",\\n  \\"PhysicalResourceId\\": \\"$imageTag\\",\\n  \\"Status\\": \\"$STATUS\\",\\n  \\"Reason\\": \\"$REASON\\",\\n  \\"Data\\": {\\n    \\"ImageTag\\": \\"$imageTag\\"\\n  }\\n}\\nEOF\\ncurl -v -i -X PUT -H 'Content-Type:' -d \\"@payload.json\\" \\"$responseURL\\"\\n              "
-      ]
-    }
-  }
-}",
-          "Type": "NO_SOURCE",
-        },
-      },
-      "Type": "AWS::CodeBuild::Project",
-    },
-    "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64RoleC5F7BBFE": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "codebuild.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/AmazonElasticContainerRegistryPublicReadOnly",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64RoleDefaultPolicy2316728F": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "logs:CreateLogGroup",
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":logs:us-west-2:123456789012:log-group:/aws/codebuild/",
-                      {
-                        "Ref": "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64C13E3549",
-                      },
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":logs:us-west-2:123456789012:log-group:/aws/codebuild/",
-                      {
-                        "Ref": "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64C13E3549",
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "codebuild:CreateReportGroup",
-                "codebuild:CreateReport",
-                "codebuild:UpdateReport",
-                "codebuild:BatchPutTestCases",
-                "codebuild:BatchPutCodeCoverages",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":codebuild:us-west-2:123456789012:report-group/",
-                    {
-                      "Ref": "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64C13E3549",
-                    },
-                    "-*",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "ecr:BatchCheckLayerAvailability",
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-                "ecr:CompleteLayerUpload",
-                "ecr:UploadLayerPart",
-                "ecr:InitiateLayerUpload",
-                "ecr:PutImage",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "WebappBuildRepository4C93D48D",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": "ecr:GetAuthorizationToken",
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": "ecr:DescribeImages",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "WebappBuildRepository4C93D48D",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": [
-                "s3:GetObject*",
-                "s3:GetBucket*",
-                "s3:List*",
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":s3:::cdk-hnb659fds-assets-123456789012-us-west-2",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":s3:::cdk-hnb659fds-assets-123456789012-us-west-2/*",
-                    ],
-                  ],
-                },
-              ],
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64RoleDefaultPolicy2316728F",
-        "Roles": [
-          {
-            "Ref": "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64RoleC5F7BBFE",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
     "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F": {
       "DependsOn": [
@@ -1894,15 +1701,10 @@ exports[`Snapshot test 2`] = `
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
     },
-    "DatabaseClusterSecurityGroupfromTaskTitanStackWebappHandlerSecurityGroup6F571E1DIndirectPortA858844A": {
+    "DatabaseClusterSecurityGroupfromTaskTitanStackWebappFargateServiceSecurityGroup9260934C5432DABE0D4B": {
       "Properties": {
-        "Description": "from TaskTitanStackWebappHandlerSecurityGroup6F571E1D:{IndirectPort}",
-        "FromPort": {
-          "Fn::GetAtt": [
-            "DatabaseCluster5B53A178",
-            "Endpoint.Port",
-          ],
-        },
+        "Description": "Allow Fargate to access Aurora PostgreSQL",
+        "FromPort": 5432,
         "GroupId": {
           "Fn::GetAtt": [
             "DatabaseClusterSecurityGroupFEF1426A",
@@ -1912,16 +1714,11 @@ exports[`Snapshot test 2`] = `
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
           "Fn::GetAtt": [
-            "WebappHandlerSecurityGroup5451B519",
+            "WebappFargateServiceSecurityGroupD5CE1BAB",
             "GroupId",
           ],
         },
-        "ToPort": {
-          "Fn::GetAtt": [
-            "DatabaseCluster5B53A178",
-            "Endpoint.Port",
-          ],
-        },
+        "ToPort": 5432,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
     },
@@ -2010,84 +1807,8 @@ exports[`Snapshot test 2`] = `
       },
       "Type": "AWS::RDS::DBClusterParameterGroup",
     },
-    "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f306AEFF37": {
-      "DependsOn": [
-        "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f3ServiceRoleDefaultPolicyFECC51DC",
-        "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f3ServiceRoleB008BAA4",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-west-2",
-          "S3Key": "REDACTED",
-        },
-        "Handler": "index.handler",
-        "Role": {
-          "Fn::GetAtt": [
-            "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f3ServiceRoleB008BAA4",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs20.x",
-        "Timeout": 300,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f3ServiceRoleB008BAA4": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f3ServiceRoleDefaultPolicyFECC51DC": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "codebuild:StartBuild",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64C13E3549",
-                  "Arn",
-                ],
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f3ServiceRoleDefaultPolicyFECC51DC",
-        "Roles": [
-          {
-            "Ref": "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f3ServiceRoleB008BAA4",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
+    "EcsDefaultClusterMnL3mNNYNVpc18E0451A": {
+      "Type": "AWS::ECS::Cluster",
     },
     "EventBusApi6E8C7C94": {
       "Properties": {
@@ -2235,10 +1956,6 @@ exports[`Snapshot test 2`] = `
               },
               "","metrics":[["AWS/Lambda","Invocations","FunctionName","",
               {
-                "Ref": "WebappHandler8DD158A3",
-              },
-              "",{"label":"Webapp","stat":"Sum"}],["AWS/Lambda","Invocations","FunctionName","",
-              {
                 "Ref": "AsyncJobHandler438266BD",
               },
               "",{"label":"AsyncJob","stat":"Sum"}]],"yAxis":{}}},{"type":"metric","width":12,"height":6,"x":0,"y":9,"properties":{"view":"timeSeries","title":"Lambda Errors (5 min)","region":"",
@@ -2246,10 +1963,6 @@ exports[`Snapshot test 2`] = `
                 "Ref": "AWS::Region",
               },
               "","metrics":[["AWS/Lambda","Errors","FunctionName","",
-              {
-                "Ref": "WebappHandler8DD158A3",
-              },
-              "",{"label":"Webapp","stat":"Sum"}],["AWS/Lambda","Errors","FunctionName","",
               {
                 "Ref": "AsyncJobHandler438266BD",
               },
@@ -2259,10 +1972,6 @@ exports[`Snapshot test 2`] = `
               },
               "","metrics":[["AWS/Lambda","Duration","FunctionName","",
               {
-                "Ref": "WebappHandler8DD158A3",
-              },
-              "",{"label":"Webapp"}],["AWS/Lambda","Duration","FunctionName","",
-              {
                 "Ref": "AsyncJobHandler438266BD",
               },
               "",{"label":"AsyncJob"}]],"yAxis":{}}},{"type":"metric","width":12,"height":6,"x":0,"y":21,"properties":{"view":"timeSeries","title":"Lambda Concurrent Executions","region":"",
@@ -2270,10 +1979,6 @@ exports[`Snapshot test 2`] = `
                 "Ref": "AWS::Region",
               },
               "","metrics":[["AWS/Lambda","ConcurrentExecutions","FunctionName","",
-              {
-                "Ref": "WebappHandler8DD158A3",
-              },
-              "",{"label":"Webapp","stat":"Maximum"}],["AWS/Lambda","ConcurrentExecutions","FunctionName","",
               {
                 "Ref": "AsyncJobHandler438266BD",
               },
@@ -3081,7 +2786,7 @@ exports.handler = async function (event, context) {
     "Webapp107041BD": {
       "Properties": {
         "DistributionConfig": {
-          "Comment": "CloudFront for Webapp",
+          "Comment": "CloudFront for TaskTitan Webapp (ECS Fargate)",
           "DefaultCacheBehavior": {
             "AllowedMethods": [
               "GET",
@@ -3092,33 +2797,11 @@ exports.handler = async function (event, context) {
               "POST",
               "DELETE",
             ],
-            "CachePolicyId": {
-              "Ref": "WebappSharedCachePolicy14FEE4A0",
-            },
+            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
             "Compress": true,
-            "FunctionAssociations": [
-              {
-                "EventType": "viewer-request",
-                "FunctionARN": {
-                  "Fn::GetAtt": [
-                    "WebappSetForwardedHost1DDF27A9",
-                    "FunctionARN",
-                  ],
-                },
-              },
-            ],
-            "LambdaFunctionAssociations": [
-              {
-                "EventType": "origin-request",
-                "IncludeBody": true,
-                "LambdaFunctionARN": {
-                  "Fn::ImportValue": "TaskTitanUsEast1Stack-SignPayloadHandlerVersionArn",
-                },
-              },
-            ],
-            "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+            "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
             "TargetOriginId": "TaskTitanStackWebappOrigin11DD10BF9",
-            "ViewerProtocolPolicy": "allow-all",
+            "ViewerProtocolPolicy": "redirect-to-https",
           },
           "Enabled": true,
           "HttpVersion": "http2",
@@ -3130,669 +2813,262 @@ exports.handler = async function (event, context) {
                 "RegionalDomainName",
               ],
             },
-            "Prefix": "Webapp/",
+            "Prefix": "webapp/",
           },
           "Origins": [
             {
-              "ConnectionTimeout": 6,
               "CustomOriginConfig": {
-                "OriginProtocolPolicy": "https-only",
-                "OriginReadTimeout": 60,
+                "OriginProtocolPolicy": "http-only",
                 "OriginSSLProtocols": [
                   "TLSv1.2",
                 ],
               },
               "DomainName": {
-                "Fn::Select": [
-                  2,
-                  {
-                    "Fn::Split": [
-                      "/",
-                      {
-                        "Fn::GetAtt": [
-                          "WebappHandlerFunctionUrl7AEF8DEE",
-                          "FunctionUrl",
-                        ],
-                      },
-                    ],
-                  },
+                "Fn::GetAtt": [
+                  "WebappFargateLB8978807F",
+                  "DNSName",
                 ],
               },
               "Id": "TaskTitanStackWebappOrigin11DD10BF9",
-              "OriginAccessControlId": {
-                "Fn::GetAtt": [
-                  "WebappOrigin1FunctionUrlOriginAccessControlEA98B600",
-                  "Id",
-                ],
-              },
+              "OriginCustomHeaders": [
+                {
+                  "HeaderName": "X-Origin-Verify",
+                  "HeaderValue": "TaskTitan-123456789012-us-west-2",
+                },
+              ],
             },
           ],
         },
       },
       "Type": "AWS::CloudFront::Distribution",
     },
-    "WebappBuild348806E3": {
-      "DeletionPolicy": "Delete",
+    "WebappFargateLB8978807F": {
       "DependsOn": [
-        "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64C13E3549",
-        "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64RoleDefaultPolicy2316728F",
-        "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64RoleC5F7BBFE",
+        "VpcPublicSubnet1DefaultRoute3DA9E72A",
+        "VpcPublicSubnet1RouteTableAssociation97140677",
+        "VpcPublicSubnet2DefaultRoute97F91067",
+        "VpcPublicSubnet2RouteTableAssociationDD5762D8",
+        "VpcPublicSubnet3DefaultRoute4697774F",
+        "VpcPublicSubnet3RouteTableAssociation1F1EDF02",
       ],
       "Properties": {
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "DeployTimeBuildCustomResourceHandlerdb740fd554364a848a09e6dfcd01f4f306AEFF37",
-            "Arn",
-          ],
-        },
-        "buildCommand": {
-          "Fn::Join": [
-            "",
-            [
-              "docker buildx build --build-arg ALLOWED_ORIGIN_HOST=*.cloudfront.net --build-arg SKIP_TS_BUILD=true --build-arg NEXT_PUBLIC_EVENT_HTTP_ENDPOINT=https://",
-              {
-                "Fn::GetAtt": [
-                  "EventBusApi6E8C7C94",
-                  "Dns.Http",
-                ],
-              },
-              " --build-arg NEXT_PUBLIC_AWS_REGION=us-west-2 --build-arg BUILD_TIMESTAMP=2020-01-01T00:00:00.000Z --platform linux/arm64 --output type=image,name=",
-              {
-                "Fn::Select": [
-                  4,
-                  {
-                    "Fn::Split": [
-                      ":",
-                      {
-                        "Fn::GetAtt": [
-                          "WebappBuildRepository4C93D48D",
-                          "Arn",
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-              ".dkr.ecr.",
-              {
-                "Fn::Select": [
-                  3,
-                  {
-                    "Fn::Split": [
-                      ":",
-                      {
-                        "Fn::GetAtt": [
-                          "WebappBuildRepository4C93D48D",
-                          "Arn",
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-              ".",
-              {
-                "Ref": "AWS::URLSuffix",
-              },
-              "/",
-              {
-                "Ref": "WebappBuildRepository4C93D48D",
-              },
-              ":<IMAGE_TAG>,push=true --provenance=false .",
-            ],
-          ],
-        },
-        "codeBuildProjectName": {
-          "Ref": "ContainerImageBuildArm64e83729feb1564e709bec452b15847a30amd64C13E3549",
-        },
-        "repositoryUri": {
-          "Fn::Join": [
-            "",
-            [
-              {
-                "Fn::Select": [
-                  4,
-                  {
-                    "Fn::Split": [
-                      ":",
-                      {
-                        "Fn::GetAtt": [
-                          "WebappBuildRepository4C93D48D",
-                          "Arn",
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-              ".dkr.ecr.",
-              {
-                "Fn::Select": [
-                  3,
-                  {
-                    "Fn::Split": [
-                      ":",
-                      {
-                        "Fn::GetAtt": [
-                          "WebappBuildRepository4C93D48D",
-                          "Arn",
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-              ".",
-              {
-                "Ref": "AWS::URLSuffix",
-              },
-              "/",
-              {
-                "Ref": "WebappBuildRepository4C93D48D",
-              },
-            ],
-          ],
-        },
-        "sourceS3Url": "s3://cdk-hnb659fds-assets-123456789012-us-west-2/REDACTED",
-        "tagPrefix": "REDACTED",
-        "type": "ContainerImageBuild",
-      },
-      "Type": "Custom::CDKContainerImageBuild",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "WebappBuildRepository4C93D48D": {
-      "DeletionPolicy": "Delete",
-      "Properties": {
-        "EmptyOnDelete": true,
-        "RepositoryPolicyText": {
-          "Statement": [
-            {
-              "Action": [
-                "ecr:BatchCheckLayerAvailability",
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-              ],
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-      },
-      "Type": "AWS::ECR::Repository",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "WebappCloudFrontInvalidation588CF152": {
-      "DeletionPolicy": "Delete",
-      "DependsOn": [
-        "WebappCloudFrontInvalidationCustomResourcePolicy18C215D6",
-      ],
-      "Properties": {
-        "Create": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"cloudfront","action":"createInvalidation","parameters":{"DistributionId":"",
-              {
-                "Ref": "Webapp107041BD",
-              },
-              "","InvalidationBatch":{"CallerReference":"",
-              {
-                "Fn::GetAtt": [
-                  "WebappHandlerCurrentVersionREDACTED",
-                  "Version",
-                ],
-              },
-              "","Paths":{"Quantity":1,"Items":["/*"]}}},"physicalResourceId":{"id":"invalidation"}}",
-            ],
-          ],
-        },
-        "InstallLatestAwsSdk": true,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
-            "Arn",
-          ],
-        },
-        "Update": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"cloudfront","action":"createInvalidation","parameters":{"DistributionId":"",
-              {
-                "Ref": "Webapp107041BD",
-              },
-              "","InvalidationBatch":{"CallerReference":"",
-              {
-                "Fn::GetAtt": [
-                  "WebappHandlerCurrentVersionREDACTED",
-                  "Version",
-                ],
-              },
-              "","Paths":{"Quantity":1,"Items":["/*"]}}},"physicalResourceId":{"id":"invalidation"}}",
-            ],
-          ],
-        },
-      },
-      "Type": "Custom::AWS",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "WebappCloudFrontInvalidationCustomResourcePolicy18C215D6": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "cloudfront:CreateInvalidation",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":cloudfront::123456789012:distribution/",
-                    {
-                      "Ref": "Webapp107041BD",
-                    },
-                  ],
-                ],
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "WebappCloudFrontInvalidationCustomResourcePolicy18C215D6",
-        "Roles": [
+        "LoadBalancerAttributes": [
           {
-            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+            "Key": "deletion_protection.enabled",
+            "Value": "false",
           },
         ],
-      },
-      "Type": "AWS::IAM::Policy",
-    },
-    "WebappHandler8DD158A3": {
-      "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
-        "WebappHandlerServiceRoleDefaultPolicy7D06F4EA",
-        "WebappHandlerServiceRole4F4D1ACD",
-      ],
-      "Properties": {
-        "Architectures": [
-          "arm64",
+        "Scheme": "internet-facing",
+        "SecurityGroups": [
+          {
+            "Fn::GetAtt": [
+              "WebappFargateLBSecurityGroupB64828EA",
+              "GroupId",
+            ],
+          },
         ],
-        "Code": {
-          "ImageUri": {
-            "Fn::Join": [
-              "",
-              [
-                {
-                  "Fn::Select": [
-                    4,
-                    {
-                      "Fn::Split": [
-                        ":",
-                        {
-                          "Fn::GetAtt": [
-                            "WebappBuildRepository4C93D48D",
-                            "Arn",
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-                ".dkr.ecr.",
-                {
-                  "Fn::Select": [
-                    3,
-                    {
-                      "Fn::Split": [
-                        ":",
-                        {
-                          "Fn::GetAtt": [
-                            "WebappBuildRepository4C93D48D",
-                            "Arn",
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-                ".",
-                {
-                  "Ref": "AWS::URLSuffix",
-                },
-                "/",
-                {
-                  "Ref": "WebappBuildRepository4C93D48D",
-                },
-                ":",
-                {
-                  "Fn::GetAtt": [
-                    "WebappBuild348806E3",
-                    "ImageTag",
-                  ],
-                },
-              ],
-            ],
+        "Subnets": [
+          {
+            "Ref": "VpcPublicSubnet1Subnet5C2D37C4",
           },
-        },
-        "Environment": {
-          "Variables": {
-            "AMPLIFY_APP_ORIGIN_SOURCE_PARAMETER": {
-              "Ref": "WebappOriginSourceParameterD87E143B",
-            },
-            "ASYNC_JOB_HANDLER_ARN": {
-              "Fn::GetAtt": [
-                "AsyncJobHandler438266BD",
-                "Arn",
-              ],
-            },
-            "COGNITO_DOMAIN": {
-              "Fn::Join": [
-                "",
-                [
-                  {
-                    "Fn::GetAtt": [
-                      "AuthDomainPrefixE1742B23",
-                      "generated",
-                    ],
-                  },
-                  ".auth.us-west-2.amazoncognito.com",
-                ],
-              ],
-            },
-            "DATABASE_ENGINE": {
-              "Fn::Join": [
-                "",
-                [
-                  "{{resolve:secretsmanager:",
-                  {
-                    "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
-                  },
-                  ":SecretString:engine::}}",
-                ],
-              ],
-            },
-            "DATABASE_HOST": {
-              "Fn::GetAtt": [
-                "DatabaseCluster5B53A178",
-                "Endpoint.Address",
-              ],
-            },
-            "DATABASE_NAME": "main",
-            "DATABASE_OPTION": "connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
-            "DATABASE_PASSWORD": {
-              "Fn::Join": [
-                "",
-                [
-                  "{{resolve:secretsmanager:",
-                  {
-                    "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
-                  },
-                  ":SecretString:password::}}",
-                ],
-              ],
-            },
-            "DATABASE_PORT": {
-              "Fn::GetAtt": [
-                "DatabaseCluster5B53A178",
-                "Endpoint.Port",
-              ],
-            },
-            "DATABASE_URL": {
-              "Fn::Join": [
-                "",
-                [
-                  "{{resolve:secretsmanager:",
-                  {
-                    "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
-                  },
-                  ":SecretString:engine::}}://{{resolve:secretsmanager:",
-                  {
-                    "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
-                  },
-                  ":SecretString:username::}}:{{resolve:secretsmanager:",
-                  {
-                    "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
-                  },
-                  ":SecretString:password::}}@",
-                  {
-                    "Fn::GetAtt": [
-                      "DatabaseCluster5B53A178",
-                      "Endpoint.Address",
-                    ],
-                  },
-                  ":",
-                  {
-                    "Fn::GetAtt": [
-                      "DatabaseCluster5B53A178",
-                      "Endpoint.Port",
-                    ],
-                  },
-                  "/main?connection_limit=1&pool_timeout=30&connect_timeout=30&socket_timeout=60",
-                ],
-              ],
-            },
-            "DATABASE_USER": {
-              "Fn::Join": [
-                "",
-                [
-                  "{{resolve:secretsmanager:",
-                  {
-                    "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
-                  },
-                  ":SecretString:username::}}",
-                ],
-              ],
-            },
-            "LOG_LEVEL": "INFO",
-            "POWERTOOLS_SERVICE_NAME": "TaskTitanWebapp",
-            "USER_POOL_CLIENT_ID": {
-              "Ref": "AuthUserPoolClientC635291F",
-            },
-            "USER_POOL_ID": {
-              "Ref": "AuthUserPool8115E87F",
-            },
-            "WIREFRAME_BUCKET_NAME": {
-              "Ref": "WireframeBucket0DCD1679",
-            },
+          {
+            "Ref": "VpcPublicSubnet2Subnet691E08A3",
           },
+          {
+            "Ref": "VpcPublicSubnet3SubnetBE12F0B6",
+          },
+        ],
+        "Type": "application",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+    },
+    "WebappFargateLBPublicListenerB8FD0169": {
+      "Properties": {
+        "DefaultActions": [
+          {
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Forbidden",
+              "StatusCode": "403",
+            },
+            "Type": "fixed-response",
+          },
+        ],
+        "LoadBalancerArn": {
+          "Ref": "WebappFargateLB8978807F",
         },
-        "MemorySize": 1024,
-        "PackageType": "Image",
-        "Role": {
-          "Fn::GetAtt": [
-            "WebappHandlerServiceRole4F4D1ACD",
-            "Arn",
-          ],
-        },
-        "Timeout": 180,
-        "TracingConfig": {
-          "Mode": "Active",
-        },
-        "VpcConfig": {
-          "SecurityGroupIds": [
-            {
-              "Fn::GetAtt": [
-                "WebappHandlerSecurityGroup5451B519",
-                "GroupId",
-              ],
-            },
-          ],
-          "SubnetIds": [
-            {
-              "Ref": "VpcPrivateSubnet1Subnet536B997A",
-            },
-            {
-              "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
-            },
-            {
-              "Ref": "VpcPrivateSubnet3SubnetF258B56E",
-            },
-          ],
+        "Port": 80,
+        "Protocol": "HTTP",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "WebappFargateLBPublicListenerECSGroup106AE235": {
+      "Properties": {
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/api/health",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 2,
+        "Port": 80,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false",
+          },
+        ],
+        "TargetType": "ip",
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
         },
       },
-      "Type": "AWS::Lambda::Function",
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
-    "WebappHandlerAliaslive1E539745": {
-      "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
-      ],
+    "WebappFargateLBPublicListenerValidateOriginRuleC2957882": {
       "Properties": {
-        "FunctionName": {
-          "Ref": "WebappHandler8DD158A3",
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "WebappFargateLBPublicListenerECSGroup106AE235",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                "TaskTitan-123456789012-us-west-2",
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "WebappFargateLBPublicListenerB8FD0169",
         },
-        "FunctionVersion": {
-          "Fn::GetAtt": [
-            "WebappHandlerCurrentVersionREDACTED",
-            "Version",
-          ],
-        },
-        "Name": "live",
-        "ProvisionedConcurrencyConfig": {
-          "ProvisionedConcurrentExecutions": 5,
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
+    "WebappFargateLBSecurityGroupB64828EA": {
+      "Properties": {
+        "GroupDescription": "Automatically created Security Group for ELB TaskTitanStackWebappFargateLBD872BE78",
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow from anyone on port 80",
+            "FromPort": 80,
+            "IpProtocol": "tcp",
+            "ToPort": 80,
+          },
+        ],
+        "VpcId": {
+          "Ref": "Vpc8378EB38",
         },
       },
-      "Type": "AWS::Lambda::Alias",
+      "Type": "AWS::EC2::SecurityGroup",
     },
-    "WebappHandlerAliasliveAliasScalingTarget6B7804A5": {
+    "WebappFargateLBSecurityGrouptoTaskTitanStackWebappFargateServiceSecurityGroup9260934C3000DFE3E9DC": {
+      "Properties": {
+        "Description": "Load balancer to target",
+        "DestinationSecurityGroupId": {
+          "Fn::GetAtt": [
+            "WebappFargateServiceSecurityGroupD5CE1BAB",
+            "GroupId",
+          ],
+        },
+        "FromPort": 3000,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "WebappFargateLBSecurityGroupB64828EA",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "ToPort": 3000,
+      },
+      "Type": "AWS::EC2::SecurityGroupEgress",
+    },
+    "WebappFargateService6A396A00": {
       "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
+        "WebappFargateLBPublicListenerECSGroup106AE235",
+        "WebappFargateLBPublicListenerB8FD0169",
+        "WebappFargateLBPublicListenerValidateOriginRuleC2957882",
+        "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
+        "WebappFargateTaskDefTaskRole6870FDEE",
       ],
       "Properties": {
-        "MaxCapacity": 50,
-        "MinCapacity": 5,
-        "ResourceId": {
-          "Fn::Join": [
-            "",
-            [
-              "function:",
+        "Cluster": {
+          "Ref": "EcsDefaultClusterMnL3mNNYNVpc18E0451A",
+        },
+        "DeploymentConfiguration": {
+          "Alarms": {
+            "AlarmNames": [],
+            "Enable": false,
+            "Rollback": false,
+          },
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true,
+          },
+          "MaximumPercent": 200,
+          "MinimumHealthyPercent": 100,
+        },
+        "DeploymentController": {
+          "Type": "ECS",
+        },
+        "DesiredCount": 2,
+        "EnableECSManagedTags": true,
+        "HealthCheckGracePeriodSeconds": 60,
+        "LaunchType": "FARGATE",
+        "LoadBalancers": [
+          {
+            "ContainerName": "web",
+            "ContainerPort": 3000,
+            "TargetGroupArn": {
+              "Ref": "WebappFargateLBPublicListenerECSGroup106AE235",
+            },
+          },
+        ],
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "SecurityGroups": [
               {
-                "Fn::Select": [
-                  6,
-                  {
-                    "Fn::Split": [
-                      ":",
-                      {
-                        "Ref": "WebappHandlerAliaslive1E539745",
-                      },
-                    ],
-                  },
+                "Fn::GetAtt": [
+                  "WebappFargateServiceSecurityGroupD5CE1BAB",
+                  "GroupId",
                 ],
               },
-              ":live",
             ],
-          ],
-        },
-        "RoleARN": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
+            "Subnets": [
               {
-                "Ref": "AWS::Partition",
+                "Ref": "VpcPrivateSubnet1Subnet536B997A",
               },
-              ":iam::123456789012:role/aws-service-role/lambda.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_LambdaConcurrency",
+              {
+                "Ref": "VpcPrivateSubnet2Subnet3788AAA1",
+              },
+              {
+                "Ref": "VpcPrivateSubnet3SubnetF258B56E",
+              },
             ],
-          ],
-        },
-        "ScalableDimension": "lambda:function:ProvisionedConcurrency",
-        "ServiceNamespace": "lambda",
-      },
-      "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
-    },
-    "WebappHandlerAliasliveAliasScalingTargetTracking56DB273E": {
-      "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
-      ],
-      "Properties": {
-        "PolicyName": "TaskTitanStackWebappHandlerAliasliveAliasScalingTargetTrackingD85BBB99",
-        "PolicyType": "TargetTrackingScaling",
-        "ScalingTargetId": {
-          "Ref": "WebappHandlerAliasliveAliasScalingTarget6B7804A5",
-        },
-        "TargetTrackingScalingPolicyConfiguration": {
-          "PredefinedMetricSpecification": {
-            "PredefinedMetricType": "LambdaProvisionedConcurrencyUtilization",
           },
-          "TargetValue": 0.7,
+        },
+        "TaskDefinition": {
+          "Ref": "WebappFargateTaskDef151FDBBF",
         },
       },
-      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+      "Type": "AWS::ECS::Service",
     },
-    "WebappHandlerCurrentVersionREDACTED": {
+    "WebappFargateServiceSecurityGroupD5CE1BAB": {
       "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
+        "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
+        "WebappFargateTaskDefTaskRole6870FDEE",
       ],
       "Properties": {
-        "FunctionName": {
-          "Ref": "WebappHandler8DD158A3",
-        },
-      },
-      "Type": "AWS::Lambda::Version",
-    },
-    "WebappHandlerFunctionUrl7AEF8DEE": {
-      "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
-      ],
-      "Properties": {
-        "AuthType": "AWS_IAM",
-        "InvokeMode": "RESPONSE_STREAM",
-        "TargetFunctionArn": {
-          "Fn::GetAtt": [
-            "WebappHandler8DD158A3",
-            "Arn",
-          ],
-        },
-      },
-      "Type": "AWS::Lambda::Url",
-    },
-    "WebappHandlerSecurityGroup5451B519": {
-      "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
-      ],
-      "Properties": {
-        "GroupDescription": "Automatic security group for Lambda Function TaskTitanStackWebappHandlerC10F8FC1",
+        "GroupDescription": "TaskTitanStack/Webapp/Fargate/Service/SecurityGroup",
         "SecurityGroupEgress": [
           {
             "CidrIp": "0.0.0.0/0",
@@ -3806,15 +3082,294 @@ exports.handler = async function (event, context) {
       },
       "Type": "AWS::EC2::SecurityGroup",
     },
-    "WebappHandlerServiceRole4F4D1ACD": {
+    "WebappFargateServiceSecurityGroupfromTaskTitanStackWebappFargateLBSecurityGroup5C2FA50A3000CAFB57D9": {
       "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
+        "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
+        "WebappFargateTaskDefTaskRole6870FDEE",
       ],
+      "Properties": {
+        "Description": "Load balancer to target",
+        "FromPort": 3000,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "WebappFargateServiceSecurityGroupD5CE1BAB",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "WebappFargateLBSecurityGroupB64828EA",
+            "GroupId",
+          ],
+        },
+        "ToPort": 3000,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "WebappFargateServiceTaskCountTarget555B119A": {
+      "DependsOn": [
+        "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
+        "WebappFargateTaskDefTaskRole6870FDEE",
+      ],
+      "Properties": {
+        "MaxCapacity": 10,
+        "MinCapacity": 2,
+        "ResourceId": {
+          "Fn::Join": [
+            "",
+            [
+              "service/",
+              {
+                "Ref": "EcsDefaultClusterMnL3mNNYNVpc18E0451A",
+              },
+              "/",
+              {
+                "Fn::GetAtt": [
+                  "WebappFargateService6A396A00",
+                  "Name",
+                ],
+              },
+            ],
+          ],
+        },
+        "RoleARN": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":iam::123456789012:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService",
+            ],
+          ],
+        },
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs",
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+    },
+    "WebappFargateServiceTaskCountTargetCpuScaling334E7748": {
+      "DependsOn": [
+        "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
+        "WebappFargateTaskDefTaskRole6870FDEE",
+      ],
+      "Properties": {
+        "PolicyName": "TaskTitanStackWebappFargateServiceTaskCountTargetCpuScalingAD7AD479",
+        "PolicyType": "TargetTrackingScaling",
+        "ScalingTargetId": {
+          "Ref": "WebappFargateServiceTaskCountTarget555B119A",
+        },
+        "TargetTrackingScalingPolicyConfiguration": {
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ECSServiceAverageCPUUtilization",
+          },
+          "ScaleInCooldown": 300,
+          "ScaleOutCooldown": 60,
+          "TargetValue": 70,
+        },
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+    },
+    "WebappFargateServiceTaskCountTargetMemoryScaling3A91BDB0": {
+      "DependsOn": [
+        "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
+        "WebappFargateTaskDefTaskRole6870FDEE",
+      ],
+      "Properties": {
+        "PolicyName": "TaskTitanStackWebappFargateServiceTaskCountTargetMemoryScaling1ECF7EEE",
+        "PolicyType": "TargetTrackingScaling",
+        "ScalingTargetId": {
+          "Ref": "WebappFargateServiceTaskCountTarget555B119A",
+        },
+        "TargetTrackingScalingPolicyConfiguration": {
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ECSServiceAverageMemoryUtilization",
+          },
+          "ScaleInCooldown": 300,
+          "ScaleOutCooldown": 60,
+          "TargetValue": 70,
+        },
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+    },
+    "WebappFargateTaskDef151FDBBF": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "DATABASE_HOST",
+                "Value": {
+                  "Fn::GetAtt": [
+                    "DatabaseCluster5B53A178",
+                    "Endpoint.Address",
+                  ],
+                },
+              },
+              {
+                "Name": "DATABASE_NAME",
+                "Value": "main",
+              },
+              {
+                "Name": "DATABASE_ENGINE",
+                "Value": "postgresql",
+              },
+              {
+                "Name": "DATABASE_PORT",
+                "Value": {
+                  "Fn::GetAtt": [
+                    "DatabaseCluster5B53A178",
+                    "Endpoint.Port",
+                  ],
+                },
+              },
+              {
+                "Name": "DATABASE_OPTION",
+                "Value": "connection_limit=10&pool_timeout=30&connect_timeout=30&socket_timeout=60",
+              },
+              {
+                "Name": "COGNITO_DOMAIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AuthDomainPrefixE1742B23",
+                          "generated",
+                        ],
+                      },
+                      ".auth.us-west-2.amazoncognito.com",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "USER_POOL_ID",
+                "Value": {
+                  "Ref": "AuthUserPool8115E87F",
+                },
+              },
+              {
+                "Name": "USER_POOL_CLIENT_ID",
+                "Value": {
+                  "Ref": "AuthUserPoolClientC635291F",
+                },
+              },
+              {
+                "Name": "ASYNC_JOB_HANDLER_ARN",
+                "Value": {
+                  "Fn::GetAtt": [
+                    "AsyncJobHandler438266BD",
+                    "Arn",
+                  ],
+                },
+              },
+              {
+                "Name": "WIREFRAME_BUCKET_NAME",
+                "Value": {
+                  "Ref": "WireframeBucket0DCD1679",
+                },
+              },
+              {
+                "Name": "POWERTOOLS_SERVICE_NAME",
+                "Value": "TaskTitanWebapp",
+              },
+              {
+                "Name": "LOG_LEVEL",
+                "Value": "INFO",
+              },
+              {
+                "Name": "PORT",
+                "Value": "3000",
+              },
+              {
+                "Name": "HOSTNAME",
+                "Value": "0.0.0.0",
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Sub": "REDACTED",
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "WebappFargateTaskDefwebLogGroup154C81AB",
+                },
+                "awslogs-region": "us-west-2",
+                "awslogs-stream-prefix": "Fargate",
+              },
+            },
+            "Name": "web",
+            "PortMappings": [
+              {
+                "ContainerPort": 3000,
+                "Protocol": "tcp",
+              },
+            ],
+            "Secrets": [
+              {
+                "Name": "DATABASE_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
+                      },
+                      ":password::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "DATABASE_USER",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
+                      },
+                      ":username::",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "512",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "WebappFargateTaskDefExecutionRole324C7C6A",
+            "Arn",
+          ],
+        },
+        "Family": "TaskTitanStackWebappFargateTaskDef9079604C",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "RuntimePlatform": {
+          "CpuArchitecture": "ARM64",
+          "OperatingSystemFamily": "LINUX",
+        },
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "WebappFargateTaskDefTaskRole6870FDEE",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "WebappFargateTaskDefExecutionRole324C7C6A": {
       "Properties": {
         "AssumeRolePolicyDocument": {
           "Statement": [
@@ -3822,94 +3377,107 @@ exports.handler = async function (event, context) {
               "Action": "sts:AssumeRole",
               "Effect": "Allow",
               "Principal": {
-                "Service": "lambda.amazonaws.com",
+                "Service": "ecs-tasks.amazonaws.com",
               },
             },
           ],
           "Version": "2012-10-17",
         },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
-              ],
-            ],
-          },
-        ],
       },
       "Type": "AWS::IAM::Role",
     },
-    "WebappHandlerServiceRoleDefaultPolicy7D06F4EA": {
-      "DependsOn": [
-        "VpcPrivateSubnet1DefaultRouteBE02A9ED",
-        "VpcPrivateSubnet1RouteTableAssociation70C59FA6",
-        "VpcPrivateSubnet2DefaultRoute060D2087",
-        "VpcPrivateSubnet2RouteTableAssociationA89CAD56",
-        "VpcPrivateSubnet3DefaultRoute94B74F0D",
-        "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
-      ],
+    "WebappFargateTaskDefExecutionRoleDefaultPolicyBD1FE93F": {
       "Properties": {
         "PolicyDocument": {
           "Statement": [
             {
               "Action": [
-                "xray:PutTraceSegments",
-                "xray:PutTelemetryRecords",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
               ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    "REDACTED",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "ecr:GetAuthorizationToken",
               "Effect": "Allow",
               "Resource": "*",
             },
             {
-              "Action": "lambda:InvokeFunction",
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "AsyncJobHandler438266BD",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "AsyncJobHandler438266BD",
-                          "Arn",
-                        ],
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
               ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "WebappFargateTaskDefwebLogGroup154C81AB",
+                  "Arn",
+                ],
+              },
             },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "WebappFargateTaskDefExecutionRoleDefaultPolicyBD1FE93F",
+        "Roles": [
+          {
+            "Ref": "WebappFargateTaskDefExecutionRole324C7C6A",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "WebappFargateTaskDefTaskRole6870FDEE": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
             {
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
               "Resource": [
-                "arn:aws:bedrock:us-west-2:123456789012:inference-profile/global.anthropic.claude-sonnet-4-5-*",
-                "arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-*",
-                "arn:aws:bedrock:*:123456789012:foundation-model/anthropic.claude-*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+                "arn:aws:bedrock:us-*:123456789012:inference-profile/us.anthropic.claude-*",
+                "arn:aws:bedrock:*:123456789012:inference-profile/global.anthropic.claude-*",
               ],
             },
             {
@@ -3950,40 +3518,47 @@ exports.handler = async function (event, context) {
               ],
             },
             {
-              "Action": [
-                "ssm:DescribeParameters",
-                "ssm:GetParameters",
-                "ssm:GetParameter",
-                "ssm:GetParameterHistory",
-              ],
+              "Action": "lambda:InvokeFunction",
               "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":ssm:us-west-2:123456789012:parameter/",
-                    {
-                      "Ref": "WebappOriginSourceParameterD87E143B",
-                    },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AsyncJobHandler438266BD",
+                    "Arn",
                   ],
-                ],
-              },
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AsyncJobHandler438266BD",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
             },
           ],
           "Version": "2012-10-17",
         },
-        "PolicyName": "WebappHandlerServiceRoleDefaultPolicy7D06F4EA",
+        "PolicyName": "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
         "Roles": [
           {
-            "Ref": "WebappHandlerServiceRole4F4D1ACD",
+            "Ref": "WebappFargateTaskDefTaskRole6870FDEE",
           },
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "WebappFargateTaskDefwebLogGroup154C81AB": {
+      "DeletionPolicy": "Retain",
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
     },
     "WebappMigrationRunnerAC67C012": {
       "DependsOn": [
@@ -4268,7 +3843,7 @@ exports.handler = async function (event, context) {
         "DatabaseClusterSecretD1FB634F",
         "DatabaseClusterSecurityGroupfromTaskTitanStackAsyncJobHandlerSecurityGroupF0B49FC9IndirectPort145BBD9C",
         "DatabaseClusterSecurityGroupfromTaskTitanStackDatabaseBastionHostInstanceSecurityGroup080D72BDIndirectPortF8575245",
-        "DatabaseClusterSecurityGroupfromTaskTitanStackWebappHandlerSecurityGroup6F571E1DIndirectPortA858844A",
+        "DatabaseClusterSecurityGroupfromTaskTitanStackWebappFargateServiceSecurityGroup9260934C5432DABE0D4B",
         "DatabaseClusterSecurityGroupfromTaskTitanStackWebappMigrationRunnerSecurityGroupB708EF2DIndirectPortEF396495",
         "DatabaseClusterSecurityGroupFEF1426A",
         "DatabaseClusterSubnets5540150D",
@@ -4290,212 +3865,6 @@ exports.handler = async function (event, context) {
       },
       "Type": "Custom::Trigger",
       "UpdateReplacePolicy": "Delete",
-    },
-    "WebappOrigin1FunctionUrlOriginAccessControlEA98B600": {
-      "Properties": {
-        "OriginAccessControlConfig": {
-          "Name": "TaskTitanStackWebappOrigin1FnctionUrlOriginAccessControl0B9B7802",
-          "OriginAccessControlOriginType": "lambda",
-          "SigningBehavior": "always",
-          "SigningProtocol": "sigv4",
-        },
-      },
-      "Type": "AWS::CloudFront::OriginAccessControl",
-    },
-    "WebappOrigin1InvokeFromApiForTaskTitanStackWebappOrigin11DD10BF99FA61C68": {
-      "Properties": {
-        "Action": "lambda:InvokeFunctionUrl",
-        "FunctionName": {
-          "Fn::GetAtt": [
-            "WebappHandlerFunctionUrl7AEF8DEE",
-            "FunctionArn",
-          ],
-        },
-        "Principal": "cloudfront.amazonaws.com",
-        "SourceArn": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":cloudfront::",
-              {
-                "Ref": "AWS::AccountId",
-              },
-              ":distribution/",
-              {
-                "Ref": "Webapp107041BD",
-              },
-            ],
-          ],
-        },
-      },
-      "Type": "AWS::Lambda::Permission",
-    },
-    "WebappOriginSourceParameterD87E143B": {
-      "Properties": {
-        "Type": "String",
-        "Value": "dummy",
-      },
-      "Type": "AWS::SSM::Parameter",
-    },
-    "WebappSetForwardedHost1DDF27A9": {
-      "Properties": {
-        "AutoPublish": true,
-        "FunctionCode": "// CloudFront Function to set x-forwarded-host for Next.js Server Actions
-// This ensures the correct host header is available to the application
-
-function handler(event) {
-  var request = event.request;
-  var host = request.headers.host ? request.headers.host.value : '';
-
-  // Set x-forwarded-host header for Next.js to properly handle server actions
-  request.headers['x-forwarded-host'] = { value: host };
-
-  return request;
-}
-",
-        "FunctionConfig": {
-          "Comment": "us-west-2TaskTitanStackWeSetForwardedHost3336E812",
-          "Runtime": "cloudfront-js-1.0",
-        },
-        "Name": "us-west-2TaskTitanStackWeSetForwardedHost3336E812",
-      },
-      "Type": "AWS::CloudFront::Function",
-    },
-    "WebappSharedCachePolicy14FEE4A0": {
-      "Properties": {
-        "CachePolicyConfig": {
-          "DefaultTTL": 0,
-          "MaxTTL": 60,
-          "MinTTL": 0,
-          "Name": "TaskTitanStackWebappSharedCachePolicyD7F98D59-us-west-2",
-          "ParametersInCacheKeyAndForwardedToOrigin": {
-            "CookiesConfig": {
-              "CookieBehavior": "whitelist",
-              "Cookies": [
-                "CognitoIdentityServiceProvider.*",
-              ],
-            },
-            "EnableAcceptEncodingBrotli": true,
-            "EnableAcceptEncodingGzip": true,
-            "HeadersConfig": {
-              "HeaderBehavior": "whitelist",
-              "Headers": [
-                "authorization",
-                "Origin",
-                "X-HTTP-Method-Override",
-                "X-HTTP-Method",
-                "X-Method-Override",
-              ],
-            },
-            "QueryStringsConfig": {
-              "QueryStringBehavior": "none",
-            },
-          },
-        },
-      },
-      "Type": "AWS::CloudFront::CachePolicy",
-    },
-    "WebappUpdateAmplifyOriginSourceParameter3F609A08": {
-      "DeletionPolicy": "Delete",
-      "DependsOn": [
-        "WebappUpdateAmplifyOriginSourceParameterCustomResourcePolicy5D80E122",
-      ],
-      "Properties": {
-        "Create": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"ssm","action":"putParameter","parameters":{"Name":"",
-              {
-                "Ref": "WebappOriginSourceParameterD87E143B",
-              },
-              "","Value":"https://",
-              {
-                "Fn::GetAtt": [
-                  "Webapp107041BD",
-                  "DomainName",
-                ],
-              },
-              "","Overwrite":true},"physicalResourceId":{"id":"",
-              {
-                "Ref": "WebappOriginSourceParameterD87E143B",
-              },
-              ""}}",
-            ],
-          ],
-        },
-        "InstallLatestAwsSdk": true,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
-            "Arn",
-          ],
-        },
-        "Update": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"ssm","action":"putParameter","parameters":{"Name":"",
-              {
-                "Ref": "WebappOriginSourceParameterD87E143B",
-              },
-              "","Value":"https://",
-              {
-                "Fn::GetAtt": [
-                  "Webapp107041BD",
-                  "DomainName",
-                ],
-              },
-              "","Overwrite":true},"physicalResourceId":{"id":"",
-              {
-                "Ref": "WebappOriginSourceParameterD87E143B",
-              },
-              ""}}",
-            ],
-          ],
-        },
-      },
-      "Type": "Custom::AWS",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "WebappUpdateAmplifyOriginSourceParameterCustomResourcePolicy5D80E122": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "ssm:PutParameter",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":ssm:us-west-2:123456789012:parameter/",
-                    {
-                      "Ref": "WebappOriginSourceParameterD87E143B",
-                    },
-                  ],
-                ],
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "WebappUpdateAmplifyOriginSourceParameterCustomResourcePolicy5D80E122",
-        "Roles": [
-          {
-            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
     "WireframeBucket0DCD1679": {
       "DeletionPolicy": "Delete",

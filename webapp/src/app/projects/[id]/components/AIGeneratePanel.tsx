@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { generateAIComponents, applyAIComponents } from '@/app/projects/actions';
 import {
@@ -53,6 +53,14 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
   const [generateSprints, setGenerateSprints] = useState(true);
   const [hasAttemptedAutoGeneration, setHasAttemptedAutoGeneration] = useState(false);
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Helper to detect cross-sprint dependencies
   const getCrossSprintDependencies = (sprint: GeneratedSprint, sprintIndex: number) => {
     const warnings: string[] = [];
@@ -87,35 +95,35 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
 
   const { execute: executeGenerate, isExecuting: isGenerating } = useAction(generateAIComponents, {
     onSuccess: ({ data }) => {
-      if (data) {
-        setGeneratedComponents(data.components);
-        setGeneratedSprints(data.sprints || []);
-        setSummary(data.summary);
-        setEnhancedDescription(data.enhancedDescription || '');
-        // Select all by default
-        setSelectedComponents(new Set(data.components.map((c) => c.name)));
-      }
+      if (!isMountedRef.current || !data) return;
+      setGeneratedComponents(data.components);
+      setGeneratedSprints(data.sprints || []);
+      setSummary(data.summary);
+      setEnhancedDescription(data.enhancedDescription || '');
+      // Select all by default
+      setSelectedComponents(new Set(data.components.map((c) => c.name)));
     },
     onError: ({ error }) => {
+      if (!isMountedRef.current) return;
       toast.error(error.serverError || 'Failed to generate components');
     },
   });
 
   const { execute: executeApply, isExecuting: isApplying } = useAction(applyAIComponents, {
     onSuccess: ({ data }) => {
-      if (data) {
-        const message =
-          data.sprints && data.sprints > 0
-            ? `Created ${data.created} components, ${data.dependencies} dependencies, and ${data.sprints} sprints`
-            : `Created ${data.created} components with ${data.dependencies} dependencies`;
-        toast.success(message);
-        setIsOpen(false);
-        setGeneratedComponents([]);
-        setGeneratedSprints([]);
-        setSelectedComponents(new Set());
-      }
+      if (!isMountedRef.current || !data) return;
+      const message =
+        data.sprints && data.sprints > 0
+          ? `Created ${data.created} components, ${data.dependencies} dependencies, and ${data.sprints} sprints`
+          : `Created ${data.created} components with ${data.dependencies} dependencies`;
+      toast.success(message);
+      setIsOpen(false);
+      setGeneratedComponents([]);
+      setGeneratedSprints([]);
+      setSelectedComponents(new Set());
     },
     onError: ({ error }) => {
+      if (!isMountedRef.current) return;
       toast.error(error.serverError || 'Failed to apply components');
     },
   });
@@ -360,7 +368,7 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
 
                         return (
                           <div
-                            key={index}
+                            key={`sprint-${sprint.name}`}
                             className="p-4 bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/20 rounded-lg"
                           >
                             <div className="flex items-start justify-between mb-2">
