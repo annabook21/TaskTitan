@@ -2789,6 +2789,17 @@ exports.handler = async function (event, context) {
             ],
             "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
             "Compress": true,
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "WebappSetForwardedHost3C7EC8E3",
+                    "FunctionARN",
+                  ],
+                },
+              },
+            ],
             "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
             "TargetOriginId": "TaskTitanStackWebappOrigin11DD10BF9",
             "ViewerProtocolPolicy": "redirect-to-https",
@@ -2809,6 +2820,7 @@ exports.handler = async function (event, context) {
             {
               "CustomOriginConfig": {
                 "OriginProtocolPolicy": "http-only",
+                "OriginReadTimeout": 120,
                 "OriginSSLProtocols": [
                   "TLSv1.2",
                 ],
@@ -2846,6 +2858,10 @@ exports.handler = async function (event, context) {
           {
             "Key": "deletion_protection.enabled",
             "Value": "false",
+          },
+          {
+            "Key": "idle_timeout.timeout_seconds",
+            "Value": "120",
           },
         ],
         "Scheme": "internet-facing",
@@ -3826,6 +3842,35 @@ exports.handler = async function (event, context) {
       "Type": "Custom::Trigger",
       "UpdateReplacePolicy": "Delete",
     },
+    "WebappPublicListenerAllowPreflightRuleBA2CDE1C": {
+      "Properties": {
+        "Actions": [
+          {
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "",
+              "StatusCode": "200",
+            },
+            "Type": "fixed-response",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-request-method",
+            "HttpRequestMethodConfig": {
+              "Values": [
+                "OPTIONS",
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "WebappPublicListenerC1463C11",
+        },
+        "Priority": 10,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
     "WebappPublicListenerC1463C11": {
       "Properties": {
         "DefaultActions": [
@@ -3870,9 +3915,27 @@ exports.handler = async function (event, context) {
         "ListenerArn": {
           "Ref": "WebappPublicListenerC1463C11",
         },
-        "Priority": 1,
+        "Priority": 20,
       },
       "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
+    "WebappSetForwardedHost3C7EC8E3": {
+      "Properties": {
+        "AutoPublish": true,
+        "FunctionCode": "
+function handler(event) {
+  var request = event.request;
+  request.headers['x-forwarded-host'] = request.headers.host;
+  return request;
+}
+",
+        "FunctionConfig": {
+          "Comment": "Set x-forwarded-host for Next.js Server Actions CSRF validation",
+          "Runtime": "cloudfront-js-1.0",
+        },
+        "Name": "us-west-2TaskTitanStackWeSetForwardedHostA6A936FF",
+      },
+      "Type": "AWS::CloudFront::Function",
     },
     "WireframeBucket0DCD1679": {
       "DeletionPolicy": "Delete",
