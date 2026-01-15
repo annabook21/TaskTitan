@@ -17,6 +17,8 @@ import {
   Sparkles,
   Eye,
   Loader2,
+  Timer,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ComponentStatus, ComponentType, User, SprintStatus } from '@prisma/client';
@@ -53,12 +55,15 @@ interface ComponentWithRelations {
   contextAlternatives: string | null;
   contextLinks: string[];
   contextAiSummary: string | null;
+  statusEnteredAt?: Date; // For aging calculation
+  cycleTimeDays?: number | null; // Cycle time for completed items
 }
 
 interface Props {
   component: ComponentWithRelations;
   teamMembers: User[];
   availableSprints: Sprint[];
+  showAging?: boolean; // Show aging indicator (for Kanban teams)
 }
 
 const statusOptions: { value: ComponentStatus; label: string; color: string }[] = [
@@ -69,10 +74,60 @@ const statusOptions: { value: ComponentStatus; label: string; color: string }[] 
   { value: 'COMPLETED', label: 'Completed', color: 'emerald' },
 ];
 
-export default function ComponentCard({ component, teamMembers, availableSprints }: Props) {
+// Calculate days in status for aging indicator
+function getDaysInStatus(enteredAt: Date | undefined): number {
+  if (!enteredAt) return 0;
+  const now = new Date();
+  const entered = new Date(enteredAt);
+  const diffMs = now.getTime() - entered.getTime();
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+}
+
+// Get aging indicator color based on days
+function getAgingColor(days: number, status: ComponentStatus): { bg: string; text: string; border: string } {
+  // Blocked items age faster - more urgent colors
+  if (status === 'BLOCKED') {
+    if (days >= 3) return { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/50' };
+    if (days >= 1) return { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/50' };
+    return { bg: 'bg-slate-700', text: 'text-slate-400', border: 'border-slate-600' };
+  }
+
+  // In Progress - watch for stale items
+  if (status === 'IN_PROGRESS') {
+    if (days >= 7) return { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/50' };
+    if (days >= 4) return { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/50' };
+    return { bg: 'bg-slate-700', text: 'text-slate-400', border: 'border-slate-600' };
+  }
+
+  // Review - shouldn't sit too long
+  if (status === 'REVIEW') {
+    if (days >= 5) return { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/50' };
+    if (days >= 2) return { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/50' };
+    return { bg: 'bg-slate-700', text: 'text-slate-400', border: 'border-slate-600' };
+  }
+
+  // Planning - backlog items, less urgent
+  if (status === 'PLANNING') {
+    if (days >= 30) return { bg: 'bg-slate-600', text: 'text-slate-400', border: 'border-slate-500' };
+    return { bg: 'bg-slate-700', text: 'text-slate-400', border: 'border-slate-600' };
+  }
+
+  // Completed - no aging concerns
+  return { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' };
+}
+
+export default function ComponentCard({ component, teamMembers, availableSprints, showAging = false }: Props) {
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isSprintOpen, setIsSprintOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+
+  // Calculate aging
+  const daysInStatus = getDaysInStatus(component.statusEnteredAt);
+  const agingColors = getAgingColor(daysInStatus, component.status);
+  const isStale =
+    (component.status === 'IN_PROGRESS' && daysInStatus >= 7) ||
+    (component.status === 'BLOCKED' && daysInStatus >= 3) ||
+    (component.status === 'REVIEW' && daysInStatus >= 5);
 
   const { execute, isExecuting } = useAction(updateComponent, {
     onSuccess: () => {
@@ -273,6 +328,33 @@ export default function ComponentCard({ component, teamMembers, availableSprints
 
         {/* Component Context Panel */}
         <ComponentContextPanel component={component} />
+
+        {/* Aging Indicator (Kanban feature) */}
+        {showAging && component.status !== 'COMPLETED' && daysInStatus > 0 && (
+          <div
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs mb-2 border ${agingColors.bg} ${agingColors.text} ${agingColors.border}`}
+          >
+            {isStale ? (
+              <AlertTriangle className="w-3 h-3" />
+            ) : (
+              <Timer className="w-3 h-3" />
+            )}
+            <span>
+              {daysInStatus} day{daysInStatus !== 1 ? 's' : ''} in {component.status === 'IN_PROGRESS' ? 'progress' : component.status.toLowerCase().replace('_', ' ')}
+            </span>
+            {isStale && <span className="font-medium">• Stale</span>}
+          </div>
+        )}
+
+        {/* Cycle Time Display for Completed Items (Kanban feature) */}
+        {showAging && component.status === 'COMPLETED' && component.cycleTimeDays !== null && (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs mb-2 border bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+            <Clock className="w-3 h-3" />
+            <span>
+              Cycle time: {component.cycleTimeDays} day{component.cycleTimeDays !== 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-800">

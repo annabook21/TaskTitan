@@ -6,11 +6,15 @@ import {
   getCycleTimeMetrics,
   getThroughputMetrics,
   getStatusDistribution,
+  getCumulativeFlowData,
+  getAgingAnalysis,
   type CycleTimeStats,
   type ThroughputData,
   type StatusDistribution,
+  type CumulativeFlowData,
+  type AgingData,
 } from './actions';
-import { BarChart3, Clock, TrendingUp, Layers, Loader2 } from 'lucide-react';
+import { BarChart3, Clock, TrendingUp, Layers, Loader2, AlertTriangle, Activity } from 'lucide-react';
 import type { TeamWorkflowConfig } from '@prisma/client';
 
 interface Props {
@@ -44,6 +48,11 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
     weeklyAverage: number;
   } | null>(null);
   const [statusDist, setStatusDist] = useState<StatusDistribution[]>([]);
+  const [cfdData, setCfdData] = useState<CumulativeFlowData[]>([]);
+  const [agingData, setAgingData] = useState<AgingData[]>([]);
+
+  // Determine if this is a Kanban (continuous flow) team
+  const isKanban = !workflowConfig?.cycleEnabled;
 
   const { execute: fetchCycleTime, isExecuting: loadingCycleTime } = useAction(getCycleTimeMetrics, {
     onSuccess: ({ data }) => {
@@ -70,13 +79,30 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
     },
   });
 
+  const { execute: fetchCfd, isExecuting: loadingCfd } = useAction(getCumulativeFlowData, {
+    onSuccess: ({ data }) => {
+      setCfdData(data?.data ?? []);
+    },
+  });
+
+  const { execute: fetchAging, isExecuting: loadingAging } = useAction(getAgingAnalysis, {
+    onSuccess: ({ data }) => {
+      setAgingData(data?.data ?? []);
+    },
+  });
+
   useEffect(() => {
     fetchCycleTime({ teamId, days });
     fetchThroughput({ teamId, days });
     fetchStatus({ teamId });
-  }, [teamId, days]);
+    // Kanban-specific metrics
+    if (isKanban) {
+      fetchCfd({ teamId, days });
+      fetchAging({ teamId });
+    }
+  }, [teamId, days, isKanban]);
 
-  const isLoading = loadingCycleTime || loadingThroughput || loadingStatus;
+  const isLoading = loadingCycleTime || loadingThroughput || loadingStatus || loadingCfd || loadingAging;
 
   // Calculate total for percentage
   const totalItems = statusDist.reduce((sum, s) => sum + s.count, 0);
@@ -244,6 +270,131 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
         )}
       </div>
 
+      {/* Cumulative Flow Diagram (Kanban-specific) */}
+      {isKanban && cfdData.length > 0 && (
+        <div className="component-card">
+          <div className="flex items-center gap-2 mb-6">
+            <Activity className="w-5 h-5 text-violet-400" />
+            <h3 className="font-medium">Cumulative Flow Diagram</h3>
+          </div>
+          <div className="h-48 flex items-end gap-1">
+            {cfdData.slice(-14).map((day, idx) => {
+              const total = day.PLANNING + day.IN_PROGRESS + day.BLOCKED + day.REVIEW + day.COMPLETED;
+              if (total === 0) return null;
+              const maxTotal = Math.max(...cfdData.slice(-14).map(d =>
+                d.PLANNING + d.IN_PROGRESS + d.BLOCKED + d.REVIEW + d.COMPLETED
+              ));
+
+              return (
+                <div key={day.date} className="flex-1 flex flex-col h-full justify-end">
+                  <div className="flex flex-col rounded-t overflow-hidden" style={{ height: `${(total / maxTotal) * 100}%` }}>
+                    {day.COMPLETED > 0 && (
+                      <div
+                        className="bg-emerald-500"
+                        style={{ height: `${(day.COMPLETED / total) * 100}%` }}
+                        title={`Completed: ${day.COMPLETED}`}
+                      />
+                    )}
+                    {day.REVIEW > 0 && (
+                      <div
+                        className="bg-amber-500"
+                        style={{ height: `${(day.REVIEW / total) * 100}%` }}
+                        title={`Review: ${day.REVIEW}`}
+                      />
+                    )}
+                    {day.BLOCKED > 0 && (
+                      <div
+                        className="bg-red-500"
+                        style={{ height: `${(day.BLOCKED / total) * 100}%` }}
+                        title={`Blocked: ${day.BLOCKED}`}
+                      />
+                    )}
+                    {day.IN_PROGRESS > 0 && (
+                      <div
+                        className="bg-cyan-500"
+                        style={{ height: `${(day.IN_PROGRESS / total) * 100}%` }}
+                        title={`In Progress: ${day.IN_PROGRESS}`}
+                      />
+                    )}
+                    {day.PLANNING > 0 && (
+                      <div
+                        className="bg-slate-500"
+                        style={{ height: `${(day.PLANNING / total) * 100}%` }}
+                        title={`Planning: ${day.PLANNING}`}
+                      />
+                    )}
+                  </div>
+                  {idx % 2 === 0 && (
+                    <span className="text-[10px] text-slate-500 mt-1 -rotate-45 origin-left whitespace-nowrap">
+                      {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap gap-4 mt-4">
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-slate-500" /><span className="text-xs text-slate-400">Planning</span></div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-cyan-500" /><span className="text-xs text-slate-400">In Progress</span></div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-red-500" /><span className="text-xs text-slate-400">Blocked</span></div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-amber-500" /><span className="text-xs text-slate-400">Review</span></div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-emerald-500" /><span className="text-xs text-slate-400">Completed</span></div>
+          </div>
+          <p className="text-xs text-slate-500 mt-3">
+            CFD shows bottlenecks - if bands widen, work is accumulating in that status.
+          </p>
+        </div>
+      )}
+
+      {/* Aging Analysis (Kanban-specific) */}
+      {isKanban && agingData.length > 0 && (
+        <div className="component-card">
+          <div className="flex items-center gap-2 mb-6">
+            <AlertTriangle className="w-5 h-5 text-amber-400" />
+            <h3 className="font-medium">Aging Analysis</h3>
+          </div>
+          <div className="space-y-4">
+            {agingData.filter(d => d.itemCount > 0).map(status => {
+              const isWarning =
+                (status.status === 'IN_PROGRESS' && status.avgDays > 5) ||
+                (status.status === 'BLOCKED' && status.avgDays > 2) ||
+                (status.status === 'REVIEW' && status.avgDays > 3);
+              const isCritical =
+                (status.status === 'IN_PROGRESS' && status.avgDays > 7) ||
+                (status.status === 'BLOCKED' && status.avgDays > 3) ||
+                (status.status === 'REVIEW' && status.avgDays > 5);
+
+              return (
+                <div key={status.status} className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded ${STATUS_COLORS[status.status]}`} />
+                    <span className="text-sm">{STATUS_LABELS[status.status]}</span>
+                    <span className="text-xs text-slate-500">({status.itemCount} items)</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <span className={`text-sm font-medium ${
+                        isCritical ? 'text-red-400' : isWarning ? 'text-amber-400' : 'text-slate-300'
+                      }`}>
+                        Avg: {status.avgDays.toFixed(1)}d
+                      </span>
+                      <span className="text-xs text-slate-500 ml-2">
+                        Max: {status.maxDays.toFixed(1)}d
+                      </span>
+                    </div>
+                    {isCritical && <AlertTriangle className="w-4 h-4 text-red-400" />}
+                    {isWarning && !isCritical && <AlertTriangle className="w-4 h-4 text-amber-400" />}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-500 mt-4">
+            High aging in a column indicates a bottleneck. Consider WIP limits or process improvements.
+          </p>
+        </div>
+      )}
+
       {/* Info Box */}
       <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
         <h4 className="font-medium text-slate-300 mb-2">Understanding These Metrics</h4>
@@ -260,6 +411,16 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
             <strong>WIP</strong>: Work in Progress. Keep this low to reduce context switching and
             improve flow.
           </li>
+          {isKanban && (
+            <>
+              <li>
+                <strong>Cumulative Flow</strong>: Shows work distribution over time. Widening bands indicate bottlenecks.
+              </li>
+              <li>
+                <strong>Aging Analysis</strong>: Shows how long items sit in each status. Helps identify stuck work.
+              </li>
+            </>
+          )}
         </ul>
       </div>
     </div>

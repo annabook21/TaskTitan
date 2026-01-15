@@ -113,6 +113,15 @@ export default async function ProjectDetailPage({ params }: Props) {
             orderBy: { createdAt: 'desc' },
             select: { id: true, htmlContent: true },
           },
+          // Load status history for aging and cycle time calculation (Kanban feature)
+          StatusHistory: {
+            orderBy: { enteredAt: 'asc' },
+            select: {
+              status: true,
+              enteredAt: true,
+              exitedAt: true,
+            },
+          },
         },
         orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
       },
@@ -129,17 +138,37 @@ export default async function ProjectDetailPage({ params }: Props) {
   }
 
   // Map components for easier use
-  const components = project.Component.map((c) => ({
-    ...c,
-    sprint: c.Sprint,
-    assignments: c.Assignment.map((a) => ({ ...a, user: a.User })),
-    dependsOn: c.Dependency_Dependency_dependentComponentIdToComponent.map((d) => ({
-      requiredComponent: d.Component_Dependency_requiredComponentIdToComponent,
-    })),
-    dependedOnBy: c.Dependency_Dependency_requiredComponentIdToComponent.map((d) => ({
-      dependentComponent: d.Component_Dependency_dependentComponentIdToComponent,
-    })),
-  }));
+  const components = project.Component.map((c) => {
+    // Find current status entry (no exit time)
+    const currentStatusEntry = c.StatusHistory.find((h) => !h.exitedAt) || c.StatusHistory[c.StatusHistory.length - 1];
+
+    // Calculate cycle time for completed items (IN_PROGRESS -> COMPLETED)
+    let cycleTimeDays: number | null = null;
+    if (c.status === 'COMPLETED') {
+      const inProgressEntry = c.StatusHistory.find((h) => h.status === 'IN_PROGRESS');
+      const completedEntry = c.StatusHistory.find((h) => h.status === 'COMPLETED');
+      if (inProgressEntry && completedEntry) {
+        const cycleTimeMs = completedEntry.enteredAt.getTime() - inProgressEntry.enteredAt.getTime();
+        cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10; // One decimal place
+      }
+    }
+
+    return {
+      ...c,
+      sprint: c.Sprint,
+      assignments: c.Assignment.map((a) => ({ ...a, user: a.User })),
+      dependsOn: c.Dependency_Dependency_dependentComponentIdToComponent.map((d) => ({
+        requiredComponent: d.Component_Dependency_requiredComponentIdToComponent,
+      })),
+      dependedOnBy: c.Dependency_Dependency_requiredComponentIdToComponent.map((d) => ({
+        dependentComponent: d.Component_Dependency_dependentComponentIdToComponent,
+      })),
+      // For aging indicator
+      statusEnteredAt: currentStatusEntry?.enteredAt || c.createdAt,
+      // For completed items - show how long it took
+      cycleTimeDays,
+    };
+  });
 
   // Get available sprints for this team
   const availableSprints = project.Team.Sprint || [];
@@ -168,6 +197,7 @@ export default async function ProjectDetailPage({ params }: Props) {
   const cycleEnabled = workflowConfig?.cycleEnabled ?? true;
   const cycleName = workflowConfig?.cycleName || 'Sprint';
   const cycleNamePlural = `${cycleName}s`;
+  const isKanban = !cycleEnabled; // Teams without cycles are Kanban/continuous flow
 
   // Get WIP limits for each status
   const wipLimits = {
@@ -287,9 +317,19 @@ export default async function ProjectDetailPage({ params }: Props) {
                       ([status, statusComponents]) => {
                         const wipLimit = wipLimits[status];
                         const isOverLimit = wipLimit && statusComponents.length > wipLimit;
+                        const isAtLimit = wipLimit && statusComponents.length === wipLimit;
 
                         return (
-                          <div key={status} className="space-y-3">
+                          <div
+                            key={status}
+                            className={`space-y-3 rounded-lg p-3 -m-3 transition-colors ${
+                              isOverLimit
+                                ? 'bg-red-500/5 border-2 border-red-500/40'
+                                : isAtLimit
+                                  ? 'bg-amber-500/5 border-2 border-amber-500/30'
+                                  : ''
+                            }`}
+                          >
                             <div className="flex items-center justify-between">
                               <h3
                                 className={`text-sm font-medium flex items-center gap-2 text-${statusConfig[status].color}-400`}
@@ -301,14 +341,19 @@ export default async function ProjectDetailPage({ params }: Props) {
                                   <span
                                     className={`text-xs px-1.5 py-0.5 rounded ${
                                       isOverLimit
-                                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                                        : 'bg-slate-700 text-slate-400'
+                                        ? 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
+                                        : isAtLimit
+                                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                          : 'bg-slate-700 text-slate-400'
                                     }`}
                                   >
-                                    /{wipLimit}
+                                    {statusComponents.length}/{wipLimit}
                                   </span>
                                 )}
                               </h3>
+                              {isOverLimit && (
+                                <span className="text-xs text-red-400 font-medium">WIP exceeded!</span>
+                              )}
                             </div>
 
                             <div className="space-y-3 min-h-[100px]">
@@ -318,6 +363,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                                   component={component}
                                   teamMembers={teamMembers}
                                   availableSprints={availableSprints}
+                                  showAging={isKanban}
                                 />
                               ))}
                             </div>

@@ -244,3 +244,178 @@ export const getWipOverTime = authActionClient
       message: 'Historical WIP tracking coming soon',
     };
   });
+
+export interface CumulativeFlowData {
+  date: string;
+  PLANNING: number;
+  IN_PROGRESS: number;
+  BLOCKED: number;
+  REVIEW: number;
+  COMPLETED: number;
+}
+
+/**
+ * Get cumulative flow diagram data (Kanban-specific metric)
+ * Shows the distribution of items across statuses over time
+ */
+export const getCumulativeFlowData = authActionClient
+  .schema(metricsQuerySchema)
+  .action(async ({ parsedInput, ctx }) => {
+    const { teamId, days } = parsedInput;
+    const { userId } = ctx;
+
+    // Check membership
+    const membership = await prisma.membership.findFirst({
+      where: { teamId, userId },
+    });
+
+    if (!membership) {
+      throw new MyCustomError('You are not a member of this team');
+    }
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get all status history events for this team's components
+    const statusHistory = await prisma.componentStatusHistory.findMany({
+      where: {
+        Component: {
+          Project: { teamId },
+        },
+      },
+      select: {
+        status: true,
+        enteredAt: true,
+        exitedAt: true,
+      },
+      orderBy: { enteredAt: 'asc' },
+    });
+
+    // Also get current component counts by status
+    const currentCounts = await prisma.component.groupBy({
+      by: ['status'],
+      where: {
+        Project: { teamId },
+      },
+      _count: { status: true },
+    });
+
+    const currentCountMap: Record<string, number> = {};
+    for (const c of currentCounts) {
+      currentCountMap[c.status] = c._count.status;
+    }
+
+    // Build daily snapshots
+    // For simplicity, we'll generate data for each day from startDate to now
+    const data: CumulativeFlowData[] = [];
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    // Initialize with zeros
+    const statuses = ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'] as const;
+
+    for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+      const dayEnd = new Date(d);
+      dayEnd.setHours(23, 59, 59, 999);
+      const dateStr = d.toISOString().split('T')[0];
+
+      // Count items in each status at the end of this day
+      // An item is in a status on a given day if:
+      // - enteredAt <= dayEnd AND (exitedAt > dayEnd OR exitedAt is null)
+      const dayCounts: Record<string, number> = {
+        PLANNING: 0,
+        IN_PROGRESS: 0,
+        BLOCKED: 0,
+        REVIEW: 0,
+        COMPLETED: 0,
+      };
+
+      for (const event of statusHistory) {
+        const enteredAt = new Date(event.enteredAt);
+        const exitedAt = event.exitedAt ? new Date(event.exitedAt) : null;
+
+        if (enteredAt <= dayEnd && (!exitedAt || exitedAt > dayEnd)) {
+          dayCounts[event.status]++;
+        }
+      }
+
+      data.push({
+        date: dateStr,
+        PLANNING: dayCounts.PLANNING,
+        IN_PROGRESS: dayCounts.IN_PROGRESS,
+        BLOCKED: dayCounts.BLOCKED,
+        REVIEW: dayCounts.REVIEW,
+        COMPLETED: dayCounts.COMPLETED,
+      });
+    }
+
+    return { data };
+  });
+
+export interface AgingData {
+  status: string;
+  avgDays: number;
+  maxDays: number;
+  itemCount: number;
+}
+
+/**
+ * Get aging analysis for items in each status (Kanban-specific)
+ * Shows how long items have been sitting in each column
+ */
+export const getAgingAnalysis = authActionClient
+  .schema(z.object({ teamId: z.string().cuid() }))
+  .action(async ({ parsedInput, ctx }) => {
+    const { teamId } = parsedInput;
+    const { userId } = ctx;
+
+    // Check membership
+    const membership = await prisma.membership.findFirst({
+      where: { teamId, userId },
+    });
+
+    if (!membership) {
+      throw new MyCustomError('You are not a member of this team');
+    }
+
+    // Get current status entries (exitedAt is null)
+    const currentStatusEntries = await prisma.componentStatusHistory.findMany({
+      where: {
+        exitedAt: null,
+        Component: {
+          Project: { teamId },
+          status: { not: 'COMPLETED' },
+        },
+      },
+      select: {
+        status: true,
+        enteredAt: true,
+      },
+    });
+
+    // Calculate aging by status
+    const agingByStatus: Record<string, { days: number[] }> = {
+      PLANNING: { days: [] },
+      IN_PROGRESS: { days: [] },
+      BLOCKED: { days: [] },
+      REVIEW: { days: [] },
+    };
+
+    const now = new Date();
+    for (const entry of currentStatusEntries) {
+      const daysInStatus = (now.getTime() - entry.enteredAt.getTime()) / (1000 * 60 * 60 * 24);
+      if (agingByStatus[entry.status]) {
+        agingByStatus[entry.status].days.push(daysInStatus);
+      }
+    }
+
+    const data: AgingData[] = Object.entries(agingByStatus).map(([status, { days }]) => ({
+      status,
+      avgDays: days.length > 0 ? days.reduce((a, b) => a + b, 0) / days.length : 0,
+      maxDays: days.length > 0 ? Math.max(...days) : 0,
+      itemCount: days.length,
+    }));
+
+    return { data };
+  });
