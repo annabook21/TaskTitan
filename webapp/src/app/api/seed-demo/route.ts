@@ -37,7 +37,43 @@ const demoUsers = [
     id: 'demo-emily-watson-006',
     email: 'emily.watson@demo.tasktitan.dev',
     name: 'Emily Watson',
-    role: 'VIEWER' as const,
+    role: 'MEMBER' as const,
+  },
+  {
+    id: 'demo-david-kim-007',
+    email: 'david.kim@demo.tasktitan.dev',
+    name: 'David Kim',
+    role: 'MEMBER' as const,
+  },
+  {
+    id: 'demo-lisa-zhang-008',
+    email: 'lisa.zhang@demo.tasktitan.dev',
+    name: 'Lisa Zhang',
+    role: 'MEMBER' as const,
+  },
+  {
+    id: 'demo-michael-brown-009',
+    email: 'michael.brown@demo.tasktitan.dev',
+    name: 'Michael Brown',
+    role: 'MEMBER' as const,
+  },
+  {
+    id: 'demo-nina-patel-010',
+    email: 'nina.patel@demo.tasktitan.dev',
+    name: 'Nina Patel',
+    role: 'MEMBER' as const,
+  },
+  {
+    id: 'demo-chris-taylor-011',
+    email: 'chris.taylor@demo.tasktitan.dev',
+    name: 'Chris Taylor',
+    role: 'MEMBER' as const,
+  },
+  {
+    id: 'demo-anna-mueller-012',
+    email: 'anna.mueller@demo.tasktitan.dev',
+    name: 'Anna Mueller',
+    role: 'MEMBER' as const,
   },
 ];
 

@@ -24,6 +24,9 @@ import {
   CachePolicy,
   OriginRequestPolicy,
   SecurityPolicyProtocol,
+  Function as CloudFrontFunction,
+  FunctionCode,
+  FunctionEventType,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { LoadBalancerV2Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { Port } from 'aws-cdk-lib/aws-ec2';
@@ -249,6 +252,21 @@ export class Webapp extends Construct {
     const originVerifyHeader = 'X-Origin-Verify';
     const originVerifyValue = `TaskTitan-${Stack.of(this).account}-${Stack.of(this).region}`;
 
+    // CloudFront Function to set x-forwarded-host header for Next.js Server Actions
+    // Next.js CSRF protection compares Origin header with X-Forwarded-Host
+    // Without this, Server Actions fail with 403 because headers don't match
+    // Reference: https://github.com/vercel/next.js/issues/58295
+    const setForwardedHostFn = new CloudFrontFunction(this, 'SetForwardedHost', {
+      code: FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  request.headers['x-forwarded-host'] = request.headers.host;
+  return request;
+}
+`),
+      comment: 'Set x-forwarded-host for Next.js Server Actions CSRF validation',
+    });
+
     // CloudFront Distribution for global edge caching and HTTPS
     // IMPORTANT: Uses nested construct 'Resource/Resource' to match old CloudFormation logical ID
     // (old CloudFrontLambdaFunctionUrlService used ID 'Resource' inside Webapp).
@@ -271,6 +289,13 @@ export class Webapp extends Construct {
         allowedMethods: AllowedMethods.ALLOW_ALL,
         cachePolicy: CachePolicy.CACHING_DISABLED, // SSR - no caching by default
         originRequestPolicy: OriginRequestPolicy.ALL_VIEWER,
+        // Attach CloudFront Function to set x-forwarded-host for Server Actions
+        functionAssociations: [
+          {
+            function: setForwardedHostFn,
+            eventType: FunctionEventType.VIEWER_REQUEST,
+          },
+        ],
       },
       ...(hostedZone && props.certificate
         ? {
@@ -283,11 +308,22 @@ export class Webapp extends Construct {
       logFilePrefix: 'webapp/',
     });
 
-    // Configure ALB listener to validate origin header
-    // Requests without the correct header will receive 403 Forbidden
-    // The default action (403) is already set on the listener - this rule forwards valid requests
+    // Configure ALB listener rules for origin verification
+    // Rule 1: Allow OPTIONS preflight requests (CORS) - these don't include custom headers
+    // Without this, browser preflight requests get 403 and block POST/PUT/DELETE
+    listener.addAction('AllowPreflight', {
+      priority: 10,
+      conditions: [ListenerCondition.httpRequestMethods(['OPTIONS'])],
+      action: ListenerAction.fixedResponse(200, {
+        contentType: 'text/plain',
+        messageBody: '',
+      }),
+    });
+
+    // Rule 2: Validate origin header for actual requests
+    // Requests without the correct header will receive 403 Forbidden (default action)
     listener.addAction('ValidateOrigin', {
-      priority: 1,
+      priority: 20,
       conditions: [ListenerCondition.httpHeader(originVerifyHeader, [originVerifyValue])],
       action: ListenerAction.forward([fargateService.targetGroup]),
     });
