@@ -2,15 +2,17 @@
  * Component Generator
  *
  * AI-powered component generation based on project descriptions.
+ * Supports workflow-aware generation (Scrum vs Kanban vs custom workflows).
  */
 
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { getBedrockClient } from '../bedrock-client';
 import { MODEL_ID } from '../config';
 import { extractJsonFromResponse } from '../utils/response-parsing';
-import { COMPONENT_GENERATION_SYSTEM_PROMPT, buildComponentGenerationPrompt } from '../prompts/component-generation';
+import { buildSystemPrompt, buildComponentGenerationPrompt } from '../prompts/component-generation';
 import { logger } from '@/lib/logger';
 import type { AIGenerationResult } from '../types';
+import type { TeamWorkflowConfig } from '@prisma/client';
 
 /**
  * Generates component suggestions for a project based on its description.
@@ -18,21 +20,26 @@ import type { AIGenerationResult } from '../types';
  * @param projectName - Name of the project
  * @param projectDescription - Detailed description of the project
  * @param existingComponents - Optional array of existing component names to avoid duplicates
- * @param generateSprints - Whether to also generate a sprint plan (default: false)
+ * @param generateCycles - Whether to also generate a cycle/sprint plan (default: false)
+ * @param workflowConfig - Optional team workflow configuration for workflow-aware generation
  */
 export async function generateComponents(
   projectName: string,
   projectDescription: string,
   existingComponents: string[] = [],
-  generateSprints: boolean = false,
+  generateCycles: boolean = false,
+  workflowConfig?: TeamWorkflowConfig | null,
 ): Promise<AIGenerationResult> {
   const client = getBedrockClient();
 
+  // Build workflow-aware prompts
+  const systemPrompt = buildSystemPrompt(workflowConfig ?? null);
   const userPrompt = buildComponentGenerationPrompt(
     projectName,
     projectDescription,
     existingComponents,
-    generateSprints,
+    generateCycles,
+    workflowConfig,
   );
 
   try {
@@ -43,7 +50,7 @@ export async function generateComponents(
       body: JSON.stringify({
         anthropic_version: 'bedrock-2023-05-31',
         max_tokens: 4096,
-        system: COMPONENT_GENERATION_SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: [
           {
             role: 'user',

@@ -26,9 +26,11 @@ interface Props {
   sprints: Sprint[];
   components: Component[];
   teamId: string;
+  cycleName?: string;
 }
 
-export default function SprintTimeline({ sprints, components, teamId }: Props) {
+export default function SprintTimeline({ sprints, components, teamId, cycleName = 'Sprint' }: Props) {
+  const cycleNamePlural = `${cycleName}s`;
   if (sprints.length === 0) {
     return null;
   }
@@ -41,10 +43,10 @@ export default function SprintTimeline({ sprints, components, teamId }: Props) {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold flex items-center gap-2">
           <Calendar className="w-5 h-5 text-amber-400" />
-          Sprint Timeline
+          {cycleName} Timeline
         </h2>
         <Link href={`/team/${teamId}/sprints`} className="text-sm text-cyan-400 hover:text-cyan-300">
-          Manage Sprints →
+          Manage {cycleNamePlural} →
         </Link>
       </div>
 

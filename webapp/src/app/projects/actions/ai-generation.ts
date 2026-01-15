@@ -41,6 +41,7 @@ const applyAIComponentsSchema = z.object({
 
 /**
  * Generates AI component suggestions based on project description
+ * Respects team workflow configuration for Scrum vs Kanban vs custom workflows
  */
 export const generateAIComponents = authActionClient
   .schema(generateComponentsSchema)
@@ -53,7 +54,7 @@ export const generateAIComponents = authActionClient
       throw new MyCustomError('AI features require Amazon Bedrock access in your AWS account.');
     }
 
-    // Get the project
+    // Get the project with team workflow configuration
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
@@ -62,6 +63,11 @@ export const generateAIComponents = authActionClient
       include: {
         Component: {
           select: { name: true },
+        },
+        Team: {
+          include: {
+            WorkflowConfig: true,
+          },
         },
       },
     });
@@ -77,9 +83,17 @@ export const generateAIComponents = authActionClient
     }
 
     const existingNames = project.Component.map((c: { name: string }) => c.name);
+    const workflowConfig = project.Team.WorkflowConfig;
 
-    // Generate components using AI (optionally with sprints)
-    const result = await generateComponents(project.name, project.description, existingNames, generateSprints);
+    // Generate components using AI (optionally with cycles/sprints)
+    // Pass workflow config so AI can generate appropriate structure (flat for Kanban, hierarchical for Scrum)
+    const result = await generateComponents(
+      project.name,
+      project.description,
+      existingNames,
+      generateSprints,
+      workflowConfig,
+    );
 
     return {
       components: result.components,

@@ -247,6 +247,10 @@ model TeamWorkflowConfig {
   cycleEnabled         Boolean  @default(false)
   cycleDurationWeeks   Int? // 1, 2, 4, or 6 weeks
   cycleStartDayOfWeek  Int? // 0=Sunday, 1=Monday, etc.
+  // Workflow Template & Terminology
+  workflowTemplate     String?  @default("CUSTOM") // "SCRUM", "KANBAN", "SHAPE_UP", "CUSTOM"
+  cycleName            String?  @default("Sprint") // "Sprint", "Cycle", "Iteration"
+  backlogName          String?  @default("Backlog") // "Backlog", "Icebox", "Pitches"
   // Other Configuration
   enforceEstimates     Boolean  @default(false)
   autoArchiveCompleted Boolean  @default(false)

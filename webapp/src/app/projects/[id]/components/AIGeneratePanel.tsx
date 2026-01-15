@@ -41,17 +41,29 @@ interface Props {
   projectId: string;
   hasDescription: boolean;
   autoOpen?: boolean;
+  cycleEnabled?: boolean;
+  cycleName?: string;
 }
 
-export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = false }: Props) {
+export default function AIGeneratePanel({
+  projectId,
+  hasDescription,
+  autoOpen = false,
+  cycleEnabled = true,
+  cycleName = 'Sprint',
+}: Props) {
   const [isOpen, setIsOpen] = useState(autoOpen);
   const [generatedComponents, setGeneratedComponents] = useState<GeneratedComponent[]>([]);
   const [generatedSprints, setGeneratedSprints] = useState<GeneratedSprint[]>([]);
   const [summary, setSummary] = useState('');
   const [enhancedDescription, setEnhancedDescription] = useState('');
   const [selectedComponents, setSelectedComponents] = useState<Set<string>>(new Set());
-  const [generateSprints, setGenerateSprints] = useState(true);
+  const [generateCycles, setGenerateCycles] = useState(cycleEnabled);
   const [hasAttemptedAutoGeneration, setHasAttemptedAutoGeneration] = useState(false);
+
+  // Terminology
+  const cycleNameLower = cycleName.toLowerCase();
+  const cycleNamePlural = `${cycleName}s`;
 
   // Track mounted state to prevent state updates after unmount
   const isMountedRef = useRef(true);
@@ -84,7 +96,7 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
             (s, idx) => idx > sprintIndex && s.componentNames.includes(depName),
           );
           if (laterSprint !== -1) {
-            warnings.push(`${compName} depends on ${depName} (Sprint ${laterSprint + 1})`);
+            warnings.push(`${compName} depends on ${depName} (${cycleName} ${laterSprint + 1})`);
           }
         }
       }
@@ -131,7 +143,7 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
   const handleGenerate = () => {
     setGeneratedComponents([]);
     setGeneratedSprints([]);
-    executeGenerate({ projectId, generateSprints });
+    executeGenerate({ projectId, generateSprints: generateCycles });
   };
 
   const handleApply = () => {
@@ -239,19 +251,21 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
                   )}
 
                   <div className="flex flex-col items-center gap-4">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={generateSprints}
-                        onChange={(e) => setGenerateSprints(e.target.checked)}
-                        className="w-4 h-4 rounded border-cyan-500/50 bg-slate-800 text-cyan-500 focus:ring-2 focus:ring-cyan-500/50"
-                      />
-                      <span className="text-sm text-slate-300">Also generate sprint plan</span>
-                    </label>
+                    {cycleEnabled && (
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={generateCycles}
+                          onChange={(e) => setGenerateCycles(e.target.checked)}
+                          className="w-4 h-4 rounded border-cyan-500/50 bg-slate-800 text-cyan-500 focus:ring-2 focus:ring-cyan-500/50"
+                        />
+                        <span className="text-sm text-slate-300">Also generate {cycleNameLower} plan</span>
+                      </label>
+                    )}
 
                     <button onClick={handleGenerate} disabled={isGenerating || !hasDescription} className="btn-primary">
                       <Sparkles className="w-5 h-5" />
-                      Generate {generateSprints ? 'Components & Sprints' : 'Components'}
+                      Generate {generateCycles && cycleEnabled ? `Components & ${cycleNamePlural}` : 'Components'}
                     </button>
                   </div>
                 </div>
@@ -335,20 +349,20 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
                 })}
               </div>
 
-              {/* Sprints Section */}
+              {/* Cycles/Sprints Section */}
               {generatedSprints.length > 0 && (
                 <div className="space-y-4">
                   <div className="border-t border-slate-700 pt-6">
                     <h4 className="font-medium text-amber-300 mb-2 flex items-center gap-2">
                       <Zap className="w-5 h-5" />
-                      Suggested Sprint Plan ({generatedSprints.length} sprints)
+                      Suggested {cycleName} Plan ({generatedSprints.length} {cycleNameLower}s)
                     </h4>
                     <div className="mb-4 p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg text-xs text-slate-400">
                       <div className="flex items-start gap-2">
                         <TrendingUp className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-green-400" />
                         <div>
-                          <span className="text-slate-300 font-medium">Smart capacity planning:</span> Sprints include a
-                          20% buffer for meetings, code review, testing, and unexpected issues. Target 70-80%
+                          <span className="text-slate-300 font-medium">Smart capacity planning:</span> {cycleNamePlural}{' '}
+                          include a 20% buffer for meetings, code review, testing, and unexpected issues. Target 70-80%
                           utilization for healthy velocity.
                         </div>
                       </div>
@@ -374,7 +388,7 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
                             <div className="flex items-start justify-between mb-2">
                               <div className="flex-1">
                                 <h5 className="font-medium text-slate-200 mb-1">
-                                  Sprint {index + 1}: {sprint.name}
+                                  {cycleName} {index + 1}: {sprint.name}
                                 </h5>
                                 <p className="text-sm text-slate-400 mb-2">{sprint.goal}</p>
                                 <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
@@ -468,7 +482,7 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
                 {generatedSprints.length > 0 && (
                   <span className="flex items-center gap-2">
                     <Zap className="w-4 h-4" />
-                    {generatedSprints.length} sprints
+                    {generatedSprints.length} {cycleNameLower}s
                   </span>
                 )}
               </div>

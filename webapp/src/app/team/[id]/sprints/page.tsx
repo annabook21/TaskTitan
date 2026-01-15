@@ -67,6 +67,7 @@ export default async function SprintsPage({ params }: Props) {
         where: { userId },
         select: { role: true },
       },
+      WorkflowConfig: true,
     },
   });
 
@@ -76,6 +77,11 @@ export default async function SprintsPage({ params }: Props) {
 
   const currentUserRole = team.Membership[0]?.role;
   const canManageSprints = currentUserRole === 'OWNER' || currentUserRole === 'ADMIN';
+
+  // Get workflow terminology
+  const cycleName = team.WorkflowConfig?.cycleName || 'Sprint';
+  const cycleNameLower = cycleName.toLowerCase();
+  const cycleNamePlural = `${cycleName}s`;
 
   // Separate sprints by status
   const activeSprint = team.Sprint.find((s) => s.status === 'ACTIVE');
@@ -102,15 +108,15 @@ export default async function SprintsPage({ params }: Props) {
             <div>
               <h1 className="text-3xl font-bold flex items-center gap-3">
                 <Zap className="w-8 h-8 text-amber-400" />
-                Sprints
+                {cycleNamePlural}
               </h1>
-              <p className="text-slate-400 mt-1">Plan and track work in timeboxed iterations</p>
+              <p className="text-slate-400 mt-1">Plan and track work in timeboxed {cycleNameLower}s</p>
             </div>
 
             {canManageSprints && (
               <Link href={`/team/${id}/sprints/new`} className="btn-primary">
                 <Plus className="w-5 h-5" />
-                New Sprint
+                New {cycleName}
               </Link>
             )}
           </div>
@@ -120,7 +126,7 @@ export default async function SprintsPage({ params }: Props) {
             <div className="mb-8">
               <h2 className="text-lg font-semibold text-green-400 mb-4 flex items-center gap-2">
                 <PlayCircle className="w-5 h-5" />
-                Active Sprint
+                Active {cycleName}
               </h2>
               <SprintCard sprint={activeSprint} teamId={id} featured />
             </div>
@@ -160,14 +166,15 @@ export default async function SprintsPage({ params }: Props) {
           {team.Sprint.length === 0 && (
             <div className="component-card text-center py-16">
               <Zap className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-              <h3 className="text-xl font-medium text-slate-300 mb-2">No sprints yet</h3>
+              <h3 className="text-xl font-medium text-slate-300 mb-2">No {cycleNameLower}s yet</h3>
               <p className="text-slate-500 mb-6 max-w-md mx-auto">
-                Sprints help you organize work into focused time periods. Create your first sprint to start planning.
+                {cycleNamePlural} help you organize work into focused time periods. Create your first {cycleNameLower} to
+                start planning.
               </p>
               {canManageSprints && (
                 <Link href={`/team/${id}/sprints/new`} className="btn-primary">
                   <Plus className="w-5 h-5" />
-                  Create First Sprint
+                  Create First {cycleName}
                 </Link>
               )}
             </div>

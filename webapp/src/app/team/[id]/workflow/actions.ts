@@ -16,6 +16,10 @@ const workflowConfigSchema = z.object({
   cycleEnabled: z.boolean(),
   cycleDurationWeeks: z.number().int().min(1).max(6).optional().nullable(),
   cycleStartDayOfWeek: z.number().int().min(0).max(6).optional().nullable(),
+  // Workflow template and terminology
+  workflowTemplate: z.enum(['SCRUM', 'KANBAN', 'SHAPE_UP', 'CUSTOM']).optional().nullable(),
+  cycleName: z.string().min(1).max(20).optional().nullable(),
+  backlogName: z.string().min(1).max(20).optional().nullable(),
   enforceEstimates: z.boolean(),
   autoArchiveCompleted: z.boolean(),
 });

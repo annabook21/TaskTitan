@@ -15,6 +15,8 @@ import {
   Mail,
   Calendar,
   Zap,
+  Settings,
+  BarChart3,
 } from 'lucide-react';
 import InviteButton from './InviteButton';
 import SeedDemoButton from './SeedDemoButton';
@@ -58,6 +60,7 @@ export default async function TeamDetailPage({ params }: Props) {
         },
         orderBy: { updatedAt: 'desc' },
       },
+      WorkflowConfig: true,
     },
   });
 
@@ -68,6 +71,12 @@ export default async function TeamDetailPage({ params }: Props) {
   // Get current user's role in this team
   const currentUserMembership = team.Membership.find((m) => String(m.userId) === String(userId));
   const isOwnerOrAdmin = currentUserMembership?.role === 'OWNER' || currentUserMembership?.role === 'ADMIN';
+
+  // Get workflow terminology
+  const workflowConfig = team.WorkflowConfig;
+  const cycleEnabled = workflowConfig?.cycleEnabled ?? true;
+  const cycleName = workflowConfig?.cycleName || 'Sprint';
+  const cycleNamePlural = `${cycleName}s`;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -111,13 +120,31 @@ export default async function TeamDetailPage({ params }: Props) {
             </div>
 
             <div className="flex items-center gap-3">
+              {cycleEnabled && (
+                <Link
+                  href={`/team/${team.id}/sprints`}
+                  className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-amber-300 font-medium transition-colors inline-flex items-center gap-2"
+                >
+                  <Zap className="w-5 h-5" />
+                  {cycleNamePlural}
+                </Link>
+              )}
               <Link
-                href={`/team/${team.id}/sprints`}
-                className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-amber-300 font-medium transition-colors inline-flex items-center gap-2"
+                href={`/team/${team.id}/metrics`}
+                className="px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-300 font-medium transition-colors inline-flex items-center gap-2"
               >
-                <Zap className="w-5 h-5" />
-                Sprints
+                <BarChart3 className="w-5 h-5" />
+                Metrics
               </Link>
+              {isOwnerOrAdmin && (
+                <Link
+                  href={`/team/${team.id}/workflow`}
+                  className="px-4 py-2.5 bg-slate-500/10 hover:bg-slate-500/20 border border-slate-500/30 rounded-xl text-slate-300 font-medium transition-colors inline-flex items-center gap-2"
+                >
+                  <Settings className="w-5 h-5" />
+                  Settings
+                </Link>
+              )}
               <Link href={`/projects/new?teamId=${team.id}`} className="btn-primary">
                 <Plus className="w-5 h-5" />
                 New Project
