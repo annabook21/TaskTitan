@@ -172,6 +172,10 @@ export class Webapp extends Construct {
     });
     this.fargateService = fargateService;
 
+    // Increase ALB idle timeout for long-running AI generation requests
+    // Default is 60s which is too short for Bedrock API calls
+    fargateService.loadBalancer.setAttribute('idle_timeout.timeout_seconds', '120');
+
     // Create a new listener with a fresh logical ID to avoid CloudFormation drift issues
     // This replaces the listener that was deleted outside of CloudFormation
     const listener = new ApplicationListener(this, 'PublicListener', {
@@ -256,6 +260,9 @@ export class Webapp extends Construct {
       defaultBehavior: {
         origin: new LoadBalancerV2Origin(fargateService.loadBalancer, {
           protocolPolicy: OriginProtocolPolicy.HTTP_ONLY,
+          // Increase read timeout for long-running AI generation requests
+          // Default is 30s which is too short for Bedrock API calls
+          readTimeout: Duration.seconds(120),
           customHeaders: {
             [originVerifyHeader]: originVerifyValue,
           },

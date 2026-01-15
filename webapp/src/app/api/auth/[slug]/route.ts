@@ -1,5 +1,4 @@
 import { createAuthRouteHandlers } from '@/lib/amplifyServerUtils';
-import { tracer, addTraceAnnotation } from '@/lib/tracer';
 import { logger } from '@/lib/logger';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -22,13 +21,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   const start = performance.now();
   const { slug } = await context.params;
 
-  // Create X-Ray subsegment for auth route
-  const segment = tracer.getSegment();
-  const subsegment = segment?.addNewSubsegment(`auth-route-${slug}`);
-
   try {
-    addTraceAnnotation('auth_action', slug);
-
     logger.info('Auth route handler started', {
       action: slug,
       path: request.nextUrl.pathname,
@@ -37,8 +30,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     // Call the base Amplify auth handler
     const baseHandler = await getBaseHandler();
     const response = await baseHandler(request, context);
-
-    subsegment?.close();
 
     const duration = performance.now() - start;
     logger.info('Auth route handler completed', {
@@ -50,9 +41,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
 
     return response;
   } catch (error) {
-    subsegment?.addError(error as Error);
-    subsegment?.close();
-
     const duration = performance.now() - start;
     logger.error('Auth route handler failed', {
       action: slug,

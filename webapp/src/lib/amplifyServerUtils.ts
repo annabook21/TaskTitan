@@ -15,13 +15,14 @@ async function resolveAmplifyAppOrigin(): Promise<string> {
   }
 
   // Only load AWS SDK + Powertools when we truly need the SSM fallback.
-  const [{ GetParameterCommand, SSMClient }, { tracer }, { logger }] = await Promise.all([
+  const [{ GetParameterCommand, SSMClient }, { logger }] = await Promise.all([
     import('@aws-sdk/client-ssm'),
-    import('@/lib/tracer'),
     import('@/lib/logger'),
   ]);
 
-  const ssm = tracer.captureAWSv3Client(new SSMClient({}));
+  // Note: Removed tracer.captureAWSv3Client - Powertools Tracer only works in Lambda
+  // For ECS/Fargate, use AWS X-Ray SDK directly if tracing is needed
+  const ssm = new SSMClient({});
   const ssmStart = performance.now();
 
   try {
