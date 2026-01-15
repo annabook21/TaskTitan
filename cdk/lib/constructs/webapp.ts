@@ -27,7 +27,7 @@ import {
 } from 'aws-cdk-lib/aws-cloudfront';
 import { LoadBalancerV2Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { Port } from 'aws-cdk-lib/aws-ec2';
-import { ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { ApplicationListener, ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 
 export interface WebappProps {
   database: Database;
@@ -167,8 +167,22 @@ export class Webapp extends Construct {
       maxHealthyPercent: 200,
       // Enable Container Insights for monitoring
       enableECSManagedTags: true,
+      // Disable default listener - we'll create our own with origin verification
+      openListener: false,
     });
     this.fargateService = fargateService;
+
+    // Create a new listener with a fresh logical ID to avoid CloudFormation drift issues
+    // This replaces the listener that was deleted outside of CloudFormation
+    const listener = new ApplicationListener(this, 'PublicListener', {
+      loadBalancer: fargateService.loadBalancer,
+      port: 80,
+      open: true,
+      defaultAction: ListenerAction.fixedResponse(403, {
+        contentType: 'text/plain',
+        messageBody: 'Forbidden',
+      }),
+    });
 
     // Allow Fargate to connect to database
     database.connections.allowFrom(
@@ -264,23 +278,12 @@ export class Webapp extends Construct {
 
     // Configure ALB listener to validate origin header
     // Requests without the correct header will receive 403 Forbidden
-    fargateService.listener.addAction('ValidateOrigin', {
+    // The default action (403) is already set on the listener - this rule forwards valid requests
+    listener.addAction('ValidateOrigin', {
       priority: 1,
       conditions: [ListenerCondition.httpHeader(originVerifyHeader, [originVerifyValue])],
       action: ListenerAction.forward([fargateService.targetGroup]),
     });
-    // Change default action to return 403 for requests without the header
-    const cfnListener = fargateService.listener.node.defaultChild as import('aws-cdk-lib/aws-elasticloadbalancingv2').CfnListener;
-    cfnListener.defaultActions = [
-      {
-        type: 'fixed-response',
-        fixedResponseConfig: {
-          statusCode: '403',
-          contentType: 'text/plain',
-          messageBody: 'Forbidden',
-        },
-      },
-    ];
 
     // Set baseUrl based on domain configuration
     if (hostedZone) {

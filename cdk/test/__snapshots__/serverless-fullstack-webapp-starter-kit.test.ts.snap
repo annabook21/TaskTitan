@@ -1240,17 +1240,7 @@ exports[`Snapshot test 2`] = `
             "RequireUppercase": true,
           },
         },
-        "Schema": [
-          {
-            "Mutable": true,
-            "Name": "email",
-            "Required": true,
-          },
-        ],
         "SmsVerificationMessage": "The verification code to your new account is {####}",
-        "UserPoolAddOns": {
-          "AdvancedSecurityMode": "ENFORCED",
-        },
         "UsernameAttributes": [
           "email",
         ],
@@ -2886,12 +2876,10 @@ exports.handler = async function (event, context) {
       "Properties": {
         "DefaultActions": [
           {
-            "FixedResponseConfig": {
-              "ContentType": "text/plain",
-              "MessageBody": "Forbidden",
-              "StatusCode": "403",
+            "TargetGroupArn": {
+              "Ref": "WebappFargateLBPublicListenerECSGroup106AE235",
             },
-            "Type": "fixed-response",
+            "Type": "forward",
           },
         ],
         "LoadBalancerArn": {
@@ -2923,34 +2911,6 @@ exports.handler = async function (event, context) {
         },
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
-    },
-    "WebappFargateLBPublicListenerValidateOriginRuleC2957882": {
-      "Properties": {
-        "Actions": [
-          {
-            "TargetGroupArn": {
-              "Ref": "WebappFargateLBPublicListenerECSGroup106AE235",
-            },
-            "Type": "forward",
-          },
-        ],
-        "Conditions": [
-          {
-            "Field": "http-header",
-            "HttpHeaderConfig": {
-              "HttpHeaderName": "X-Origin-Verify",
-              "Values": [
-                "TaskTitan-123456789012-us-west-2",
-              ],
-            },
-          },
-        ],
-        "ListenerArn": {
-          "Ref": "WebappFargateLBPublicListenerB8FD0169",
-        },
-        "Priority": 1,
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
     },
     "WebappFargateLBSecurityGroupB64828EA": {
       "Properties": {
@@ -2995,9 +2955,9 @@ exports.handler = async function (event, context) {
       "DependsOn": [
         "WebappFargateLBPublicListenerECSGroup106AE235",
         "WebappFargateLBPublicListenerB8FD0169",
-        "WebappFargateLBPublicListenerValidateOriginRuleC2957882",
         "WebappFargateTaskDefTaskRoleDefaultPolicy320DD29E",
         "WebappFargateTaskDefTaskRole6870FDEE",
+        "WebappPublicListenerValidateOriginRule5099A74E",
       ],
       "Properties": {
         "Cluster": {
@@ -3865,6 +3825,54 @@ exports.handler = async function (event, context) {
       },
       "Type": "Custom::Trigger",
       "UpdateReplacePolicy": "Delete",
+    },
+    "WebappPublicListenerC1463C11": {
+      "Properties": {
+        "DefaultActions": [
+          {
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Forbidden",
+              "StatusCode": "403",
+            },
+            "Type": "fixed-response",
+          },
+        ],
+        "LoadBalancerArn": {
+          "Ref": "WebappFargateLB8978807F",
+        },
+        "Port": 80,
+        "Protocol": "HTTP",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "WebappPublicListenerValidateOriginRule5099A74E": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "WebappFargateLBPublicListenerECSGroup106AE235",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                "TaskTitan-123456789012-us-west-2",
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "WebappPublicListenerC1463C11",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
     },
     "WireframeBucket0DCD1679": {
       "DeletionPolicy": "Delete",

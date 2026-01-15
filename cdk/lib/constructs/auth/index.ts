@@ -4,7 +4,6 @@ import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
   AccountRecovery,
   CfnManagedLoginBranding,
-  CfnUserPool,
   ManagedLoginVersion,
   UserPool,
   UserPoolClient,
@@ -94,13 +93,8 @@ export class Auth extends Construct {
       },
       // AWS Best Practice: Email-only account recovery prevents phone-based attacks
       accountRecovery: AccountRecovery.EMAIL_ONLY,
-      // Require email attribute for all users
-      standardAttributes: {
-        email: {
-          required: true,
-          mutable: true,
-        },
-      },
+      // Note: standardAttributes cannot be modified on an existing User Pool
+      // Email is already required via signInAliases.email: true
       // Custom verification email
       userVerification: {
         emailSubject: 'Verify your TaskTitan account',
@@ -110,12 +104,12 @@ export class Auth extends Construct {
       removalPolicy: RemovalPolicy.RETAIN, // Protect user data in production
     });
 
-    // Enable advanced security mode to prevent account enumeration attacks
-    // This hides whether an email exists during sign-in/password reset
-    const cfnUserPool = userPool.node.defaultChild as CfnUserPool;
-    cfnUserPool.userPoolAddOns = {
-      advancedSecurityMode: 'ENFORCED',
-    };
+    // Note: Advanced security mode (Threat Protection) requires Cognito Plus tier ($0.05/MAU)
+    // For now, we rely on other security measures:
+    // - Email-only account recovery
+    // - Strong password policy
+    // - Token revocation
+    // To enable advanced security, upgrade the user pool tier in AWS Console first
 
     const client = userPool.addClient(`Client`, {
       idTokenValidity: Duration.days(1),
