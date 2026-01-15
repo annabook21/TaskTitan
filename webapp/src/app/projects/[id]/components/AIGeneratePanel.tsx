@@ -51,6 +51,7 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
   const [enhancedDescription, setEnhancedDescription] = useState('');
   const [selectedComponents, setSelectedComponents] = useState<Set<string>>(new Set());
   const [generateSprints, setGenerateSprints] = useState(true);
+  const [hasAttemptedAutoGeneration, setHasAttemptedAutoGeneration] = useState(false);
 
   // Helper to detect cross-sprint dependencies
   const getCrossSprintDependencies = (sprint: GeneratedSprint, sprintIndex: number) => {
@@ -157,13 +158,14 @@ export default function AIGeneratePanel({ projectId, hasDescription, autoOpen = 
     setSelectedComponents(new Set());
   };
 
-  // Auto-trigger generation when opened automatically
+  // Auto-trigger generation when opened automatically (only once)
   useEffect(() => {
-    if (autoOpen && hasDescription && isOpen && generatedComponents.length === 0 && !isGenerating) {
+    if (autoOpen && hasDescription && isOpen && !hasAttemptedAutoGeneration && !isGenerating) {
+      setHasAttemptedAutoGeneration(true);
       handleGenerate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoOpen, hasDescription, isOpen]);
+  }, [autoOpen, hasDescription, isOpen, hasAttemptedAutoGeneration, isGenerating]);
 
   if (!isOpen) {
     return (
