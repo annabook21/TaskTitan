@@ -35,25 +35,14 @@ const virginia = new UsEast1Stack(app, 'TaskTitanUsEast1Stack', {
   hostedZoneId: props.hostedZoneId,
 });
 
-// Temporary migration safety:
-// - We allow supplying the Lambda@Edge Version ARN via context to avoid CloudFormation export update deadlocks.
-// - Once `TaskTitanUsEast1Stack` deploys successfully with the stable export, we can switch back to importValue.
-//
-// Usage:
-//   npx cdk deploy --context signPayloadHandlerVersionArn=arn:aws:lambda:...:1
-const signPayloadHandlerVersionArn =
-  (app.node.tryGetContext('signPayloadHandlerVersionArn') as string | undefined) ??
-  // Default to the currently deployed version ARN (safe fallback during migration).
-  'arn:aws:lambda:us-east-1:232894901916:function:TaskTitanUsEast1Stack-SignPayloadHandlerFnDDFF6B33-UWg1mqha8auQ:1';
-
+// ECS Fargate deployment - no Lambda@Edge needed
 new MainStack(app, 'TaskTitanStack', {
   env: {
     account: props.account,
-    region: 'us-east-1', // Deploy to us-east-1 (same as Lambda@Edge)
+    region: 'us-east-1',
   },
   sharedCertificate: virginia.certificate,
   hostedZone: virginia.hostedZone,
   domainName: props.domainName,
   useNatInstance: props.useNatInstance,
-  signPayloadHandlerVersionArn,
 });

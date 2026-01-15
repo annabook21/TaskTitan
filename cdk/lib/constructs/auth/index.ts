@@ -82,6 +82,9 @@ export class Auth extends Construct {
         minLength: 8,
       },
       selfSignUpEnabled: true,
+      autoVerify: {
+        email: true,
+      },
       signInAliases: {
         username: false,
         email: true,

@@ -30,6 +30,7 @@
     "@types/aws-lambda": "^8.10.149",
     "aws-cdk-lib": "^2.189.1",
     "cdk-nag": "^2.14.29",
+    "cdk-nextjs": "^0.4.14",
     "constructs": "^10.0.0",
     "deploy-time-build": "^0.3.32",
     "source-map-support": "^0.5.21"

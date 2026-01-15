@@ -1,15 +1,9 @@
 import { NextResponse } from 'next/server';
 
 /**
- * Health check endpoint for AWS Lambda Web Adapter readiness probe
- *
- * This endpoint is probed by AWS Lambda Web Adapter to determine if the
- * Next.js application is ready to serve traffic. Without this endpoint,
- * the adapter may timeout during initialization, causing cold start issues.
- *
- * Reference: https://github.com/awslabs/aws-lambda-web-adapter
- * Environment variable: AWS_LWA_READINESS_CHECK_PATH="/api/health"
+ * Health check endpoint for ECS Fargate container health monitoring.
+ * Returns HTTP 200 to indicate the application is healthy.
  */
-export async function GET() {
-  return NextResponse.json({ status: 'ok' }, { status: 200 });
+export function GET() {
+  return NextResponse.json({ status: 'healthy' });
 }

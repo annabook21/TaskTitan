@@ -20,8 +20,7 @@ test('Snapshot test', () => {
     domainName: props.domainName,
   });
 
-  const signPayloadHandlerVersionArn = cdk.Fn.importValue(`${virginia.stackName}-SignPayloadHandlerVersionArn`);
-
+  // ECS Fargate deployment - no Lambda@Edge needed
   const mainStack = new MainStack(app, 'TaskTitanStack', {
     env: {
       account: props.account,
@@ -30,7 +29,6 @@ test('Snapshot test', () => {
     crossRegionReferences: true,
     sharedCertificate: virginia.certificate,
     domainName: props.domainName,
-    signPayloadHandlerVersionArn,
   });
   const virginiaTemplate = Template.fromStack(virginia);
   const mainTemplate = Template.fromStack(mainStack);

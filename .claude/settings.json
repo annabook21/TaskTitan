@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(aws ec2 detach-internet-gateway:*)",
-      "Bash(aws ec2 delete-internet-gateway:*)"
+      "Bash(aws ec2 delete-internet-gateway:*)",
+      "Bash(/Users/anna/Library/Python/3.9/bin/aws elbv2 delete-target-group:*)",
+      "Bash(/Users/anna/Library/Python/3.9/bin/aws ecs list-clusters:*)",
+      "Bash(/Users/anna/Library/Python/3.9/bin/aws elbv2 describe-listeners:*)"
     ]
   }
 }
