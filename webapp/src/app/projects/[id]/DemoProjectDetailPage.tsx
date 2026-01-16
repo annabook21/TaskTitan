@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import type { DemoComponent } from '@/lib/demo/types';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { ArrowLeft, Layers, Clock, ChevronRight } from 'lucide-react';
 import SmartComponentCreator from './components/SmartComponentCreator';
+import AIGeneratePanel from './components/AIGeneratePanel';
 import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 
 const statusColors: Record<string, string> = {
@@ -38,7 +39,9 @@ interface ProjectData {
 
 export default function DemoProjectDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.id as string;
+  const generateAI = searchParams.get('generateAI') === 'true';
   const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -174,6 +177,11 @@ export default function DemoProjectDetailPage() {
             </div>
 
             <div className="flex items-center gap-3">
+              <AIGeneratePanel
+                projectId={project.id}
+                hasDescription={!!project.description && project.description.length >= 20}
+                autoOpen={generateAI}
+              />
               <SmartComponentCreator projectId={project.id} />
             </div>
           </div>

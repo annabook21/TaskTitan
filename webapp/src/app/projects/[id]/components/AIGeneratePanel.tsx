@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { generateAIComponents, applyAIComponents } from '@/app/projects/actions';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 import {
   Sparkles,
   X,
@@ -60,6 +61,7 @@ export default function AIGeneratePanel({
   const [selectedComponents, setSelectedComponents] = useState<Set<string>>(new Set());
   const [generateCycles, setGenerateCycles] = useState(cycleEnabled);
   const [hasAttemptedAutoGeneration, setHasAttemptedAutoGeneration] = useState(false);
+  const { handleResult } = useDemoActionHandler();
 
   // Terminology
   const cycleNameLower = cycleName.toLowerCase();
@@ -108,12 +110,31 @@ export default function AIGeneratePanel({
   const { execute: executeGenerate, isExecuting: isGenerating } = useAction(generateAIComponents, {
     onSuccess: ({ data }) => {
       if (!isMountedRef.current || !data) return;
-      setGeneratedComponents(data.components);
-      setGeneratedSprints(data.sprints || []);
-      setSummary(data.summary);
-      setEnhancedDescription(data.enhancedDescription || '');
-      // Select all by default
-      setSelectedComponents(new Set(data.components.map((c) => c.name)));
+
+      // Handle demo mode by processing locally
+      interface GenerateResult {
+        components: GeneratedComponent[];
+        sprints?: GeneratedSprint[];
+        summary: string;
+        enhancedDescription?: string;
+      }
+
+      let result: GenerateResult | undefined;
+
+      if (isDemoResult(data)) {
+        result = handleResult(data) as unknown as GenerateResult;
+      } else if ('components' in data && data.components) {
+        result = data as unknown as GenerateResult;
+      }
+
+      if (result) {
+        setGeneratedComponents(result.components);
+        setGeneratedSprints(result.sprints || []);
+        setSummary(result.summary);
+        setEnhancedDescription(result.enhancedDescription || '');
+        // Select all by default
+        setSelectedComponents(new Set(result.components.map((c) => c.name)));
+      }
     },
     onError: ({ error }) => {
       if (!isMountedRef.current) return;
@@ -124,15 +145,33 @@ export default function AIGeneratePanel({
   const { execute: executeApply, isExecuting: isApplying } = useAction(applyAIComponents, {
     onSuccess: ({ data }) => {
       if (!isMountedRef.current || !data) return;
-      const message =
-        data.sprints && data.sprints > 0
-          ? `Created ${data.created} components, ${data.dependencies} dependencies, and ${data.sprints} sprints`
-          : `Created ${data.created} components with ${data.dependencies} dependencies`;
-      toast.success(message);
-      setIsOpen(false);
-      setGeneratedComponents([]);
-      setGeneratedSprints([]);
-      setSelectedComponents(new Set());
+
+      // Handle demo mode by processing locally
+      interface ApplyResult {
+        created: number;
+        dependencies: number;
+        sprints: number;
+      }
+
+      let result: ApplyResult | undefined;
+
+      if (isDemoResult(data)) {
+        result = handleResult(data) as unknown as ApplyResult;
+      } else if ('created' in data) {
+        result = data as unknown as ApplyResult;
+      }
+
+      if (result) {
+        const message =
+          result.sprints && result.sprints > 0
+            ? `Created ${result.created} components, ${result.dependencies} dependencies, and ${result.sprints} sprints`
+            : `Created ${result.created} components with ${result.dependencies} dependencies`;
+        toast.success(message);
+        setIsOpen(false);
+        setGeneratedComponents([]);
+        setGeneratedSprints([]);
+        setSelectedComponents(new Set());
+      }
     },
     onError: ({ error }) => {
       if (!isMountedRef.current) return;

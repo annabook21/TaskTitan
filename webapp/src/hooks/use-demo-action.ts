@@ -95,6 +95,12 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
     case 'executeImport':
       return executeImportInDemo(input as unknown as ExecuteImportInput);
 
+    // AI generation actions
+    case 'generateAIComponents':
+      return generateAIComponentsInDemo(input as unknown as GenerateAIComponentsInput);
+    case 'applyAIComponents':
+      return applyAIComponentsInDemo(input as unknown as ApplyAIComponentsInput);
+
     default:
       console.warn(`Unknown demo action: ${action}`);
       return { success: true };
@@ -273,6 +279,414 @@ function executeImportInDemo(input: ExecuteImportInput) {
   }
 
   return { projectId: targetProjectId, stats };
+}
+
+/**
+ * Input type for generateAIComponents demo action
+ */
+interface GenerateAIComponentsInput {
+  projectId: string;
+  generateSprints?: boolean;
+}
+
+/**
+ * Input type for applyAIComponents demo action
+ */
+interface ApplyAIComponentsInput {
+  projectId: string;
+  components: Array<{
+    name: string;
+    description: string;
+    type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
+    estimatedHours: number;
+    priority: number;
+    suggestedDependencies: string[];
+    parentName?: string;
+  }>;
+  enhancedDescription?: string;
+  sprints?: Array<{
+    name: string;
+    goal: string;
+    durationWeeks: number;
+    componentNames: string[];
+    capacity?: number;
+  }>;
+}
+
+/**
+ * Generated component type for demo AI
+ */
+interface DemoGeneratedComponent {
+  name: string;
+  description: string;
+  type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
+  estimatedHours: number;
+  priority: number;
+  suggestedDependencies: string[];
+  parentName?: string;
+}
+
+/**
+ * Generated sprint type for demo AI
+ */
+interface DemoGeneratedSprint {
+  name: string;
+  goal: string;
+  durationWeeks: number;
+  componentNames: string[];
+  capacity?: number;
+}
+
+/**
+ * Generate AI components in demo mode - creates intelligent suggestions based on project description
+ */
+function generateAIComponentsInDemo(input: GenerateAIComponentsInput) {
+  const { projectId, generateSprints } = input;
+
+  const store = demoStore.getStore();
+  const project = store.projects.find((p) => p.id === projectId);
+
+  if (!project) {
+    return { components: [], summary: 'Project not found', sprints: [] };
+  }
+
+  const description = project.description || project.name;
+  const components: DemoGeneratedComponent[] = [];
+  const sprints: DemoGeneratedSprint[] = [];
+
+  // Analyze description for keywords to generate relevant components
+  const descLower = description.toLowerCase();
+
+  // Common project patterns and their components
+  const patterns = [
+    {
+      keywords: ['auth', 'login', 'signup', 'user', 'account', 'password', 'oauth'],
+      epic: 'User Authentication',
+      features: [
+        { name: 'User Registration', desc: 'Allow users to create accounts', hours: 16, priority: 5 },
+        { name: 'User Login', desc: 'Secure login with email/password', hours: 12, priority: 5 },
+        { name: 'Password Reset', desc: 'Forgot password flow with email verification', hours: 8, priority: 4 },
+        { name: 'Session Management', desc: 'Handle user sessions and tokens', hours: 8, priority: 4 },
+      ],
+    },
+    {
+      keywords: ['ecommerce', 'shop', 'product', 'cart', 'checkout', 'payment', 'store', 'buy'],
+      epic: 'E-Commerce Platform',
+      features: [
+        { name: 'Product Catalog', desc: 'Browse and search products', hours: 20, priority: 5 },
+        { name: 'Shopping Cart', desc: 'Add/remove items, update quantities', hours: 16, priority: 5 },
+        { name: 'Checkout Flow', desc: 'Multi-step checkout process', hours: 24, priority: 5 },
+        { name: 'Payment Integration', desc: 'Stripe/PayPal payment processing', hours: 20, priority: 4 },
+        { name: 'Order History', desc: 'View past orders and status', hours: 12, priority: 3 },
+      ],
+    },
+    {
+      keywords: ['dashboard', 'admin', 'analytics', 'report', 'metrics', 'chart'],
+      epic: 'Analytics Dashboard',
+      features: [
+        { name: 'Dashboard Overview', desc: 'Key metrics at a glance', hours: 16, priority: 5 },
+        { name: 'Data Visualization', desc: 'Charts and graphs for insights', hours: 20, priority: 4 },
+        { name: 'Report Generation', desc: 'Export reports in various formats', hours: 12, priority: 3 },
+        { name: 'Real-time Updates', desc: 'Live data refresh', hours: 16, priority: 3 },
+      ],
+    },
+    {
+      keywords: ['api', 'backend', 'server', 'rest', 'graphql', 'endpoint'],
+      epic: 'API Development',
+      features: [
+        { name: 'API Architecture', desc: 'Design RESTful or GraphQL API', hours: 16, priority: 5 },
+        { name: 'Authentication Middleware', desc: 'Secure API endpoints', hours: 12, priority: 5 },
+        { name: 'Rate Limiting', desc: 'Protect against abuse', hours: 8, priority: 4 },
+        { name: 'API Documentation', desc: 'OpenAPI/Swagger docs', hours: 8, priority: 3 },
+      ],
+    },
+    {
+      keywords: ['mobile', 'app', 'ios', 'android', 'react native', 'flutter'],
+      epic: 'Mobile Application',
+      features: [
+        { name: 'Mobile UI Framework', desc: 'Set up mobile app structure', hours: 20, priority: 5 },
+        { name: 'Navigation', desc: 'App navigation and routing', hours: 12, priority: 5 },
+        { name: 'Offline Support', desc: 'Work without internet connection', hours: 16, priority: 3 },
+        { name: 'Push Notifications', desc: 'Engage users with notifications', hours: 12, priority: 4 },
+      ],
+    },
+    {
+      keywords: ['social', 'profile', 'follow', 'feed', 'post', 'comment', 'like'],
+      epic: 'Social Features',
+      features: [
+        { name: 'User Profiles', desc: 'View and edit user profiles', hours: 16, priority: 5 },
+        { name: 'Activity Feed', desc: 'News feed with posts and updates', hours: 20, priority: 5 },
+        { name: 'Comments System', desc: 'Comment on posts and content', hours: 12, priority: 4 },
+        { name: 'Follow/Friend System', desc: 'Connect with other users', hours: 16, priority: 4 },
+      ],
+    },
+    {
+      keywords: ['search', 'filter', 'sort', 'query', 'find'],
+      epic: 'Search & Discovery',
+      features: [
+        { name: 'Full-text Search', desc: 'Search across content', hours: 16, priority: 4 },
+        { name: 'Advanced Filters', desc: 'Filter results by criteria', hours: 12, priority: 4 },
+        { name: 'Search Suggestions', desc: 'Autocomplete and suggestions', hours: 8, priority: 3 },
+      ],
+    },
+    {
+      keywords: ['notification', 'alert', 'email', 'sms', 'message'],
+      epic: 'Notifications',
+      features: [
+        { name: 'Email Notifications', desc: 'Send email alerts', hours: 12, priority: 4 },
+        { name: 'In-App Notifications', desc: 'Real-time in-app alerts', hours: 16, priority: 4 },
+        { name: 'Notification Preferences', desc: 'User notification settings', hours: 8, priority: 3 },
+      ],
+    },
+  ];
+
+  // Find matching patterns
+  const matchedPatterns = patterns.filter((p) => p.keywords.some((k) => descLower.includes(k)));
+
+  // If no patterns match, create generic components
+  if (matchedPatterns.length === 0) {
+    components.push(
+      {
+        name: 'Core Features',
+        description: 'Main functionality for ' + project.name,
+        type: 'EPIC',
+        estimatedHours: 40,
+        priority: 5,
+        suggestedDependencies: [],
+      },
+      {
+        name: 'User Interface',
+        description: 'Design and implement the user interface',
+        type: 'FEATURE',
+        estimatedHours: 24,
+        priority: 5,
+        suggestedDependencies: [],
+        parentName: 'Core Features',
+      },
+      {
+        name: 'Backend Logic',
+        description: 'Server-side business logic',
+        type: 'FEATURE',
+        estimatedHours: 24,
+        priority: 5,
+        suggestedDependencies: [],
+        parentName: 'Core Features',
+      },
+      {
+        name: 'Data Storage',
+        description: 'Database schema and data layer',
+        type: 'FEATURE',
+        estimatedHours: 16,
+        priority: 4,
+        suggestedDependencies: [],
+        parentName: 'Core Features',
+      },
+      {
+        name: 'Testing & QA',
+        description: 'Unit tests, integration tests, and QA',
+        type: 'EPIC',
+        estimatedHours: 20,
+        priority: 4,
+        suggestedDependencies: ['Core Features'],
+      },
+      {
+        name: 'Documentation',
+        description: 'User guides and technical documentation',
+        type: 'FEATURE',
+        estimatedHours: 12,
+        priority: 3,
+        suggestedDependencies: ['Core Features'],
+      },
+    );
+  } else {
+    // Generate components from matched patterns
+    for (const pattern of matchedPatterns) {
+      // Add Epic
+      components.push({
+        name: pattern.epic,
+        description: `${pattern.epic} functionality for ${project.name}`,
+        type: 'EPIC',
+        estimatedHours: pattern.features.reduce((sum, f) => sum + f.hours, 0),
+        priority: 5,
+        suggestedDependencies: [],
+      });
+
+      // Add features under the epic
+      for (const feature of pattern.features) {
+        components.push({
+          name: feature.name,
+          description: feature.desc,
+          type: 'FEATURE',
+          estimatedHours: feature.hours,
+          priority: feature.priority,
+          suggestedDependencies: [],
+          parentName: pattern.epic,
+        });
+      }
+    }
+
+    // Add dependencies between epics if multiple patterns matched
+    if (matchedPatterns.length > 1) {
+      const epicNames = matchedPatterns.map((p) => p.epic);
+      // Make later epics depend on first epic
+      for (let i = 1; i < components.length; i++) {
+        if (components[i].type === 'EPIC' && epicNames.includes(components[i].name)) {
+          components[i].suggestedDependencies = [epicNames[0]];
+        }
+      }
+    }
+  }
+
+  // Generate sprints if requested
+  if (generateSprints && components.length > 0) {
+    const totalHours = components.reduce((sum, c) => sum + c.estimatedHours, 0);
+    const hoursPerSprint = 80; // Assuming 2-week sprints with 2 developers
+    const numSprints = Math.ceil(totalHours / hoursPerSprint);
+
+    let componentIndex = 0;
+    for (let i = 0; i < Math.min(numSprints, 4); i++) {
+      const sprintComponents: string[] = [];
+      let sprintHours = 0;
+
+      // Add components to sprint until capacity is reached
+      while (componentIndex < components.length && sprintHours < hoursPerSprint) {
+        const comp = components[componentIndex];
+        sprintComponents.push(comp.name);
+        sprintHours += comp.estimatedHours;
+        componentIndex++;
+      }
+
+      sprints.push({
+        name: `Sprint ${i + 1}`,
+        goal: i === 0 ? 'Foundation and core setup' : i === numSprints - 1 ? 'Polish and launch prep' : `Iteration ${i + 1}`,
+        durationWeeks: 2,
+        componentNames: sprintComponents,
+        capacity: hoursPerSprint,
+      });
+    }
+  }
+
+  const summary =
+    matchedPatterns.length > 0
+      ? `Based on your project description, I've identified ${matchedPatterns.length} key area(s): ${matchedPatterns.map((p) => p.epic).join(', ')}. Generated ${components.length} components with logical dependencies.`
+      : `Generated a standard project structure with ${components.length} components for ${project.name}.`;
+
+  return {
+    components,
+    summary,
+    enhancedDescription: description,
+    sprints,
+  };
+}
+
+/**
+ * Apply AI-generated components in demo mode - creates them in demo store
+ */
+function applyAIComponentsInDemo(input: ApplyAIComponentsInput) {
+  const { projectId, components, enhancedDescription, sprints } = input;
+
+  const store = demoStore.getStore();
+  const project = store.projects.find((p) => p.id === projectId);
+
+  if (!project) {
+    return { created: 0, dependencies: 0, sprints: 0 };
+  }
+
+  // Update project description if enhanced
+  if (enhancedDescription) {
+    project.description = enhancedDescription;
+  }
+
+  const nameToId = new Map<string, string>();
+  let created = 0;
+  let dependencyCount = 0;
+  let sprintCount = 0;
+
+  // First pass: Create components without parents (EPICs)
+  for (const comp of components.filter((c) => !c.parentName)) {
+    const component = demoStore.createComponent({
+      name: comp.name,
+      description: comp.description,
+      type: comp.type,
+      priority: comp.priority,
+      estimatedHours: comp.estimatedHours,
+      projectId,
+    });
+    nameToId.set(comp.name, component.id);
+    created++;
+  }
+
+  // Second pass: Create components with parents
+  for (const comp of components.filter((c) => c.parentName)) {
+    const parentId = nameToId.get(comp.parentName!);
+    const component = demoStore.createComponent({
+      name: comp.name,
+      description: comp.description,
+      type: comp.type,
+      priority: comp.priority,
+      estimatedHours: comp.estimatedHours,
+      projectId,
+      parentId,
+    });
+    nameToId.set(comp.name, component.id);
+    created++;
+  }
+
+  // Create dependencies
+  for (const comp of components) {
+    const dependentId = nameToId.get(comp.name);
+    if (!dependentId) continue;
+
+    for (const depName of comp.suggestedDependencies) {
+      const requiredId = nameToId.get(depName);
+      if (requiredId && requiredId !== dependentId) {
+        demoStore.addDependency(dependentId, requiredId);
+        dependencyCount++;
+      }
+    }
+  }
+
+  // Create sprints if provided
+  if (sprints && sprints.length > 0) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < sprints.length; i++) {
+      const sprint = sprints[i];
+      const startDate = new Date(today);
+      startDate.setDate(startDate.getDate() + i * sprint.durationWeeks * 7);
+
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + sprint.durationWeeks * 7);
+
+      const createdSprint = demoStore.createSprint({
+        name: sprint.name,
+        goal: sprint.goal,
+        teamId: project.teamId,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        capacity: sprint.capacity,
+      });
+
+      // Assign components to sprint
+      for (const compName of sprint.componentNames) {
+        const componentId = nameToId.get(compName);
+        if (componentId) {
+          demoStore.assignComponentToSprint(componentId, createdSprint.id);
+        }
+      }
+
+      sprintCount++;
+    }
+  }
+
+  demoStore.saveStore(store);
+
+  return {
+    created,
+    dependencies: dependencyCount,
+    sprints: sprintCount,
+  };
 }
 
 /**

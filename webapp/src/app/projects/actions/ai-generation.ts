@@ -47,7 +47,16 @@ export const generateAIComponents = authActionClient
   .schema(generateComponentsSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { projectId, generateSprints = false } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return {
+        _demo: true,
+        _action: 'generateAIComponents',
+        _input: { projectId, generateSprints },
+      };
+    }
 
     // Check if AI is configured
     if (!isAIConfigured()) {
@@ -110,7 +119,16 @@ export const applyAIComponents = authActionClient
   .schema(applyAIComponentsSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { projectId, components, enhancedDescription, sprints } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return {
+        _demo: true,
+        _action: 'applyAIComponents',
+        _input: { projectId, components, enhancedDescription, sprints },
+      };
+    }
 
     // Verify access
     const project = await prisma.project.findFirst({

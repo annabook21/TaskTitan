@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import { ArrowLeft, FolderKanban, Plus } from 'lucide-react';
+import { ArrowLeft, FolderKanban, Plus, Sparkles } from 'lucide-react';
 
 interface TeamOption {
   id: string;
@@ -24,6 +24,7 @@ export default function DemoNewProjectPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [autoGenerateAI, setAutoGenerateAI] = useState(false);
 
   useEffect(() => {
     const store = demoStore.getStore();
@@ -80,7 +81,11 @@ export default function DemoNewProjectPage() {
       store.projects.push(newProject);
       demoStore.saveStore(store);
 
-      router.push(`/projects/${newProject.id}`);
+      // Navigate to project, optionally triggering AI generation
+      const url = autoGenerateAI && description.trim()
+        ? `/projects/${newProject.id}?generateAI=true`
+        : `/projects/${newProject.id}`;
+      router.push(url);
     } catch {
       setError('Failed to create project');
       setSubmitting(false);
@@ -177,15 +182,41 @@ export default function DemoNewProjectPage() {
 
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
-                Description <span className="text-slate-500">(optional)</span>
+                Description <span className="text-slate-500">(optional but recommended for AI)</span>
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What is this project about?"
-                rows={3}
+                placeholder="Describe your project in detail - the more context you provide, the better AI can generate components. Example: 'An e-commerce platform with user authentication, product catalog, shopping cart, and checkout with Stripe integration.'"
+                rows={4}
                 className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg focus:outline-none focus:border-cyan-500 resize-none"
               />
+            </div>
+
+            {/* AI Generation Option */}
+            <div className="p-4 bg-gradient-to-r from-cyan-500/10 to-violet-500/10 border border-cyan-500/20 rounded-lg">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoGenerateAI}
+                  onChange={(e) => setAutoGenerateAI(e.target.checked)}
+                  className="mt-1 w-4 h-4 rounded border-cyan-500/50 bg-slate-800 text-cyan-500 focus:ring-2 focus:ring-cyan-500/50"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <Sparkles className="w-4 h-4 text-cyan-400" />
+                    Auto-generate components with AI
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    AI will analyze your project description and suggest components with estimates, priorities, and dependencies.
+                    {!description.trim() && (
+                      <span className="text-amber-400 block mt-1">
+                        Add a detailed description above to enable this feature.
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </label>
             </div>
 
             <div className="flex justify-end gap-3 pt-4">
