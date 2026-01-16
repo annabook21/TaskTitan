@@ -17,7 +17,7 @@ import {
   PauseCircle,
 } from 'lucide-react';
 import ComponentCard from './components/ComponentCard';
-import CreateComponentForm from './components/CreateComponentForm';
+import SmartComponentCreator from './components/SmartComponentCreator';
 import DependencyGraph from './components/DependencyGraph';
 import AIGeneratePanelWrapper from './components/AIGeneratePanelWrapper';
 import TimelineView from './components/TimelineView';
@@ -261,7 +261,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                 cycleEnabled={cycleEnabled}
                 cycleName={cycleName}
               />
-              <CreateComponentForm projectId={project.id} />
+              <SmartComponentCreator projectId={project.id} />
             </div>
           </div>
 
@@ -282,7 +282,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                     Break down your project into components. Each component represents a distinct piece of functionality
                     that can be developed independently.
                   </p>
-                  <CreateComponentForm projectId={project.id} />
+                  <SmartComponentCreator projectId={project.id} />
                 </div>
               ) : (
                 <div className="space-y-8">

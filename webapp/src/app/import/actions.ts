@@ -2,9 +2,9 @@
 
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
-import { analyzeImportData, cleanupImportData } from '@/lib/ai';
+import { analyzeImportData, cleanupImportData, isAIConfigured } from '@/lib/ai';
 import type { ComponentType, ComponentStatus } from '@prisma/client';
 
 const analyzeSchema = z.object({
@@ -33,7 +33,12 @@ const importSchema = z.object({
  */
 export const analyzeImport = authActionClient.schema(analyzeSchema).action(async ({ parsedInput, ctx }) => {
   const { teamId, headers, sampleRows } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - use simple heuristic-based mapping
+  if (isDemo) {
+    return generateSimpleMappings(headers, sampleRows);
+  }
 
   // Verify user is member of team
   const membership = await prisma.membership.findUnique({
@@ -41,7 +46,7 @@ export const analyzeImport = authActionClient.schema(analyzeSchema).action(async
   });
 
   if (!membership) {
-    throw new Error('You must be a team member to import data');
+    throw new MyCustomError('You must be a team member to import data');
   }
 
   // Get existing projects and sprints for context
@@ -56,6 +61,12 @@ export const analyzeImport = authActionClient.schema(analyzeSchema).action(async
     }),
   ]);
 
+  // Check if AI is configured
+  if (!isAIConfigured()) {
+    // Fallback to simple heuristic mapping
+    return generateSimpleMappings(headers, sampleRows);
+  }
+
   const result = await analyzeImportData(
     headers,
     sampleRows,
@@ -65,6 +76,80 @@ export const analyzeImport = authActionClient.schema(analyzeSchema).action(async
 
   return result;
 });
+
+/**
+ * Simple heuristic-based column mapping for demo mode or when AI is not available
+ */
+function generateSimpleMappings(headers: string[], sampleRows: Record<string, string>[]) {
+  const mappings: Array<{ sourceColumn: string; targetField: string | null; confidence: number }> = [];
+
+  const fieldPatterns: Record<string, RegExp[]> = {
+    name: [/^(name|title|summary|issue|ticket)$/i, /name|title|summary/i],
+    description: [/^(description|desc|details|body|content)$/i, /description|desc/i],
+    type: [/^(type|issue.?type|kind|category)$/i, /type/i],
+    status: [/^(status|state|stage)$/i, /status|state/i],
+    priority: [/^(priority|severity|importance)$/i, /priority|severity/i],
+    owner: [/^(owner|assignee|assigned|assigned.?to|user)$/i, /assignee|owner|assigned/i],
+    estimatedHours: [/^(estimate|hours|effort|story.?points|points)$/i, /estimate|hours|effort/i],
+    parentName: [/^(parent|epic|parent.?name|epic.?name)$/i, /parent|epic/i],
+    externalId: [/^(id|key|external.?id|jira.?key|issue.?key)$/i, /^key$/i],
+    sprint: [/^(sprint|iteration|milestone)$/i, /sprint|iteration/i],
+    tags: [/^(tags|labels|components)$/i, /tags|labels/i],
+    dependencies: [/^(dependencies|depends.?on|blocked.?by|links)$/i, /depends|blocked/i],
+  };
+
+  for (const header of headers) {
+    let matched = false;
+
+    for (const [field, patterns] of Object.entries(fieldPatterns)) {
+      for (let i = 0; i < patterns.length; i++) {
+        if (patterns[i].test(header)) {
+          mappings.push({
+            sourceColumn: header,
+            targetField: field,
+            confidence: i === 0 ? 0.95 : 0.7,
+          });
+          matched = true;
+          break;
+        }
+      }
+      if (matched) break;
+    }
+
+    if (!matched) {
+      mappings.push({
+        sourceColumn: header,
+        targetField: null,
+        confidence: 0,
+      });
+    }
+  }
+
+  // Detect format based on headers
+  let detectedFormat = 'Generic spreadsheet';
+  const headerStr = headers.join(' ').toLowerCase();
+  if (headerStr.includes('jira') || headerStr.includes('issue key')) {
+    detectedFormat = 'Jira export';
+  } else if (headerStr.includes('asana')) {
+    detectedFormat = 'Asana export';
+  } else if (headerStr.includes('trello')) {
+    detectedFormat = 'Trello export';
+  }
+
+  const suggestions: string[] = [];
+  const warnings: string[] = [];
+
+  if (!mappings.some((m) => m.targetField === 'name')) {
+    warnings.push('No column mapped to Name - please select one manually');
+  }
+
+  return {
+    mappings,
+    detectedFormat,
+    suggestions,
+    warnings,
+  };
+}
 
 const cleanupSchema = z.object({
   teamId: z.string().cuid(),
@@ -82,7 +167,12 @@ const cleanupSchema = z.object({
  */
 export const cleanupData = authActionClient.schema(cleanupSchema).action(async ({ parsedInput, ctx }) => {
   const { teamId, rows, mappings } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - use simple cleanup
+  if (isDemo) {
+    return simpleCleanup(rows, mappings);
+  }
 
   // Verify user is member of team
   const membership = await prisma.membership.findUnique({
@@ -90,7 +180,12 @@ export const cleanupData = authActionClient.schema(cleanupSchema).action(async (
   });
 
   if (!membership) {
-    throw new Error('You must be a team member to clean data');
+    throw new MyCustomError('You must be a team member to clean data');
+  }
+
+  // Check if AI is configured
+  if (!isAIConfigured()) {
+    return simpleCleanup(rows, mappings);
   }
 
   const result = await cleanupImportData(rows, mappings);
@@ -98,11 +193,105 @@ export const cleanupData = authActionClient.schema(cleanupSchema).action(async (
 });
 
 /**
+ * Simple data cleanup for demo mode or when AI is not available
+ */
+function simpleCleanup(
+  rows: Record<string, string>[],
+  mappings: Array<{ sourceColumn: string; targetField: string | null }>,
+) {
+  const cleanedRows: Array<{ cleaned: Record<string, string>; changes: string[] }> = [];
+  let totalChanges = 0;
+
+  // Find which columns map to which fields
+  const typeColumn = mappings.find((m) => m.targetField === 'type')?.sourceColumn;
+  const statusColumn = mappings.find((m) => m.targetField === 'status')?.sourceColumn;
+  const priorityColumn = mappings.find((m) => m.targetField === 'priority')?.sourceColumn;
+
+  for (const row of rows) {
+    const cleaned = { ...row };
+    const changes: string[] = [];
+
+    // Normalize type values
+    if (typeColumn && cleaned[typeColumn]) {
+      const original = cleaned[typeColumn];
+      const lower = original.toLowerCase();
+      let normalized = original;
+
+      if (lower.includes('epic')) normalized = 'EPIC';
+      else if (lower.includes('feature')) normalized = 'FEATURE';
+      else if (lower.includes('story') || lower.includes('user story')) normalized = 'STORY';
+      else if (lower.includes('bug') || lower.includes('defect')) normalized = 'BUG';
+      else if (lower.includes('task') || lower.includes('sub-task')) normalized = 'TASK';
+
+      if (normalized !== original) {
+        cleaned[typeColumn] = normalized;
+        changes.push(`Type: "${original}" → "${normalized}"`);
+        totalChanges++;
+      }
+    }
+
+    // Normalize status values
+    if (statusColumn && cleaned[statusColumn]) {
+      const original = cleaned[statusColumn];
+      const lower = original.toLowerCase();
+      let normalized = original;
+
+      if (lower.includes('to do') || lower.includes('todo') || lower.includes('open') || lower.includes('new'))
+        normalized = 'PLANNING';
+      else if (lower.includes('progress') || lower.includes('doing') || lower.includes('active'))
+        normalized = 'IN_PROGRESS';
+      else if (lower.includes('block')) normalized = 'BLOCKED';
+      else if (lower.includes('review') || lower.includes('testing') || lower.includes('qa')) normalized = 'REVIEW';
+      else if (lower.includes('done') || lower.includes('complete') || lower.includes('closed'))
+        normalized = 'COMPLETED';
+
+      if (normalized !== original) {
+        cleaned[statusColumn] = normalized;
+        changes.push(`Status: "${original}" → "${normalized}"`);
+        totalChanges++;
+      }
+    }
+
+    // Normalize priority values
+    if (priorityColumn && cleaned[priorityColumn]) {
+      const original = cleaned[priorityColumn];
+      const lower = original.toLowerCase();
+      let normalized = original;
+
+      if (lower.includes('highest') || lower.includes('critical') || lower === 'p0') normalized = '5';
+      else if (lower.includes('high') || lower === 'p1') normalized = '4';
+      else if (lower.includes('medium') || lower === 'p2') normalized = '3';
+      else if (lower.includes('low') || lower === 'p3') normalized = '2';
+      else if (lower.includes('lowest') || lower === 'p4') normalized = '1';
+
+      if (normalized !== original) {
+        cleaned[priorityColumn] = normalized;
+        changes.push(`Priority: "${original}" → "${normalized}"`);
+        totalChanges++;
+      }
+    }
+
+    cleanedRows.push({ cleaned, changes });
+  }
+
+  return { rows: cleanedRows, totalChanges };
+}
+
+/**
  * Execute the import with mapped data
  */
 export const executeImport = authActionClient.schema(importSchema).action(async ({ parsedInput, ctx }) => {
   const { teamId, projectId, projectName, mappings, rows, createMissingParents, autoAssignSprint } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return {
+      _demo: true,
+      _action: 'executeImport',
+      _input: { teamId, projectId, projectName, mappings, rows, createMissingParents, autoAssignSprint },
+    };
+  }
 
   // Verify user is member of team
   const membership = await prisma.membership.findUnique({
@@ -110,7 +299,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
   });
 
   if (!membership) {
-    throw new Error('You must be a team member to import data');
+    throw new MyCustomError('You must be a team member to import data');
   }
 
   // Create or get project

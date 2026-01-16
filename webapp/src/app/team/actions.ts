@@ -4,10 +4,12 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
+import { getTemplateSettings, type WorkflowTemplateKey } from '@/lib/workflow-templates';
 
 const createTeamSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   description: z.string().max(500).optional(),
+  workflowTemplate: z.enum(['SCRUM', 'KANBAN', 'SHAPE_UP', 'CUSTOM']).optional(),
 });
 
 const updateTeamSchema = z.object({
@@ -34,15 +36,19 @@ const removeMemberSchema = z.object({
 });
 
 export const createTeam = authActionClient.schema(createTeamSchema).action(async ({ parsedInput, ctx }) => {
-  const { name, description } = parsedInput;
+  const { name, description, workflowTemplate } = parsedInput;
   const { userId, isDemo } = ctx;
 
   // Demo mode - return marker for client-side handling
   if (isDemo) {
-    return { _demo: true, _action: 'createTeam', _input: { name, description, userId } };
+    return { _demo: true, _action: 'createTeam', _input: { name, description, workflowTemplate, userId } };
   }
 
-  // Create team and add creator as owner
+  // Get template settings (defaults to CUSTOM if not specified)
+  const templateKey: WorkflowTemplateKey = workflowTemplate ?? 'CUSTOM';
+  const templateSettings = getTemplateSettings(templateKey);
+
+  // Create team and add creator as owner, with workflow config
   const team = await prisma.team.create({
     data: {
       name,
@@ -51,6 +57,24 @@ export const createTeam = authActionClient.schema(createTeamSchema).action(async
         create: {
           userId,
           role: 'OWNER',
+        },
+      },
+      WorkflowConfig: {
+        create: {
+          workflowTemplate: templateKey,
+          ...(templateSettings && {
+            cycleEnabled: templateSettings.cycleEnabled,
+            cycleDurationWeeks: templateSettings.cycleDurationWeeks,
+            cycleStartDayOfWeek: templateSettings.cycleStartDayOfWeek,
+            cycleName: templateSettings.cycleName,
+            backlogName: templateSettings.backlogName,
+            enforceEstimates: templateSettings.enforceEstimates,
+            wipLimitPlanning: templateSettings.wipLimitPlanning,
+            wipLimitInProgress: templateSettings.wipLimitInProgress,
+            wipLimitBlocked: templateSettings.wipLimitBlocked,
+            wipLimitReview: templateSettings.wipLimitReview,
+            autoArchiveCompleted: templateSettings.autoArchiveCompleted,
+          }),
         },
       },
     },

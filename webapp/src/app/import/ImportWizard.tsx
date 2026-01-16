@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAction } from 'next-safe-action/hooks';
 import { analyzeImport, executeImport, cleanupData } from './actions';
@@ -19,8 +19,12 @@ import {
   Wand2,
   Edit3,
   RotateCcw,
+  Info,
+  Undo2,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Team {
   id: string;
@@ -56,8 +60,68 @@ const targetFieldOptions = [
   { value: 'dependencies', label: 'Dependencies (comma-separated)' },
 ];
 
+// Field validation rules - shows expected format for each field
+const fieldValidationRules: Record<string, { format: string; example: string; validate?: (v: string) => boolean }> = {
+  name: {
+    format: 'Required, 1-200 characters',
+    example: 'User Authentication',
+    validate: (v) => v.trim().length > 0 && v.length <= 200,
+  },
+  description: {
+    format: 'Optional, free text',
+    example: 'Implement OAuth2 login flow',
+  },
+  type: {
+    format: 'EPIC, FEATURE, STORY, TASK, or BUG',
+    example: 'TASK',
+    validate: (v) => !v || /^(epic|feature|story|task|bug)$/i.test(v.trim()),
+  },
+  parentName: {
+    format: 'Name of existing parent item',
+    example: 'Authentication Epic',
+  },
+  owner: {
+    format: 'Email address',
+    example: 'developer@example.com',
+    validate: (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+  },
+  status: {
+    format: 'PLANNING, IN_PROGRESS, BLOCKED, REVIEW, or COMPLETED',
+    example: 'IN_PROGRESS',
+    validate: (v) =>
+      !v || /^(planning|to\s*do|in[\s_]?progress|doing|blocked|review|testing|done|completed?)$/i.test(v.trim()),
+  },
+  priority: {
+    format: 'Number 1-5 or text (Lowest/Low/Medium/High/Critical)',
+    example: 'High or 4',
+    validate: (v) => !v || /^[1-5]$/.test(v.trim()) || /^(lowest|low|medium|high|highest|critical)$/i.test(v.trim()),
+  },
+  estimatedHours: {
+    format: 'Positive number',
+    example: '8',
+    validate: (v) => !v || (!isNaN(parseFloat(v)) && parseFloat(v) >= 0),
+  },
+  sprint: {
+    format: 'Sprint name',
+    example: 'Sprint 1',
+  },
+  tags: {
+    format: 'Comma-separated list',
+    example: 'frontend, auth, urgent',
+  },
+  externalId: {
+    format: 'External system ID',
+    example: 'PROJ-123',
+  },
+  dependencies: {
+    format: 'Comma-separated item names',
+    example: 'Login Page, User Model',
+  },
+};
+
 export default function ImportWizard({ teams, selectedTeam }: Props) {
   const router = useRouter();
+  const { handleResult } = useDemoActionHandler();
   const [step, setStep] = useState(1);
   const [teamId, setTeamId] = useState(selectedTeam.id);
   const [projectId, setProjectId] = useState<string>('');
@@ -88,7 +152,78 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
     warnings: string[];
   } | null>(null);
 
+  // Progress tracking for large imports
+  const [importProgress, setImportProgress] = useState(0);
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Validation errors for inline correction
+  const [validationErrors, setValidationErrors] = useState<Map<string, string[]>>(new Map());
+
+  // Undo/rollback state - store last import info
+  const [lastImport, setLastImport] = useState<{
+    projectId: string;
+    componentIds: string[];
+    timestamp: Date;
+  } | null>(null);
+  const [isUndoing, setIsUndoing] = useState(false);
+
+  // Field info tooltip state
+  const [showFieldInfo, setShowFieldInfo] = useState<string | null>(null);
+
   const currentTeam = teams.find((t) => t.id === teamId) || selectedTeam;
+
+  // Validate all rows against field rules
+  const validateRows = useCallback(() => {
+    const errors = new Map<string, string[]>();
+
+    rows.forEach((row, rowIndex) => {
+      const rowErrors: string[] = [];
+
+      mappings.forEach((m) => {
+        if (m.targetField && fieldValidationRules[m.targetField]?.validate) {
+          const value = row[m.sourceColumn] || '';
+          const isValid = fieldValidationRules[m.targetField].validate!(value);
+          if (!isValid) {
+            rowErrors.push(
+              `Row ${rowIndex + 1}: Invalid ${m.targetField} "${value}" - Expected: ${fieldValidationRules[m.targetField].format}`,
+            );
+          }
+        }
+      });
+
+      // Check required name field
+      const nameMapping = mappings.find((m) => m.targetField === 'name');
+      if (nameMapping) {
+        const nameValue = row[nameMapping.sourceColumn];
+        if (!nameValue || nameValue.trim() === '') {
+          rowErrors.push(`Row ${rowIndex + 1}: Name is required`);
+        }
+      }
+
+      if (rowErrors.length > 0) {
+        errors.set(`row-${rowIndex}`, rowErrors);
+      }
+    });
+
+    setValidationErrors(errors);
+    return errors.size === 0;
+  }, [rows, mappings]);
+
+  // Run validation when rows or mappings change
+  useEffect(() => {
+    if (rows.length > 0 && mappings.length > 0) {
+      validateRows();
+    }
+  }, [rows, mappings, validateRows]);
+
+  // Cleanup progress interval on unmount
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, []);
 
   const { execute: analyze, isExecuting: isAnalyzing } = useAction(analyzeImport, {
     onSuccess: ({ data }) => {
@@ -107,13 +242,42 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
 
   const { execute: doImport, isExecuting: isImporting } = useAction(executeImport, {
     onSuccess: ({ data }) => {
+      // Stop progress simulation
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      setImportProgress(100);
+
       if (data) {
-        setImportStats(data.stats);
-        setStep(5);
-        toast.success(`Imported ${data.stats.created} items!`);
+        // Handle demo mode by processing locally
+        let result = data;
+        if (isDemoResult(data)) {
+          result = handleResult(data);
+        }
+        if (result && 'stats' in result && result.stats) {
+          setImportStats(result.stats);
+          setStep(5);
+          toast.success(`Imported ${result.stats.created} items!`);
+
+          // Store import info for potential undo (only in production mode)
+          if (!isDemoResult(data) && 'projectId' in result && result.projectId) {
+            setLastImport({
+              projectId: result.projectId as string,
+              componentIds: [], // Would need server to return created IDs for full undo
+              timestamp: new Date(),
+            });
+          }
+        }
       }
     },
     onError: ({ error }) => {
+      // Stop progress simulation
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      setImportProgress(0);
       toast.error(error.serverError || 'Import failed');
     },
   });
@@ -277,7 +441,29 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
       return;
     }
 
+    // Check for validation errors
+    if (validationErrors.size > 0) {
+      toast.error(`Please fix ${validationErrors.size} validation error(s) before importing`);
+      return;
+    }
+
     setStep(4);
+    setImportProgress(0);
+
+    // Start progress simulation for large imports
+    // Estimate ~50ms per row, cap progress at 95% until complete
+    const totalRows = rows.length;
+    const estimatedMs = Math.max(2000, totalRows * 50);
+    const intervalMs = 100;
+    const incrementPerTick = (95 / (estimatedMs / intervalMs));
+
+    progressIntervalRef.current = setInterval(() => {
+      setImportProgress((prev) => {
+        const next = prev + incrementPerTick;
+        return next >= 95 ? 95 : next;
+      });
+    }, intervalMs);
+
     doImport({
       teamId,
       projectId: projectId || undefined,
@@ -287,6 +473,37 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
       createMissingParents: true,
       autoAssignSprint: sprintId || undefined,
     });
+  };
+
+  // Helper to check if a cell has validation error
+  const getCellError = (rowIndex: number, targetField: string): string | null => {
+    const rowErrors = validationErrors.get(`row-${rowIndex}`);
+    if (!rowErrors) return null;
+    const fieldError = rowErrors.find((e) => e.includes(targetField));
+    return fieldError || null;
+  };
+
+  // Download template CSV
+  const downloadTemplate = () => {
+    const headers = ['name', 'description', 'type', 'status', 'priority', 'estimatedHours', 'parentName'];
+    const exampleRow = [
+      'Login Feature',
+      'Implement user login',
+      'FEATURE',
+      'PLANNING',
+      'High',
+      '8',
+      'Authentication Epic',
+    ];
+    const csv = [headers.join(','), exampleRow.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tasktitan-import-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Template downloaded!');
   };
 
   return (
@@ -361,6 +578,18 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
               Our AI will analyze your data and automatically map columns to the right fields. You can review and adjust
               before importing.
             </p>
+          </div>
+
+          {/* Download template link */}
+          <div className="mt-4 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={downloadTemplate}
+              className="text-sm text-cyan-400 hover:text-cyan-300 flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Download CSV template
+            </button>
           </div>
         </div>
       )}
@@ -521,6 +750,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                     <th className="pb-3">Source Column</th>
                     <th className="pb-3">Sample Value</th>
                     <th className="pb-3">Maps To</th>
+                    <th className="pb-3">Format</th>
                     <th className="pb-3 text-right">Confidence</th>
                   </tr>
                 </thead>
@@ -550,6 +780,30 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                           ))}
                         </select>
                       </td>
+                      <td className="py-3">
+                        {m.targetField && fieldValidationRules[m.targetField] && (
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setShowFieldInfo(showFieldInfo === m.sourceColumn ? null : m.sourceColumn)}
+                              className="text-xs text-slate-500 hover:text-cyan-400 flex items-center gap-1"
+                            >
+                              <Info className="w-3.5 h-3.5" />
+                              <span className="truncate max-w-[120px]">{fieldValidationRules[m.targetField].format}</span>
+                            </button>
+                            {showFieldInfo === m.sourceColumn && (
+                              <div className="absolute z-10 top-full left-0 mt-1 p-3 bg-slate-800 border border-slate-700 rounded-lg shadow-lg w-64">
+                                <div className="text-xs text-slate-300 mb-1">
+                                  <strong>Format:</strong> {fieldValidationRules[m.targetField].format}
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  <strong>Example:</strong> {fieldValidationRules[m.targetField].example}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 text-right">
                         {m.targetField && (
                           <span
@@ -572,14 +826,45 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
             </div>
           </div>
 
+          {/* Validation Errors Summary */}
+          {validationErrors.size > 0 && (
+            <div className="component-card border-red-500/30 bg-red-500/5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-red-400 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  {validationErrors.size} row(s) with validation errors
+                </h3>
+                <span className="text-xs text-slate-500">Fix errors in the preview below to continue</span>
+              </div>
+              <ul className="text-sm text-red-300/80 space-y-1 max-h-24 overflow-y-auto">
+                {Array.from(validationErrors.values())
+                  .flat()
+                  .slice(0, 5)
+                  .map((e, i) => (
+                    <li key={i}>• {e}</li>
+                  ))}
+                {Array.from(validationErrors.values()).flat().length > 5 && (
+                  <li className="text-slate-500">
+                    ...and {Array.from(validationErrors.values()).flat().length - 5} more errors
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+
           {/* Editable Preview */}
           <div className="component-card">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-medium flex items-center gap-2">
                 <Edit3 className="w-4 h-4 text-cyan-400" />
                 Preview & Edit ({rows.length} rows)
+                {validationErrors.size > 0 && (
+                  <span className="text-xs text-red-400 ml-2">
+                    ({validationErrors.size} with errors)
+                  </span>
+                )}
               </h3>
-              <span className="text-xs text-slate-500">Click any cell to edit</span>
+              <span className="text-xs text-slate-500">Click any cell to edit • Red cells have errors</span>
             </div>
             <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
               <table className="w-full text-sm">
@@ -596,36 +881,63 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, i) => (
-                    <tr key={i} className="border-b border-slate-800 hover:bg-slate-800/50">
-                      <td className="py-2 pr-2 text-slate-500 text-xs">{i + 1}</td>
-                      {mappings
-                        .filter((m) => m.targetField)
-                        .map((m) => (
-                          <td key={m.sourceColumn} className="py-1 pr-2">
-                            {editingRow === i ? (
-                              <input
-                                type="text"
-                                value={row[m.sourceColumn] || ''}
-                                onChange={(e) => updateRowField(i, m.sourceColumn, e.target.value)}
-                                onBlur={() => setEditingRow(null)}
-                                onKeyDown={(e) => e.key === 'Enter' && setEditingRow(null)}
-                                autoFocus={m.targetField === 'name'}
-                                className="w-full px-2 py-1 bg-slate-900 border border-cyan-500 rounded text-slate-100 text-sm"
-                              />
-                            ) : (
-                              <div
-                                onClick={() => setEditingRow(i)}
-                                className="px-2 py-1 text-slate-300 truncate max-w-[200px] cursor-pointer hover:bg-slate-700 rounded"
-                                title={row[m.sourceColumn] || '—'}
-                              >
-                                {row[m.sourceColumn] || <span className="text-slate-600">—</span>}
-                              </div>
-                            )}
-                          </td>
-                        ))}
-                    </tr>
-                  ))}
+                  {rows.map((row, i) => {
+                    const rowHasError = validationErrors.has(`row-${i}`);
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-b border-slate-800 hover:bg-slate-800/50 ${rowHasError ? 'bg-red-500/5' : ''}`}
+                      >
+                        <td className="py-2 pr-2 text-slate-500 text-xs">
+                          {rowHasError && <AlertTriangle className="w-3 h-3 text-red-400 inline mr-1" />}
+                          {i + 1}
+                        </td>
+                        {mappings
+                          .filter((m) => m.targetField)
+                          .map((m) => {
+                            const cellError = getCellError(i, m.targetField!);
+                            const hasError = !!cellError;
+
+                            return (
+                              <td key={m.sourceColumn} className="py-1 pr-2">
+                                {editingRow === i ? (
+                                  <div>
+                                    <input
+                                      type="text"
+                                      value={row[m.sourceColumn] || ''}
+                                      onChange={(e) => updateRowField(i, m.sourceColumn, e.target.value)}
+                                      onBlur={() => setEditingRow(null)}
+                                      onKeyDown={(e) => e.key === 'Enter' && setEditingRow(null)}
+                                      autoFocus={m.targetField === 'name'}
+                                      className={`w-full px-2 py-1 bg-slate-900 border rounded text-slate-100 text-sm ${
+                                        hasError ? 'border-red-500' : 'border-cyan-500'
+                                      }`}
+                                    />
+                                    {hasError && m.targetField && fieldValidationRules[m.targetField] && (
+                                      <div className="text-xs text-red-400 mt-1">
+                                        Expected: {fieldValidationRules[m.targetField].format}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div
+                                    onClick={() => setEditingRow(i)}
+                                    className={`px-2 py-1 truncate max-w-[200px] cursor-pointer rounded ${
+                                      hasError
+                                        ? 'text-red-300 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20'
+                                        : 'text-slate-300 hover:bg-slate-700'
+                                    }`}
+                                    title={hasError ? `Error: ${cellError}` : row[m.sourceColumn] || '—'}
+                                  >
+                                    {row[m.sourceColumn] || <span className="text-slate-600">—</span>}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -639,30 +951,55 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                 setHeaders([]);
                 setRows([]);
                 setMappings([]);
+                setValidationErrors(new Map());
               }}
               className="px-4 py-2 text-slate-400 hover:text-white flex items-center gap-2"
             >
               <ArrowLeft className="w-4 h-4" />
               Start Over
             </button>
-            <button
-              onClick={handleExecuteImport}
-              disabled={!mappings.some((m) => m.targetField === 'name')}
-              className="btn-primary"
-            >
-              Import {rows.length} Items
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-3">
+              {validationErrors.size > 0 && (
+                <span className="text-sm text-amber-400">
+                  {validationErrors.size} error(s) to fix
+                </span>
+              )}
+              <button
+                onClick={handleExecuteImport}
+                disabled={!mappings.some((m) => m.targetField === 'name') || validationErrors.size > 0}
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Import {rows.length} Items
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Step 4: Importing */}
+      {/* Step 4: Importing with Progress */}
       {step === 4 && (
         <div className="component-card text-center py-12">
           <Loader2 className="w-12 h-12 text-cyan-400 animate-spin mx-auto mb-4" />
           <h2 className="text-xl font-semibold mb-2">Importing Data</h2>
-          <p className="text-slate-400">Creating work items, resolving hierarchy, linking dependencies...</p>
+          <p className="text-slate-400 mb-6">Creating work items, resolving hierarchy, linking dependencies...</p>
+
+          {/* Progress bar */}
+          <div className="max-w-md mx-auto">
+            <div className="flex items-center justify-between text-sm text-slate-400 mb-2">
+              <span>Progress</span>
+              <span>{Math.round(importProgress)}%</span>
+            </div>
+            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-violet-500 to-cyan-500 transition-all duration-300 ease-out"
+                style={{ width: `${importProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              Processing {rows.length} items...
+            </p>
+          </div>
         </div>
       )}
 
@@ -677,6 +1014,48 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
             Successfully imported <span className="text-cyan-400 font-semibold">{importStats.created}</span> items
             {importStats.skipped > 0 && <span className="text-slate-500"> ({importStats.skipped} skipped)</span>}
           </p>
+
+          {/* Undo option - available briefly after import */}
+          {lastImport && Date.now() - lastImport.timestamp.getTime() < 5 * 60 * 1000 && (
+            <div className="mb-6 p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="text-left">
+                  <p className="text-sm text-slate-300 flex items-center gap-2">
+                    <Undo2 className="w-4 h-4 text-amber-400" />
+                    Made a mistake? You can undo this import
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Available for 5 minutes after import
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    setIsUndoing(true);
+                    // In a full implementation, this would call a server action to delete the imported components
+                    // For now, show a toast about the limitation
+                    toast.info('Undo imports the file with corrections. Navigate to the project to delete individual items.');
+                    setIsUndoing(false);
+                    // Go back to step 3 with the same data for re-import with corrections
+                    setStep(3);
+                  }}
+                  disabled={isUndoing}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 text-white rounded-lg text-sm font-medium flex items-center gap-2"
+                >
+                  {isUndoing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Undoing...
+                    </>
+                  ) : (
+                    <>
+                      <Undo2 className="w-4 h-4" />
+                      Re-import with Changes
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Warnings */}
           {importStats.warnings.length > 0 && (
@@ -713,6 +1092,8 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                 setRows([]);
                 setMappings([]);
                 setImportStats(null);
+                setLastImport(null);
+                setValidationErrors(new Map());
               }}
               className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg"
             >

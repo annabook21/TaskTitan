@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Settings } from 'lucide-react';
 import WorkflowSettingsForm from './WorkflowSettingsForm';
+import DemoWorkflowSettingsPage from './DemoWorkflowSettingsPage';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -12,7 +13,13 @@ interface Props {
 
 export default async function WorkflowSettingsPage({ params }: Props) {
   const { id } = await params;
-  const { userId, user } = await getSession();
+  const session = await getSession();
+  const { userId, user } = session;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoWorkflowSettingsPage />;
+  }
 
   // Check if user is owner or admin
   const team = await prisma.team.findFirst({

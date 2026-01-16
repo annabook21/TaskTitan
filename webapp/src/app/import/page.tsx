@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import { redirect } from 'next/navigation';
 import ImportWizard from './ImportWizard';
+import DemoImportPage from './DemoImportPage';
 
 interface Props {
   searchParams: Promise<{ teamId?: string }>;
@@ -10,7 +11,13 @@ interface Props {
 
 export default async function ImportPage({ searchParams }: Props) {
   const params = await searchParams;
-  const { userId, user } = await getSession();
+  const session = await getSession();
+  const { userId, user } = session;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoImportPage />;
+  }
 
   // Get user's teams
   const teams = await prisma.team.findMany({

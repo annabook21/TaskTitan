@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { ArrowLeft, Zap } from 'lucide-react';
 import NewSprintForm from './NewSprintForm';
+import DemoNewSprintPage from './DemoNewSprintPage';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -12,7 +13,13 @@ interface Props {
 
 export default async function NewSprintPage({ params }: Props) {
   const { id } = await params;
-  const { userId, user } = await getSession();
+  const session = await getSession();
+  const { userId, user } = session;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoNewSprintPage />;
+  }
 
   const team = await prisma.team.findFirst({
     where: {

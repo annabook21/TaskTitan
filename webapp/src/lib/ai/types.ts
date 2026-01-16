@@ -213,3 +213,20 @@ export interface GenerateWireframeResult {
   inputTokens: number;
   outputTokens: number;
 }
+
+// Chat Refinement Types
+export interface ChatRefinementInput {
+  currentComponent: NaturalLanguageComponentResult;
+  refinementRequest: string;
+  projectContext?: {
+    projectName: string;
+    projectDescription: string;
+    existingComponents: Array<{ name: string; type: string }>;
+  };
+}
+
+export interface ChatRefinementResult {
+  component: NaturalLanguageComponentResult;
+  explanation: string;
+  suggestedFollowUps: string[];
+}

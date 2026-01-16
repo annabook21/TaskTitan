@@ -6,7 +6,9 @@ import { demoStore, DEMO_USER } from '@/lib/demo';
 import type { DemoComponent } from '@/lib/demo/types';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Layers, GitBranch, Users, Clock, Sparkles, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Layers, Clock, ChevronRight } from 'lucide-react';
+import SmartComponentCreator from './components/SmartComponentCreator';
+import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 
 const statusColors: Record<string, string> = {
   PLANNING: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
@@ -41,7 +43,8 @@ export default function DemoProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
-  useEffect(() => {
+  // Load project data from demo store
+  const loadProjectData = () => {
     const store = demoStore.getStore();
 
     const projectData = store.projects.find((p) => p.id === projectId);
@@ -64,6 +67,23 @@ export default function DemoProjectDetailPage() {
       updatedAt: projectData.updatedAt,
     });
     setLoading(false);
+  };
+
+  // Load on mount
+  useEffect(() => {
+    loadProjectData();
+  }, [projectId]);
+
+  // Listen for demo store updates to refresh data
+  useEffect(() => {
+    const handleStoreUpdate = () => {
+      loadProjectData();
+    };
+
+    window.addEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    return () => {
+      window.removeEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    };
   }, [projectId]);
 
   const user = {
@@ -154,14 +174,7 @@ export default function DemoProjectDetailPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <button className="btn-secondary" disabled>
-                <Sparkles className="w-5 h-5" />
-                AI Generate
-              </button>
-              <button className="btn-primary" disabled>
-                <Plus className="w-5 h-5" />
-                Add Component
-              </button>
+              <SmartComponentCreator projectId={project.id} />
             </div>
           </div>
 

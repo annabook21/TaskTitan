@@ -20,6 +20,7 @@ import {
 import SprintControls from './SprintControls';
 import SprintComponents from './SprintComponents';
 import AISprintPlanner from './AISprintPlanner';
+import DemoSprintDetailPage from './DemoSprintDetailPage';
 
 interface Props {
   params: Promise<{ id: string; sprintId: string }>;
@@ -50,7 +51,13 @@ const statusConfig = {
 
 export default async function SprintDetailPage({ params }: Props) {
   const { id: teamId, sprintId } = await params;
-  const { userId, user } = await getSession();
+  const session = await getSession();
+  const { userId, user } = session;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoSprintDetailPage />;
+  }
 
   const sprint = await prisma.sprint.findFirst({
     where: {

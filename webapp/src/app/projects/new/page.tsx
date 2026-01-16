@@ -2,14 +2,21 @@ import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import NewProjectForm from './NewProjectForm';
 import { prisma } from '@/lib/prisma';
+import DemoNewProjectPage from './DemoNewProjectPage';
 
 interface Props {
   searchParams: Promise<{ teamId?: string }>;
 }
 
 export default async function NewProjectPage({ searchParams }: Props) {
-  const { user, userId } = await getSession();
+  const session = await getSession();
+  const { user, userId } = session;
   const params = await searchParams;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoNewProjectPage />;
+  }
 
   // Get user's teams
   const memberships = await prisma.membership.findMany({

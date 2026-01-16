@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { notFound } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import MetricsClient from './MetricsClient';
+import DemoMetricsPage from './DemoMetricsPage';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -9,7 +10,13 @@ interface Props {
 
 export default async function MetricsPage({ params }: Props) {
   const { id: teamId } = await params;
-  const { userId } = await getSession();
+  const session = await getSession();
+  const { userId } = session;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoMetricsPage />;
+  }
 
   // Check membership
   const membership = await prisma.membership.findFirst({

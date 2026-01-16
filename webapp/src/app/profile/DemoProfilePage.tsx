@@ -1,33 +1,55 @@
-import { getSession } from '@/lib/auth';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { demoStore, DEMO_USER, clearDemoMode } from '@/lib/demo';
 import Header from '@/components/Header';
-import { prisma } from '@/lib/prisma';
-import { User, Mail, Calendar, FolderKanban, Users } from 'lucide-react';
 import Link from 'next/link';
-import DemoProfilePage from './DemoProfilePage';
+import { useRouter } from 'next/navigation';
+import { User, Mail, Calendar, FolderKanban, Users, LogOut } from 'lucide-react';
 
-export default async function ProfilePage() {
-  const session = await getSession();
-  const { user } = session;
+interface ProfileData {
+  teamsCount: number;
+  projectsCount: number;
+}
 
-  // Demo mode - render client-side page that reads from localStorage
-  if ('isDemo' in session && session.isDemo) {
-    return <DemoProfilePage />;
+export default function DemoProfilePage() {
+  const router = useRouter();
+  const [data, setData] = useState<ProfileData>({ teamsCount: 0, projectsCount: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const store = demoStore.getStore();
+    const userMemberships = store.memberships.filter((m) => m.userId === DEMO_USER.id);
+    const teamIds = userMemberships.map((m) => m.teamId);
+
+    const teamsCount = teamIds.length;
+    const projectsCount = store.projects.filter((p) => teamIds.includes(p.teamId)).length;
+
+    setData({ teamsCount, projectsCount });
+    setLoading(false);
+  }, []);
+
+  const user = {
+    id: DEMO_USER.id,
+    name: DEMO_USER.name,
+    email: DEMO_USER.email,
+  };
+
+  const handleSignOut = () => {
+    clearDemoMode();
+    router.push('/sign-in');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header user={user} />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="animate-pulse text-slate-400">Loading profile...</div>
+        </main>
+      </div>
+    );
   }
-
-  // Get user stats
-  const memberships = await prisma.membership.findMany({
-    where: { userId: user.id },
-    include: {
-      Team: {
-        include: {
-          Project: true,
-        },
-      },
-    },
-  });
-
-  const teamsCount = memberships.length;
-  const projectsCount = memberships.reduce((acc, m) => acc + m.Team.Project.length, 0);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -39,22 +61,18 @@ export default async function ProfilePage() {
           <div className="component-card mb-8">
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
               <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-500 to-emerald-500 flex items-center justify-center text-3xl font-bold text-white">
-                {user.name?.[0]?.toUpperCase() || user.email[0].toUpperCase()}
+                {DEMO_USER.name[0].toUpperCase()}
               </div>
               <div className="flex-1">
-                <h1 className="text-2xl font-bold text-slate-100">{user.name || 'User'}</h1>
+                <h1 className="text-2xl font-bold text-slate-100">{DEMO_USER.name}</h1>
                 <p className="text-slate-400 flex items-center gap-2 mt-1">
                   <Mail className="w-4 h-4" />
-                  {user.email}
+                  {DEMO_USER.email}
                 </p>
                 <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <Calendar className="w-4 h-4" />
-                    Joined{' '}
-                    {new Date(user.createdAt).toLocaleDateString('en-US', {
-                      month: 'long',
-                      year: 'numeric',
-                    })}
+                    Demo Account
                   </span>
                 </div>
               </div>
@@ -69,7 +87,7 @@ export default async function ProfilePage() {
                   <Users className="w-6 h-6 text-violet-400" />
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-slate-100">{teamsCount}</div>
+                  <div className="text-2xl font-bold text-slate-100">{data.teamsCount}</div>
                   <div className="text-sm text-slate-400 group-hover:text-violet-400 transition-colors">Teams</div>
                 </div>
               </div>
@@ -81,7 +99,7 @@ export default async function ProfilePage() {
                   <FolderKanban className="w-6 h-6 text-cyan-400" />
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-slate-100">{projectsCount}</div>
+                  <div className="text-2xl font-bold text-slate-100">{data.projectsCount}</div>
                   <div className="text-sm text-slate-400 group-hover:text-cyan-400 transition-colors">Projects</div>
                 </div>
               </div>
@@ -98,22 +116,29 @@ export default async function ProfilePage() {
               <div className="flex items-center justify-between py-3 border-b border-slate-800">
                 <div>
                   <div className="text-sm font-medium text-slate-300">Name</div>
-                  <div className="text-sm text-slate-500">{user.name || 'Not set'}</div>
+                  <div className="text-sm text-slate-500">{DEMO_USER.name}</div>
                 </div>
               </div>
               <div className="flex items-center justify-between py-3 border-b border-slate-800">
                 <div>
                   <div className="text-sm font-medium text-slate-300">Email</div>
-                  <div className="text-sm text-slate-500">{user.email}</div>
+                  <div className="text-sm text-slate-500">{DEMO_USER.email}</div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between py-3 border-b border-slate-800">
+                <div>
+                  <div className="text-sm font-medium text-slate-300">Account Type</div>
+                  <div className="text-sm text-amber-400">Demo Account</div>
                 </div>
               </div>
               <div className="pt-4">
-                <Link
-                  href="/api/auth/sign-out"
-                  className="btn-secondary text-red-400 border-red-500/20 hover:bg-red-500/10"
+                <button
+                  onClick={handleSignOut}
+                  className="btn-secondary text-red-400 border-red-500/20 hover:bg-red-500/10 inline-flex items-center gap-2"
                 >
-                  Sign Out
-                </Link>
+                  <LogOut className="w-4 h-4" />
+                  Exit Demo Mode
+                </button>
               </div>
             </div>
           </div>
