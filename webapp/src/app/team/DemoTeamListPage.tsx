@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { Plus, Users, FolderKanban, Crown, ArrowRight } from 'lucide-react';
+import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 
 interface TeamData {
   id: string;
@@ -19,7 +20,8 @@ export default function DemoTeamListPage() {
   const [teams, setTeams] = useState<TeamData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  // Load teams from demo store
+  const loadTeams = useCallback(() => {
     const store = demoStore.getStore();
     const userId = DEMO_USER.id;
 
@@ -47,6 +49,23 @@ export default function DemoTeamListPage() {
     setTeams(teamData);
     setLoading(false);
   }, []);
+
+  // Load on mount
+  useEffect(() => {
+    loadTeams();
+  }, [loadTeams]);
+
+  // Listen for demo store updates (e.g., after deleting a team)
+  useEffect(() => {
+    const handleStoreUpdate = () => {
+      loadTeams();
+    };
+
+    window.addEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    return () => {
+      window.removeEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    };
+  }, [loadTeams]);
 
   const user = {
     id: DEMO_USER.id,

@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { Plus, FolderKanban, Layers, Clock, ArrowRight, Filter } from 'lucide-react';
+import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 
 interface ProjectData {
   id: string;
@@ -20,7 +21,8 @@ export default function DemoProjectsPage() {
   const [projects, setProjects] = useState<ProjectData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  // Load projects from demo store
+  const loadProjects = useCallback(() => {
     const store = demoStore.getStore();
 
     // Get all projects
@@ -48,6 +50,23 @@ export default function DemoProjectsPage() {
     setProjects(projectData);
     setLoading(false);
   }, []);
+
+  // Load on mount
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  // Listen for demo store updates (e.g., after deleting a project)
+  useEffect(() => {
+    const handleStoreUpdate = () => {
+      loadProjects();
+    };
+
+    window.addEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    return () => {
+      window.removeEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    };
+  }, [loadProjects]);
 
   const user = {
     id: DEMO_USER.id,
