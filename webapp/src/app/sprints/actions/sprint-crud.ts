@@ -39,7 +39,12 @@ const assignToSprintSchema = z.object({
  */
 export const createSprint = authActionClient.schema(createSprintSchema).action(async ({ parsedInput, ctx }) => {
   const { teamId, name, goal, startDate, endDate, capacity } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'createSprint', _input: { teamId, name, goal, startDate, endDate, capacity } };
+  }
 
   // Verify user is member of team
   const membership = await prisma.membership.findUnique({
@@ -184,7 +189,12 @@ export const assignComponentToSprint = authActionClient
   .schema(assignToSprintSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, sprintId } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'assignComponentToSprint', _input: { componentId, sprintId } };
+    }
 
     const component = await prisma.component.findUnique({
       where: { id: componentId },
@@ -239,7 +249,12 @@ export const deleteSprint = authActionClient
   .schema(z.object({ id: z.string().cuid() }))
   .action(async ({ parsedInput, ctx }) => {
     const { id } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'deleteSprint', _input: { sprintId: id } };
+    }
 
     const sprint = await prisma.sprint.findUnique({
       where: { id },

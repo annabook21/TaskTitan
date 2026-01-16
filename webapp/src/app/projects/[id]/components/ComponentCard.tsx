@@ -334,13 +334,10 @@ export default function ComponentCard({ component, teamMembers, availableSprints
           <div
             className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs mb-2 border ${agingColors.bg} ${agingColors.text} ${agingColors.border}`}
           >
-            {isStale ? (
-              <AlertTriangle className="w-3 h-3" />
-            ) : (
-              <Timer className="w-3 h-3" />
-            )}
+            {isStale ? <AlertTriangle className="w-3 h-3" /> : <Timer className="w-3 h-3" />}
             <span>
-              {daysInStatus} day{daysInStatus !== 1 ? 's' : ''} in {component.status === 'IN_PROGRESS' ? 'progress' : component.status.toLowerCase().replace('_', ' ')}
+              {daysInStatus} day{daysInStatus !== 1 ? 's' : ''} in{' '}
+              {component.status === 'IN_PROGRESS' ? 'progress' : component.status.toLowerCase().replace('_', ' ')}
             </span>
             {isStale && <span className="font-medium">• Stale</span>}
           </div>

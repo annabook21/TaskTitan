@@ -35,7 +35,12 @@ const removeMemberSchema = z.object({
 
 export const createTeam = authActionClient.schema(createTeamSchema).action(async ({ parsedInput, ctx }) => {
   const { name, description } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'createTeam', _input: { name, description, userId } };
+  }
 
   // Create team and add creator as owner
   const team = await prisma.team.create({
@@ -59,7 +64,12 @@ export const createTeam = authActionClient.schema(createTeamSchema).action(async
 
 export const updateTeam = authActionClient.schema(updateTeamSchema).action(async ({ parsedInput, ctx }) => {
   const { id, name, description } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'updateTeam', _input: { teamId: id, name, description } };
+  }
 
   // Verify user is admin or owner
   const membership = await prisma.membership.findUnique({
@@ -209,7 +219,12 @@ export const deleteTeam = authActionClient
   .action(async ({ parsedInput, ctx }) => {
     try {
       const { id } = parsedInput;
-      const { userId } = ctx;
+      const { userId, isDemo } = ctx;
+
+      // Demo mode - return marker for client-side handling
+      if (isDemo) {
+        return { _demo: true, _action: 'deleteTeam', _input: { teamId: id } };
+      }
 
       // Verify user is owner
       const membership = await prisma.membership.findUnique({

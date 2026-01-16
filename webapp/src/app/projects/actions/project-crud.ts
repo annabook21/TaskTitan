@@ -27,7 +27,12 @@ const deleteProjectSchema = z.object({
  */
 export const createProject = authActionClient.schema(createProjectSchema).action(async ({ parsedInput, ctx }) => {
   const { name, description, teamId } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'createProject', _input: { name, description, teamId, ownerId: userId } };
+  }
 
   // Verify user is a member of the team
   const membership = await prisma.membership.findUnique({
@@ -68,7 +73,12 @@ export const createProject = authActionClient.schema(createProjectSchema).action
  */
 export const updateProject = authActionClient.schema(updateProjectSchema).action(async ({ parsedInput, ctx }) => {
   const { id, name, description } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'updateProject', _input: { projectId: id, name, description } };
+  }
 
   // Verify user has access to the project
   const project = await prisma.project.findFirst({
@@ -101,7 +111,12 @@ export const updateProject = authActionClient.schema(updateProjectSchema).action
  */
 export const deleteProject = authActionClient.schema(deleteProjectSchema).action(async ({ parsedInput, ctx }) => {
   const { id } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'deleteProject', _input: { projectId: id } };
+  }
 
   // Verify user is owner (using String comparison to avoid type mismatch)
   const project = await prisma.project.findFirst({

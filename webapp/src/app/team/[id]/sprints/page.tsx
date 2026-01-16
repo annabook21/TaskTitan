@@ -168,8 +168,8 @@ export default async function SprintsPage({ params }: Props) {
               <Zap className="w-16 h-16 text-slate-600 mx-auto mb-4" />
               <h3 className="text-xl font-medium text-slate-300 mb-2">No {cycleNameLower}s yet</h3>
               <p className="text-slate-500 mb-6 max-w-md mx-auto">
-                {cycleNamePlural} help you organize work into focused time periods. Create your first {cycleNameLower} to
-                start planning.
+                {cycleNamePlural} help you organize work into focused time periods. Create your first {cycleNameLower}{' '}
+                to start planning.
               </p>
               {canManageSprints && (
                 <Link href={`/team/${id}/sprints/new`} className="btn-primary">

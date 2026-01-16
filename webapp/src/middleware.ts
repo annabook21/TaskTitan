@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { fetchAuthSession } from 'aws-amplify/auth/server';
 import { runWithAmplifyServerContext } from '@/lib/amplifyServerUtils';
+import { DEMO_COOKIE_NAME } from '@/lib/demo/constants';
 
 // Local development mode - bypasses Cognito auth
 const IS_LOCAL_DEV = process.env.NODE_ENV === 'development' && !process.env.USER_POOL_ID;
@@ -18,6 +19,12 @@ export async function middleware(request: NextRequest) {
 
   // Skip auth check in local development
   if (IS_LOCAL_DEV) {
+    return response;
+  }
+
+  // Skip auth check in demo mode - data is stored locally in browser
+  const demoCookie = request.cookies.get(DEMO_COOKIE_NAME);
+  if (demoCookie?.value) {
     return response;
   }
 

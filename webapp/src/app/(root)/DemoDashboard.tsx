@@ -1,49 +1,109 @@
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { FolderKanban, Users, GitBranch, Plus, ArrowRight, Sparkles, Layers, Clock } from 'lucide-react';
-import DemoDashboard from './DemoDashboard';
 
-export default async function Dashboard() {
-  const session = await getSession();
-  const { userId, user } = session;
+interface DashboardData {
+  teams: Array<{
+    id: string;
+    name: string;
+    projectCount: number;
+    memberCount: number;
+  }>;
+  recentProjects: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    componentCount: number;
+    updatedAt: string;
+  }>;
+  stats: {
+    totalProjects: number;
+    totalComponents: number;
+    totalTeams: number;
+    totalMembers: number;
+  };
+}
 
-  // Demo mode - render client-side dashboard that reads from localStorage
-  if ('isDemo' in session && session.isDemo) {
-    return <DemoDashboard />;
-  }
+export default function DemoDashboard() {
+  const [data, setData] = useState<DashboardData | null>(null);
 
-  // Get user's projects through team memberships
-  const memberships = await prisma.membership.findMany({
-    where: { userId },
-    include: {
-      Team: {
-        include: {
-          Project: {
-            include: {
-              _count: {
-                select: { Component: true },
-              },
-            },
-            orderBy: { updatedAt: 'desc' },
-            take: 5,
-          },
-          _count: {
-            select: { Membership: true },
-          },
-        },
+  useEffect(() => {
+    // Load data from demo store (localStorage)
+    const store = demoStore.getStore();
+    const userId = DEMO_USER.id;
+
+    // Get user's teams through memberships
+    const userMemberships = store.memberships.filter((m) => m.userId === userId);
+    const teams = userMemberships
+      .map((m) => {
+        const team = store.teams.find((t) => t.id === m.teamId);
+        if (!team) return null;
+        const projectCount = store.projects.filter((p) => p.teamId === team.id).length;
+        const memberCount = store.memberships.filter((mem) => mem.teamId === team.id).length;
+        return {
+          id: team.id,
+          name: team.name,
+          projectCount,
+          memberCount,
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+
+    // Get recent projects
+    const teamIds = teams.map((t) => t.id);
+    const recentProjects = store.projects
+      .filter((p) => teamIds.includes(p.teamId))
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 5)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        componentCount: store.components.filter((c) => c.projectId === p.id).length,
+        updatedAt: p.updatedAt,
+      }));
+
+    // Calculate stats
+    const allProjects = store.projects.filter((p) => teamIds.includes(p.teamId));
+    const totalProjects = allProjects.length;
+    const totalComponents = store.components.filter((c) => allProjects.some((p) => p.id === c.projectId)).length;
+    const totalTeams = teams.length;
+    const totalMembers = teams.reduce((acc, t) => acc + t.memberCount, 0);
+
+    setData({
+      teams,
+      recentProjects,
+      stats: {
+        totalProjects,
+        totalComponents,
+        totalTeams,
+        totalMembers,
       },
-    },
-  });
+    });
+  }, []);
 
-  const teams = memberships.map((m) => m.Team);
-  const recentProjects = teams.flatMap((t) => t.Project).slice(0, 5);
+  // Demo user for header
+  const user = {
+    id: DEMO_USER.id,
+    name: DEMO_USER.name,
+    email: DEMO_USER.email,
+  };
 
-  // Calculate stats
-  const totalProjects = teams.reduce((acc, t) => acc + t.Project.length, 0);
-  const totalComponents = recentProjects.reduce((acc, p) => acc + p._count.Component, 0);
-  const totalTeamMembers = teams.reduce((acc, t) => acc + t._count.Membership, 0);
+  if (!data) {
+    // Loading state
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header user={user} />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="animate-pulse text-slate-400">Loading demo data...</div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -93,19 +153,19 @@ export default async function Dashboard() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               <div className="text-center">
-                <div className="text-3xl font-bold text-cyan-400">{totalProjects}</div>
+                <div className="text-3xl font-bold text-cyan-400">{data.stats.totalProjects}</div>
                 <div className="text-sm text-slate-400 mt-1">Active Projects</div>
               </div>
               <div className="text-center">
-                <div className="text-3xl font-bold text-emerald-400">{totalComponents}</div>
+                <div className="text-3xl font-bold text-emerald-400">{data.stats.totalComponents}</div>
                 <div className="text-sm text-slate-400 mt-1">Components</div>
               </div>
               <div className="text-center">
-                <div className="text-3xl font-bold text-violet-400">{teams.length}</div>
+                <div className="text-3xl font-bold text-violet-400">{data.stats.totalTeams}</div>
                 <div className="text-sm text-slate-400 mt-1">Teams</div>
               </div>
               <div className="text-center">
-                <div className="text-3xl font-bold text-amber-400">{totalTeamMembers}</div>
+                <div className="text-3xl font-bold text-amber-400">{data.stats.totalMembers}</div>
                 <div className="text-sm text-slate-400 mt-1">Team Members</div>
               </div>
             </div>
@@ -127,7 +187,7 @@ export default async function Dashboard() {
                 </Link>
               </div>
 
-              {recentProjects.length === 0 ? (
+              {data.recentProjects.length === 0 ? (
                 <div className="component-card text-center py-12">
                   <Layers className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-slate-300 mb-2">No projects yet</h3>
@@ -139,7 +199,7 @@ export default async function Dashboard() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {recentProjects.map((project) => (
+                  {data.recentProjects.map((project) => (
                     <Link key={project.id} href={`/projects/${project.id}`} className="component-card block group">
                       <div className="flex items-start justify-between">
                         <div>
@@ -152,7 +212,7 @@ export default async function Dashboard() {
                           <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
                             <span className="flex items-center gap-1">
                               <Layers className="w-3.5 h-3.5" />
-                              {project._count.Component} components
+                              {project.componentCount} components
                             </span>
                             <span className="flex items-center gap-1">
                               <Clock className="w-3.5 h-3.5" />
@@ -182,7 +242,7 @@ export default async function Dashboard() {
                   </Link>
                 </div>
 
-                {teams.length === 0 ? (
+                {data.teams.length === 0 ? (
                   <div className="component-card text-center py-8">
                     <Users className="w-10 h-10 text-slate-600 mx-auto mb-3" />
                     <p className="text-sm text-slate-500 mb-4">No teams yet</p>
@@ -192,7 +252,7 @@ export default async function Dashboard() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {teams.map((team) => (
+                    {data.teams.map((team) => (
                       <Link key={team.id} href={`/team/${team.id}`} className="component-card block group">
                         <div className="flex items-center justify-between">
                           <div>
@@ -200,7 +260,7 @@ export default async function Dashboard() {
                               {team.name}
                             </h3>
                             <p className="text-xs text-slate-500 mt-1">
-                              {team._count.Membership} members · {team.Project.length} projects
+                              {team.memberCount} members · {team.projectCount} projects
                             </p>
                           </div>
                         </div>

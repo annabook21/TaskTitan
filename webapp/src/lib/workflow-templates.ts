@@ -87,8 +87,6 @@ export const WORKFLOW_TEMPLATES: Record<WorkflowTemplateKey, WorkflowTemplate> =
 /**
  * Get template settings, returning null for CUSTOM template
  */
-export function getTemplateSettings(
-  templateKey: WorkflowTemplateKey,
-): WorkflowTemplateSettings | null {
+export function getTemplateSettings(templateKey: WorkflowTemplateKey): WorkflowTemplateSettings | null {
   return WORKFLOW_TEMPLATES[templateKey]?.settings ?? null;
 }

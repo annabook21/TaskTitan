@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { fetchAuthSession } from 'aws-amplify/auth/server';
 import { runWithAmplifyServerContext } from '@/lib/amplifyServerUtils';
 import { prisma } from '@/lib/prisma';
+import { DEMO_COOKIE_NAME, DEMO_USER } from '@/lib/demo/constants';
 
 export class UserNotCreatedError {
   constructor(
@@ -36,6 +37,28 @@ async function ensureLocalDevUser() {
 }
 
 export async function getSession() {
+  // Check for demo mode first (works in both dev and production)
+  const cookieStore = await cookies();
+  const demoCookie = cookieStore.get(DEMO_COOKIE_NAME);
+  if (demoCookie?.value) {
+    // Demo mode - return demo user without database access
+    const demoUser = {
+      id: DEMO_USER.id,
+      email: DEMO_USER.email,
+      name: DEMO_USER.name,
+      avatarUrl: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    return {
+      userId: DEMO_USER.id,
+      email: DEMO_USER.email,
+      accessToken: 'demo-token',
+      user: demoUser,
+      isDemo: true,
+    };
+  }
+
   // Local development mode - use mock user
   if (IS_LOCAL_DEV) {
     const user = await ensureLocalDevUser();

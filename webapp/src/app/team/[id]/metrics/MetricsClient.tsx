@@ -115,11 +115,7 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
       {/* Time Range Selector */}
       <div className="flex items-center gap-4">
         <label className="text-sm text-slate-400">Time range:</label>
-        <select
-          value={days}
-          onChange={(e) => setDays(parseInt(e.target.value))}
-          className="input w-auto"
-        >
+        <select value={days} onChange={(e) => setDays(parseInt(e.target.value))} className="input w-auto">
           <option value={7}>Last 7 days</option>
           <option value={14}>Last 14 days</option>
           <option value={30}>Last 30 days</option>
@@ -143,9 +139,7 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
                 {cycleTimeStats.average.toFixed(1)}
                 <span className="text-lg text-slate-400 ml-1">days</span>
               </p>
-              <p className="text-xs text-slate-500 mt-2">
-                Based on {cycleTimeStats.count} completed items
-              </p>
+              <p className="text-xs text-slate-500 mt-2">Based on {cycleTimeStats.count} completed items</p>
             </div>
           ) : (
             <p className="text-slate-500 text-sm">No cycle time data</p>
@@ -229,9 +223,7 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
             ))}
           </div>
         ) : (
-          <p className="text-slate-500 text-sm text-center py-8">
-            No throughput data for this period
-          </p>
+          <p className="text-slate-500 text-sm text-center py-8">No throughput data for this period</p>
         )}
       </div>
 
@@ -258,8 +250,7 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
                 <div key={status.status} className="flex items-center gap-2">
                   <div className={`w-3 h-3 rounded ${STATUS_COLORS[status.status]}`} />
                   <span className="text-sm text-slate-400">
-                    {STATUS_LABELS[status.status]}: {status.count} (
-                    {((status.count / totalItems) * 100).toFixed(0)}%)
+                    {STATUS_LABELS[status.status]}: {status.count} ({((status.count / totalItems) * 100).toFixed(0)}%)
                   </span>
                 </div>
               ))}
@@ -281,13 +272,16 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
             {cfdData.slice(-14).map((day, idx) => {
               const total = day.PLANNING + day.IN_PROGRESS + day.BLOCKED + day.REVIEW + day.COMPLETED;
               if (total === 0) return null;
-              const maxTotal = Math.max(...cfdData.slice(-14).map(d =>
-                d.PLANNING + d.IN_PROGRESS + d.BLOCKED + d.REVIEW + d.COMPLETED
-              ));
+              const maxTotal = Math.max(
+                ...cfdData.slice(-14).map((d) => d.PLANNING + d.IN_PROGRESS + d.BLOCKED + d.REVIEW + d.COMPLETED),
+              );
 
               return (
                 <div key={day.date} className="flex-1 flex flex-col h-full justify-end">
-                  <div className="flex flex-col rounded-t overflow-hidden" style={{ height: `${(total / maxTotal) * 100}%` }}>
+                  <div
+                    className="flex flex-col rounded-t overflow-hidden"
+                    style={{ height: `${(total / maxTotal) * 100}%` }}
+                  >
                     {day.COMPLETED > 0 && (
                       <div
                         className="bg-emerald-500"
@@ -334,11 +328,26 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
             })}
           </div>
           <div className="flex flex-wrap gap-4 mt-4">
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-slate-500" /><span className="text-xs text-slate-400">Planning</span></div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-cyan-500" /><span className="text-xs text-slate-400">In Progress</span></div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-red-500" /><span className="text-xs text-slate-400">Blocked</span></div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-amber-500" /><span className="text-xs text-slate-400">Review</span></div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-emerald-500" /><span className="text-xs text-slate-400">Completed</span></div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-slate-500" />
+              <span className="text-xs text-slate-400">Planning</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-cyan-500" />
+              <span className="text-xs text-slate-400">In Progress</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-red-500" />
+              <span className="text-xs text-slate-400">Blocked</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-amber-500" />
+              <span className="text-xs text-slate-400">Review</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-emerald-500" />
+              <span className="text-xs text-slate-400">Completed</span>
+            </div>
           </div>
           <p className="text-xs text-slate-500 mt-3">
             CFD shows bottlenecks - if bands widen, work is accumulating in that status.
@@ -354,40 +363,42 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
             <h3 className="font-medium">Aging Analysis</h3>
           </div>
           <div className="space-y-4">
-            {agingData.filter(d => d.itemCount > 0).map(status => {
-              const isWarning =
-                (status.status === 'IN_PROGRESS' && status.avgDays > 5) ||
-                (status.status === 'BLOCKED' && status.avgDays > 2) ||
-                (status.status === 'REVIEW' && status.avgDays > 3);
-              const isCritical =
-                (status.status === 'IN_PROGRESS' && status.avgDays > 7) ||
-                (status.status === 'BLOCKED' && status.avgDays > 3) ||
-                (status.status === 'REVIEW' && status.avgDays > 5);
+            {agingData
+              .filter((d) => d.itemCount > 0)
+              .map((status) => {
+                const isWarning =
+                  (status.status === 'IN_PROGRESS' && status.avgDays > 5) ||
+                  (status.status === 'BLOCKED' && status.avgDays > 2) ||
+                  (status.status === 'REVIEW' && status.avgDays > 3);
+                const isCritical =
+                  (status.status === 'IN_PROGRESS' && status.avgDays > 7) ||
+                  (status.status === 'BLOCKED' && status.avgDays > 3) ||
+                  (status.status === 'REVIEW' && status.avgDays > 5);
 
-              return (
-                <div key={status.status} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded ${STATUS_COLORS[status.status]}`} />
-                    <span className="text-sm">{STATUS_LABELS[status.status]}</span>
-                    <span className="text-xs text-slate-500">({status.itemCount} items)</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <span className={`text-sm font-medium ${
-                        isCritical ? 'text-red-400' : isWarning ? 'text-amber-400' : 'text-slate-300'
-                      }`}>
-                        Avg: {status.avgDays.toFixed(1)}d
-                      </span>
-                      <span className="text-xs text-slate-500 ml-2">
-                        Max: {status.maxDays.toFixed(1)}d
-                      </span>
+                return (
+                  <div key={status.status} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded ${STATUS_COLORS[status.status]}`} />
+                      <span className="text-sm">{STATUS_LABELS[status.status]}</span>
+                      <span className="text-xs text-slate-500">({status.itemCount} items)</span>
                     </div>
-                    {isCritical && <AlertTriangle className="w-4 h-4 text-red-400" />}
-                    {isWarning && !isCritical && <AlertTriangle className="w-4 h-4 text-amber-400" />}
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <span
+                          className={`text-sm font-medium ${
+                            isCritical ? 'text-red-400' : isWarning ? 'text-amber-400' : 'text-slate-300'
+                          }`}
+                        >
+                          Avg: {status.avgDays.toFixed(1)}d
+                        </span>
+                        <span className="text-xs text-slate-500 ml-2">Max: {status.maxDays.toFixed(1)}d</span>
+                      </div>
+                      {isCritical && <AlertTriangle className="w-4 h-4 text-red-400" />}
+                      {isWarning && !isCritical && <AlertTriangle className="w-4 h-4 text-amber-400" />}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
           <p className="text-xs text-slate-500 mt-4">
             High aging in a column indicates a bottleneck. Consider WIP limits or process improvements.
@@ -400,21 +411,20 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
         <h4 className="font-medium text-slate-300 mb-2">Understanding These Metrics</h4>
         <ul className="text-sm text-slate-400 space-y-1">
           <li>
-            <strong>Cycle Time</strong>: Time from when work starts (In Progress) until completion.
-            Lower is generally better.
+            <strong>Cycle Time</strong>: Time from when work starts (In Progress) until completion. Lower is generally
+            better.
           </li>
           <li>
-            <strong>Throughput</strong>: Number of items completed per week. Tracks team delivery
-            velocity.
+            <strong>Throughput</strong>: Number of items completed per week. Tracks team delivery velocity.
           </li>
           <li>
-            <strong>WIP</strong>: Work in Progress. Keep this low to reduce context switching and
-            improve flow.
+            <strong>WIP</strong>: Work in Progress. Keep this low to reduce context switching and improve flow.
           </li>
           {isKanban && (
             <>
               <li>
-                <strong>Cumulative Flow</strong>: Shows work distribution over time. Widening bands indicate bottlenecks.
+                <strong>Cumulative Flow</strong>: Shows work distribution over time. Widening bands indicate
+                bottlenecks.
               </li>
               <li>
                 <strong>Aging Analysis</strong>: Shows how long items sit in each status. Helps identify stuck work.

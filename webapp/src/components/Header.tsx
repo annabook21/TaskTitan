@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Hexagon, Menu, X, User, LogOut, ChevronDown, Upload } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
+import DemoBadge from './DemoBadge';
 
 const navLinks = [
   { href: '/', label: 'Dashboard' },
@@ -45,17 +46,23 @@ export default function Header({ user }: HeaderProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="relative">
-              <Hexagon className="w-8 h-8 text-cyan-500 transition-transform group-hover:scale-110" strokeWidth={1.5} />
-              <span className="absolute inset-0 flex items-center justify-center text-cyan-400 font-bold text-sm">
-                T
+          <div className="flex items-center gap-3">
+            <Link href="/" className="flex items-center gap-2 group">
+              <div className="relative">
+                <Hexagon
+                  className="w-8 h-8 text-cyan-500 transition-transform group-hover:scale-110"
+                  strokeWidth={1.5}
+                />
+                <span className="absolute inset-0 flex items-center justify-center text-cyan-400 font-bold text-sm">
+                  T
+                </span>
+              </div>
+              <span className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-cyan-200 bg-clip-text text-transparent">
+                TaskTitan
               </span>
-            </div>
-            <span className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-cyan-200 bg-clip-text text-transparent">
-              TaskTitan
-            </span>
-          </Link>
+            </Link>
+            <DemoBadge />
+          </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">

@@ -260,12 +260,7 @@ export default async function ProjectDetailPage({ params }: Props) {
 
           {/* Sprint Timeline - only show if cycles are enabled */}
           {cycleEnabled && availableSprints.length > 0 && (
-            <SprintTimeline
-              sprints={availableSprints}
-              components={components}
-              teamId={team.id}
-              cycleName={cycleName}
-            />
+            <SprintTimeline sprints={availableSprints} components={components} teamId={team.id} cycleName={cycleName} />
           )}
 
           {/* Main Content */}
@@ -351,9 +346,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                                   </span>
                                 )}
                               </h3>
-                              {isOverLimit && (
-                                <span className="text-xs text-red-400 font-medium">WIP exceeded!</span>
-                              )}
+                              {isOverLimit && <span className="text-xs text-red-400 font-medium">WIP exceeded!</span>}
                             </div>
 
                             <div className="space-y-3 min-h-[100px]">
@@ -420,7 +413,9 @@ export default async function ProjectDetailPage({ params }: Props) {
                                 {sprint.name}
                               </span>
                               {sprint.status === 'ACTIVE' && (
-                                <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded">Active</span>
+                                <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded">
+                                  Active
+                                </span>
                               )}
                             </div>
                             <div className="flex items-center gap-2 text-xs text-slate-500">

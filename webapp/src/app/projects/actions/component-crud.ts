@@ -30,7 +30,16 @@ const updateComponentSchema = z.object({
  */
 export const createComponent = authActionClient.schema(createComponentSchema).action(async ({ parsedInput, ctx }) => {
   const { projectId, name, description, priority, estimatedHours, dueDate } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return {
+      _demo: true,
+      _action: 'createComponent',
+      _input: { projectId, name, description, type: 'TASK', priority, estimatedHours, dueDate },
+    };
+  }
 
   // Verify user has access
   const project = await prisma.project.findFirst({
@@ -84,7 +93,16 @@ export const createComponent = authActionClient.schema(createComponentSchema).ac
  */
 export const updateComponent = authActionClient.schema(updateComponentSchema).action(async ({ parsedInput, ctx }) => {
   const { id, name, description, status, priority, estimatedHours, dueDate } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return {
+      _demo: true,
+      _action: 'updateComponent',
+      _input: { componentId: id, name, description, status, priority, estimatedHours, dueDate },
+    };
+  }
 
   // Verify access through project
   const component = await prisma.component.findFirst({

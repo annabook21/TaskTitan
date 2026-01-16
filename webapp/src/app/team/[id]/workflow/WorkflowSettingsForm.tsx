@@ -6,11 +6,7 @@ import { updateWorkflowConfig } from './actions';
 import { toast } from 'sonner';
 import { Loader2, Save, Layers, Zap, TrendingUp, Calendar, LayoutTemplate, Type } from 'lucide-react';
 import type { TeamWorkflowConfig } from '@prisma/client';
-import {
-  WORKFLOW_TEMPLATES,
-  type WorkflowTemplateKey,
-  getTemplateSettings,
-} from '@/lib/workflow-templates';
+import { WORKFLOW_TEMPLATES, type WorkflowTemplateKey, getTemplateSettings } from '@/lib/workflow-templates';
 import { CYCLE_NAME_OPTIONS, BACKLOG_NAME_OPTIONS } from '@/lib/terminology';
 
 interface Props {
@@ -121,9 +117,7 @@ export default function WorkflowSettingsForm({ teamId, config }: Props) {
           <LayoutTemplate className="w-5 h-5 text-emerald-400" />
           <div>
             <h2 className="text-lg font-semibold">Workflow Template</h2>
-            <p className="text-sm text-slate-400 mt-1">
-              Choose a preset or customize your own workflow settings.
-            </p>
+            <p className="text-sm text-slate-400 mt-1">Choose a preset or customize your own workflow settings.</p>
           </div>
         </div>
 
@@ -154,9 +148,7 @@ export default function WorkflowSettingsForm({ teamId, config }: Props) {
           <Type className="w-5 h-5 text-pink-400" />
           <div>
             <h2 className="text-lg font-semibold">Terminology</h2>
-            <p className="text-sm text-slate-400 mt-1">
-              Customize the language used throughout your workspace.
-            </p>
+            <p className="text-sm text-slate-400 mt-1">Customize the language used throughout your workspace.</p>
           </div>
         </div>
 
@@ -376,9 +368,7 @@ export default function WorkflowSettingsForm({ teamId, config }: Props) {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-slate-500 mt-2">
-                  {cycleName}s will start on this day of the week.
-                </p>
+                <p className="text-xs text-slate-500 mt-2">{cycleName}s will start on this day of the week.</p>
               </div>
             </div>
           )}
