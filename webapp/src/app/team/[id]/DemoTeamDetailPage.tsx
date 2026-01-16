@@ -1,8 +1,10 @@
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import {
   ArrowLeft,
   Users,
@@ -18,14 +20,6 @@ import {
   Settings,
   BarChart3,
 } from 'lucide-react';
-import InviteButton from './InviteButton';
-import SeedDemoButton from './SeedDemoButton';
-import DeleteTeamButton from './DeleteTeamButton';
-import DemoTeamDetailPage from './DemoTeamDetailPage';
-
-interface Props {
-  params: Promise<{ id: string }>;
-}
 
 const roleIcons = {
   OWNER: Crown,
@@ -41,48 +35,128 @@ const roleColors = {
   VIEWER: 'text-slate-400 bg-slate-500/10',
 };
 
-export default async function TeamDetailPage({ params }: Props) {
-  const { id } = await params;
-  const session = await getSession();
-  const { userId, user } = session;
+interface TeamData {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  members: Array<{
+    id: string;
+    name: string | null;
+    email: string;
+    role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+  }>;
+  projects: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    componentCount: number;
+    updatedAt: string;
+  }>;
+  workflowConfig: {
+    cycleEnabled: boolean;
+    cycleName: string;
+  } | null;
+}
 
-  // Demo mode - render client-side page that reads from localStorage
-  if ('isDemo' in session && session.isDemo) {
-    return <DemoTeamDetailPage />;
+export default function DemoTeamDetailPage() {
+  const params = useParams();
+  const teamId = params.id as string;
+  const [team, setTeam] = useState<TeamData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    const store = demoStore.getStore();
+
+    const teamData = store.teams.find((t) => t.id === teamId);
+    if (!teamData) {
+      setNotFound(true);
+      setLoading(false);
+      return;
+    }
+
+    // Get members
+    const memberships = store.memberships.filter((m) => m.teamId === teamId);
+    const members = memberships.map((m) => {
+      const user = store.users.find((u) => u.id === m.userId);
+      return {
+        id: user?.id || m.userId,
+        name: user?.name || null,
+        email: user?.email || 'unknown@example.com',
+        role: m.role as 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER',
+      };
+    });
+
+    // Get projects
+    const projects = store.projects
+      .filter((p) => p.teamId === teamId)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        componentCount: store.components.filter((c) => c.projectId === p.id).length,
+        updatedAt: p.updatedAt,
+      }));
+
+    // Get workflow config
+    const workflowConfig = store.workflowConfigs.find((w) => w.teamId === teamId);
+
+    setTeam({
+      id: teamData.id,
+      name: teamData.name,
+      description: teamData.description,
+      createdAt: teamData.createdAt,
+      members,
+      projects,
+      workflowConfig: workflowConfig
+        ? {
+            cycleEnabled: workflowConfig.cycleEnabled,
+            cycleName: workflowConfig.cycleName,
+          }
+        : null,
+    });
+    setLoading(false);
+  }, [teamId]);
+
+  const user = {
+    id: DEMO_USER.id,
+    name: DEMO_USER.name,
+    email: DEMO_USER.email,
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header user={user} />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="animate-pulse text-slate-400">Loading team...</div>
+        </main>
+      </div>
+    );
   }
 
-  const team = await prisma.team.findFirst({
-    where: {
-      id,
-      Membership: { some: { userId } },
-    },
-    include: {
-      Membership: {
-        include: { User: true },
-        orderBy: { joinedAt: 'asc' },
-      },
-      Project: {
-        include: {
-          _count: { select: { Component: true } },
-        },
-        orderBy: { updatedAt: 'desc' },
-      },
-      WorkflowConfig: true,
-    },
-  });
-
-  if (!team) {
-    notFound();
+  if (notFound || !team) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header user={user} />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-slate-300 mb-2">Team not found</h1>
+            <p className="text-slate-500 mb-4">This team doesn&apos;t exist in demo mode.</p>
+            <Link href="/team" className="btn-primary">
+              Back to Teams
+            </Link>
+          </div>
+        </main>
+      </div>
+    );
   }
 
-  // Get current user's role in this team
-  const currentUserMembership = team.Membership.find((m) => String(m.userId) === String(userId));
-  const isOwnerOrAdmin = currentUserMembership?.role === 'OWNER' || currentUserMembership?.role === 'ADMIN';
-
-  // Get workflow terminology
-  const workflowConfig = team.WorkflowConfig;
-  const cycleEnabled = workflowConfig?.cycleEnabled ?? true;
-  const cycleName = workflowConfig?.cycleName || 'Sprint';
+  const currentUserMember = team.members.find((m) => m.id === DEMO_USER.id);
+  const isOwnerOrAdmin = currentUserMember?.role === 'OWNER' || currentUserMember?.role === 'ADMIN';
+  const cycleEnabled = team.workflowConfig?.cycleEnabled ?? true;
+  const cycleName = team.workflowConfig?.cycleName || 'Sprint';
   const cycleNamePlural = `${cycleName}s`;
 
   return (
@@ -92,10 +166,7 @@ export default async function TeamDetailPage({ params }: Props) {
       <main className="flex-grow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Back link */}
-          <Link
-            href="/team"
-            className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-6"
-          >
+          <Link href="/team" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-6">
             <ArrowLeft className="w-4 h-4" />
             Back to Teams
           </Link>
@@ -112,11 +183,11 @@ export default async function TeamDetailPage({ params }: Props) {
                 <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <Users className="w-4 h-4" />
-                    {team.Membership.length} member{team.Membership.length !== 1 ? 's' : ''}
+                    {team.members.length} member{team.members.length !== 1 ? 's' : ''}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <FolderKanban className="w-4 h-4" />
-                    {team.Project.length} project{team.Project.length !== 1 ? 's' : ''}
+                    {team.projects.length} project{team.projects.length !== 1 ? 's' : ''}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Calendar className="w-4 h-4" />
@@ -168,7 +239,7 @@ export default async function TeamDetailPage({ params }: Props) {
                 Projects
               </h2>
 
-              {team.Project.length === 0 ? (
+              {team.projects.length === 0 ? (
                 <div className="component-card text-center py-12">
                   <FolderKanban className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-slate-300 mb-2">No projects yet</h3>
@@ -180,7 +251,7 @@ export default async function TeamDetailPage({ params }: Props) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {team.Project.map((project) => (
+                  {team.projects.map((project) => (
                     <Link key={project.id} href={`/projects/${project.id}`} className="component-card block group">
                       <div className="flex items-start justify-between">
                         <div>
@@ -191,7 +262,7 @@ export default async function TeamDetailPage({ params }: Props) {
                             <p className="text-sm text-slate-400 mt-1 line-clamp-2">{project.description}</p>
                           )}
                           <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
-                            <span>{project._count.Component} components</span>
+                            <span>{project.componentCount} components</span>
                             <span>Updated {new Date(project.updatedAt).toLocaleDateString()}</span>
                           </div>
                         </div>
@@ -209,13 +280,12 @@ export default async function TeamDetailPage({ params }: Props) {
                   <Users className="w-5 h-5 text-violet-400" />
                   Members
                 </h2>
-                {isOwnerOrAdmin && <InviteButton teamId={team.id} />}
               </div>
 
               <div className="component-card">
                 <div className="space-y-4">
-                  {team.Membership.map(({ User: member, role }) => {
-                    const RoleIcon = roleIcons[role];
+                  {team.members.map((member) => {
+                    const RoleIcon = roleIcons[member.role];
                     return (
                       <div key={member.id} className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-sm font-medium text-white">
@@ -227,10 +297,10 @@ export default async function TeamDetailPage({ params }: Props) {
                               {member.name || member.email.split('@')[0]}
                             </span>
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${roleColors[role]}`}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${roleColors[member.role]}`}
                             >
                               <RoleIcon className="w-3 h-3" />
-                              {role.toLowerCase()}
+                              {member.role.toLowerCase()}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
@@ -243,21 +313,6 @@ export default async function TeamDetailPage({ params }: Props) {
                   })}
                 </div>
               </div>
-
-              {/* Demo seed button - only for owner */}
-              {currentUserMembership?.role === 'OWNER' && (
-                <div className="mt-6">
-                  <SeedDemoButton teamId={team.id} />
-                </div>
-              )}
-
-              {/* Danger Zone - only for owner */}
-              {currentUserMembership?.role === 'OWNER' && (
-                <div className="mt-8 pt-6 border-t border-slate-700">
-                  <h3 className="text-sm font-medium text-red-400 mb-3">Danger Zone</h3>
-                  <DeleteTeamButton teamId={team.id} teamName={team.name} />
-                </div>
-              )}
             </div>
           </div>
         </div>

@@ -24,6 +24,7 @@ import TimelineView from './components/TimelineView';
 import DeleteProjectButton from './DeleteProjectButton';
 import GitHubIntegrationSettings from './components/GitHubIntegrationSettings';
 import SprintTimeline from './components/SprintTimeline';
+import DemoProjectDetailPage from './DemoProjectDetailPage';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -31,7 +32,13 @@ interface Props {
 
 export default async function ProjectDetailPage({ params }: Props) {
   const { id } = await params;
-  const { userId, user } = await getSession();
+  const session = await getSession();
+  const { userId, user } = session;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoProjectDetailPage />;
+  }
 
   const project = await prisma.project.findFirst({
     where: {

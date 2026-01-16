@@ -1,80 +1,70 @@
-import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import { Plus, FolderKanban, Layers, Clock, Users, ArrowRight, Filter } from 'lucide-react';
-import DemoProjectsPage from './DemoProjectsPage';
+import { Plus, FolderKanban, Layers, Clock, ArrowRight, Filter } from 'lucide-react';
 
-export default async function ProjectsPage() {
-  const session = await getSession();
-  const { userId, user } = session;
+interface ProjectData {
+  id: string;
+  name: string;
+  description: string | null;
+  teamName: string;
+  componentCount: number;
+  componentsByStatus: Record<string, number>;
+  updatedAt: string;
+}
 
-  // Demo mode - render client-side page that reads from localStorage
-  if ('isDemo' in session && session.isDemo) {
-    return <DemoProjectsPage />;
+export default function DemoProjectsPage() {
+  const [projects, setProjects] = useState<ProjectData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const store = demoStore.getStore();
+
+    // Get all projects
+    const projectData = store.projects.map((project) => {
+      const team = store.teams.find((t) => t.id === project.teamId);
+      const components = store.components.filter((c) => c.projectId === project.id);
+
+      // Count by status
+      const componentsByStatus: Record<string, number> = {};
+      for (const comp of components) {
+        componentsByStatus[comp.status] = (componentsByStatus[comp.status] || 0) + 1;
+      }
+
+      return {
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        teamName: team?.name || 'Unknown Team',
+        componentCount: components.length,
+        componentsByStatus,
+        updatedAt: project.updatedAt,
+      };
+    });
+
+    setProjects(projectData);
+    setLoading(false);
+  }, []);
+
+  const user = {
+    id: DEMO_USER.id,
+    name: DEMO_USER.name,
+    email: DEMO_USER.email,
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header user={user} />
+        <main className="flex-grow flex items-center justify-center">
+          <div className="animate-pulse text-slate-400">Loading projects...</div>
+        </main>
+      </div>
+    );
   }
-
-  // Get all projects user has access to
-  const projects = await prisma.project.findMany({
-    where: {
-      Team: { Membership: { some: { userId } } },
-    },
-    select: {
-      id: true,
-      name: true,
-      description: true,
-      updatedAt: true,
-      // Only load essential Team fields
-      Team: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      // Only load essential User fields
-      User: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      },
-      _count: {
-        select: { Component: true },
-      },
-    },
-    orderBy: { updatedAt: 'desc' },
-  });
-
-  // Get status counts for all projects in a single aggregated query (more efficient)
-  const statusCounts = await prisma.component.groupBy({
-    by: ['projectId', 'status'],
-    where: {
-      projectId: { in: projects.map((p) => p.id) },
-    },
-    _count: true,
-  });
-
-  // Build status count map for quick lookup
-  const statusCountMap = new Map<string, Record<string, number>>();
-  for (const count of statusCounts) {
-    if (!statusCountMap.has(count.projectId)) {
-      statusCountMap.set(count.projectId, {});
-    }
-    statusCountMap.get(count.projectId)![count.status] = count._count;
-  }
-
-  // Attach status counts to projects
-  const projectsWithStats = projects.map((project) => {
-    const componentsByStatus = statusCountMap.get(project.id) || {};
-
-    return {
-      ...project,
-      team: project.Team,
-      _count: { components: project._count.Component },
-      componentsByStatus,
-    };
-  });
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -106,7 +96,7 @@ export default async function ProjectsPage() {
           </div>
 
           {/* Projects Grid */}
-          {projectsWithStats.length === 0 ? (
+          {projects.length === 0 ? (
             <div className="component-card text-center py-16">
               <Layers className="w-16 h-16 text-slate-600 mx-auto mb-4" />
               <h2 className="text-xl font-medium text-slate-300 mb-2">No projects yet</h2>
@@ -120,7 +110,7 @@ export default async function ProjectsPage() {
             </div>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {projectsWithStats.map((project, index) => (
+              {projects.map((project, index) => (
                 <Link
                   key={project.id}
                   href={`/projects/${project.id}`}
@@ -131,7 +121,7 @@ export default async function ProjectsPage() {
                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-cyan-600/20 flex items-center justify-center">
                       <FolderKanban className="w-5 h-5 text-cyan-400" />
                     </div>
-                    <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">{project.team.name}</span>
+                    <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">{project.teamName}</span>
                   </div>
 
                   <h3 className="text-lg font-semibold text-slate-100 group-hover:text-cyan-400 transition-colors mb-2">
@@ -143,14 +133,14 @@ export default async function ProjectsPage() {
                   )}
 
                   {/* Component Status Bar */}
-                  {project._count.components > 0 && (
+                  {project.componentCount > 0 && (
                     <div className="mb-4">
                       <div className="flex h-2 rounded-full overflow-hidden bg-slate-800">
                         {project.componentsByStatus.COMPLETED > 0 && (
                           <div
                             className="bg-emerald-500"
                             style={{
-                              width: `${(project.componentsByStatus.COMPLETED / project._count.components) * 100}%`,
+                              width: `${(project.componentsByStatus.COMPLETED / project.componentCount) * 100}%`,
                             }}
                           />
                         )}
@@ -158,7 +148,7 @@ export default async function ProjectsPage() {
                           <div
                             className="bg-cyan-500"
                             style={{
-                              width: `${(project.componentsByStatus.IN_PROGRESS / project._count.components) * 100}%`,
+                              width: `${(project.componentsByStatus.IN_PROGRESS / project.componentCount) * 100}%`,
                             }}
                           />
                         )}
@@ -166,7 +156,7 @@ export default async function ProjectsPage() {
                           <div
                             className="bg-amber-500"
                             style={{
-                              width: `${(project.componentsByStatus.REVIEW / project._count.components) * 100}%`,
+                              width: `${(project.componentsByStatus.REVIEW / project.componentCount) * 100}%`,
                             }}
                           />
                         )}
@@ -174,7 +164,7 @@ export default async function ProjectsPage() {
                           <div
                             className="bg-red-500"
                             style={{
-                              width: `${(project.componentsByStatus.BLOCKED / project._count.components) * 100}%`,
+                              width: `${(project.componentsByStatus.BLOCKED / project.componentCount) * 100}%`,
                             }}
                           />
                         )}
@@ -182,7 +172,7 @@ export default async function ProjectsPage() {
                           <div
                             className="bg-violet-500"
                             style={{
-                              width: `${(project.componentsByStatus.PLANNING / project._count.components) * 100}%`,
+                              width: `${(project.componentsByStatus.PLANNING / project.componentCount) * 100}%`,
                             }}
                           />
                         )}
@@ -208,7 +198,7 @@ export default async function ProjectsPage() {
                     <div className="flex items-center gap-4 text-xs text-slate-500">
                       <span className="flex items-center gap-1">
                         <Layers className="w-3.5 h-3.5" />
-                        {project._count.components}
+                        {project.componentCount}
                       </span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5" />

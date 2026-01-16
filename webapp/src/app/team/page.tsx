@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { Users, Plus, FolderKanban, Crown, Shield, User as UserIcon, Eye, ArrowRight } from 'lucide-react';
+import DemoTeamListPage from './DemoTeamListPage';
 
 const roleIcons = {
   OWNER: Crown,
@@ -19,7 +20,13 @@ const roleColors = {
 };
 
 export default async function TeamPage() {
-  const { userId, user } = await getSession();
+  const session = await getSession();
+  const { userId, user } = session;
+
+  // Demo mode - render client-side page that reads from localStorage
+  if ('isDemo' in session && session.isDemo) {
+    return <DemoTeamListPage />;
+  }
 
   const memberships = await prisma.membership.findMany({
     where: { userId },
