@@ -8,12 +8,12 @@ import { generateComponents, isAIConfigured } from '@/lib/ai';
 
 // Schemas
 const generateComponentsSchema = z.object({
-  projectId: z.string().cuid(),
+  projectId: z.string().min(1),
   generateSprints: z.boolean().optional(),
 });
 
 const applyAIComponentsSchema = z.object({
-  projectId: z.string().cuid(),
+  projectId: z.string().min(1),
   components: z.array(
     z.object({
       name: z.string(),

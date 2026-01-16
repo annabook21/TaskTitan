@@ -8,14 +8,14 @@ import { analyzeImportData, cleanupImportData, isAIConfigured } from '@/lib/ai';
 import type { ComponentType, ComponentStatus } from '@prisma/client';
 
 const analyzeSchema = z.object({
-  teamId: z.string().cuid(),
+  teamId: z.string().min(1),
   headers: z.array(z.string()),
   sampleRows: z.array(z.record(z.string())),
 });
 
 const importSchema = z.object({
-  teamId: z.string().cuid(),
-  projectId: z.string().cuid().optional(),
+  teamId: z.string().min(1),
+  projectId: z.string().min(1).optional(),
   projectName: z.string().optional(),
   mappings: z.array(
     z.object({
@@ -25,7 +25,7 @@ const importSchema = z.object({
   ),
   rows: z.array(z.record(z.string())),
   createMissingParents: z.boolean().default(true),
-  autoAssignSprint: z.string().cuid().optional(),
+  autoAssignSprint: z.string().min(1).optional(),
 });
 
 /**
@@ -152,7 +152,7 @@ function generateSimpleMappings(headers: string[], sampleRows: Record<string, st
 }
 
 const cleanupSchema = z.object({
-  teamId: z.string().cuid(),
+  teamId: z.string().min(1),
   rows: z.array(z.record(z.string())),
   mappings: z.array(
     z.object({

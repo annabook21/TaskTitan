@@ -20,18 +20,18 @@ const componentResultSchema = z.object({
 
 // Schemas for actions
 const generateSmartComponentSchema = z.object({
-  projectId: z.string().cuid(),
+  projectId: z.string().min(1),
   userInput: z.string().min(3, 'Please provide more detail').max(500),
 });
 
 const refineSmartComponentSchema = z.object({
-  projectId: z.string().cuid(),
+  projectId: z.string().min(1),
   currentComponent: componentResultSchema,
   refinementRequest: z.string().min(1, 'Please enter a refinement').max(500),
 });
 
 const createFromPreviewSchema = z.object({
-  projectId: z.string().cuid(),
+  projectId: z.string().min(1),
   component: componentResultSchema,
 });
 

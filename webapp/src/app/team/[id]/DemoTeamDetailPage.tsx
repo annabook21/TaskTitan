@@ -228,7 +228,6 @@ export default function DemoTeamDetailPage() {
                 <Plus className="w-5 h-5" />
                 New Project
               </Link>
-              {isOwnerOrAdmin && <DeleteTeamButton teamId={team.id} teamName={team.name} />}
             </div>
           </div>
 

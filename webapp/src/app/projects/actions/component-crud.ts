@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache';
 
 // Schemas
 const createComponentSchema = z.object({
-  projectId: z.string().cuid(),
+  projectId: z.string().min(1),
   name: z.string().min(1, 'Name is required').max(100),
   description: z.string().max(2000).optional(),
   priority: z.number().int().min(0).max(100).optional(),
@@ -16,7 +16,7 @@ const createComponentSchema = z.object({
 });
 
 const updateComponentSchema = z.object({
-  id: z.string().cuid(),
+  id: z.string().min(1),
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(2000).optional(),
   status: z.enum(['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED']).optional(),

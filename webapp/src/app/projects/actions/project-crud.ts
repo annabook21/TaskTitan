@@ -9,17 +9,17 @@ import { revalidatePath } from 'next/cache';
 const createProjectSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   description: z.string().max(1000).optional(),
-  teamId: z.string().cuid('Invalid team ID'),
+  teamId: z.string().min(1, 'Invalid team ID'),
 });
 
 const updateProjectSchema = z.object({
-  id: z.string().cuid(),
+  id: z.string().min(1),
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(1000).optional(),
 });
 
 const deleteProjectSchema = z.object({
-  id: z.string().cuid(),
+  id: z.string().min(1),
 });
 
 /**

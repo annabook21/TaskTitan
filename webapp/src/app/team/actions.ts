@@ -13,25 +13,25 @@ const createTeamSchema = z.object({
 });
 
 const updateTeamSchema = z.object({
-  id: z.string().cuid(),
+  id: z.string().min(1),
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
 });
 
 const inviteMemberSchema = z.object({
-  teamId: z.string().cuid(),
+  teamId: z.string().min(1),
   email: z.string().email(),
   role: z.enum(['ADMIN', 'MEMBER', 'VIEWER']).default('MEMBER'),
 });
 
 const updateMemberRoleSchema = z.object({
-  teamId: z.string().cuid(),
+  teamId: z.string().min(1),
   userId: z.string(),
   role: z.enum(['ADMIN', 'MEMBER', 'VIEWER']),
 });
 
 const removeMemberSchema = z.object({
-  teamId: z.string().cuid(),
+  teamId: z.string().min(1),
   userId: z.string(),
 });
 
@@ -239,7 +239,7 @@ export const removeMember = authActionClient.schema(removeMemberSchema).action(a
 });
 
 export const deleteTeam = authActionClient
-  .schema(z.object({ id: z.string().cuid() }))
+  .schema(z.object({ id: z.string().min(1) }))
   .action(async ({ parsedInput, ctx }) => {
     try {
       const { id } = parsedInput;
