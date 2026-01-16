@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { ArrowLeft, Layers, Clock, ChevronRight } from 'lucide-react';
 import SmartComponentCreator from './components/SmartComponentCreator';
 import AIGeneratePanel from './components/AIGeneratePanel';
+import DeleteProjectButton from './DeleteProjectButton';
 import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 
 const statusColors: Record<string, string> = {
@@ -183,6 +184,7 @@ export default function DemoProjectDetailPage() {
                 autoOpen={generateAI}
               />
               <SmartComponentCreator projectId={project.id} />
+              <DeleteProjectButton projectId={project.id} projectName={project.name} />
             </div>
           </div>
 

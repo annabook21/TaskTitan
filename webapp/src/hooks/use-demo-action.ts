@@ -339,6 +339,7 @@ interface DemoGeneratedSprint {
 
 /**
  * Generate AI components in demo mode - creates intelligent suggestions based on project description
+ * Respects team workflow configuration (Scrum vs Kanban vs custom)
  */
 function generateAIComponentsInDemo(input: GenerateAIComponentsInput) {
   const { projectId, generateSprints } = input;
@@ -349,6 +350,11 @@ function generateAIComponentsInDemo(input: GenerateAIComponentsInput) {
   if (!project) {
     return { components: [], summary: 'Project not found', sprints: [] };
   }
+
+  // Get team's workflow config to respect workflow mode
+  const workflowConfig = store.workflowConfigs.find((w) => w.teamId === project.teamId);
+  const cycleEnabled = workflowConfig?.cycleEnabled ?? true; // Default to Scrum if not configured
+  const cycleName = workflowConfig?.cycleName || 'Sprint';
 
   const description = project.description || project.name;
   const components: DemoGeneratedComponent[] = [];
@@ -537,39 +543,49 @@ function generateAIComponentsInDemo(input: GenerateAIComponentsInput) {
     }
   }
 
-  // Generate sprints if requested
-  if (generateSprints && components.length > 0) {
+  // Generate sprints/cycles only if cycles are enabled for this team's workflow (Scrum, not Kanban)
+  // AND if the user requested sprint generation
+  if (generateSprints && cycleEnabled && components.length > 0) {
     const totalHours = components.reduce((sum, c) => sum + c.estimatedHours, 0);
-    const hoursPerSprint = 80; // Assuming 2-week sprints with 2 developers
-    const numSprints = Math.ceil(totalHours / hoursPerSprint);
+    const cycleDuration = workflowConfig?.cycleDurationWeeks || 2;
+    const hoursPerCycle = cycleDuration * 40; // Assuming 1 developer at 40 hours/week
+    const numCycles = Math.ceil(totalHours / hoursPerCycle);
 
     let componentIndex = 0;
-    for (let i = 0; i < Math.min(numSprints, 4); i++) {
-      const sprintComponents: string[] = [];
-      let sprintHours = 0;
+    for (let i = 0; i < Math.min(numCycles, 4); i++) {
+      const cycleComponents: string[] = [];
+      let cycleHours = 0;
 
-      // Add components to sprint until capacity is reached
-      while (componentIndex < components.length && sprintHours < hoursPerSprint) {
+      // Add components to cycle until capacity is reached
+      while (componentIndex < components.length && cycleHours < hoursPerCycle) {
         const comp = components[componentIndex];
-        sprintComponents.push(comp.name);
-        sprintHours += comp.estimatedHours;
+        cycleComponents.push(comp.name);
+        cycleHours += comp.estimatedHours;
         componentIndex++;
       }
 
       sprints.push({
-        name: `Sprint ${i + 1}`,
-        goal: i === 0 ? 'Foundation and core setup' : i === numSprints - 1 ? 'Polish and launch prep' : `Iteration ${i + 1}`,
-        durationWeeks: 2,
-        componentNames: sprintComponents,
-        capacity: hoursPerSprint,
+        name: `${cycleName} ${i + 1}`,
+        goal: i === 0 ? 'Foundation and core setup' : i === numCycles - 1 ? 'Polish and launch prep' : `Iteration ${i + 1}`,
+        durationWeeks: cycleDuration,
+        componentNames: cycleComponents,
+        capacity: hoursPerCycle,
       });
     }
   }
 
+  // Build summary based on workflow mode
+  let workflowNote = '';
+  if (!cycleEnabled) {
+    workflowNote = ' (Kanban workflow - no sprints generated)';
+  } else if (sprints.length > 0) {
+    workflowNote = ` with ${sprints.length} ${cycleName.toLowerCase()}(s)`;
+  }
+
   const summary =
     matchedPatterns.length > 0
-      ? `Based on your project description, I've identified ${matchedPatterns.length} key area(s): ${matchedPatterns.map((p) => p.epic).join(', ')}. Generated ${components.length} components with logical dependencies.`
-      : `Generated a standard project structure with ${components.length} components for ${project.name}.`;
+      ? `Based on your project description, I've identified ${matchedPatterns.length} key area(s): ${matchedPatterns.map((p) => p.epic).join(', ')}. Generated ${components.length} components${workflowNote}.`
+      : `Generated a standard project structure with ${components.length} components for ${project.name}${workflowNote}.`;
 
   return {
     components,

@@ -6,6 +6,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { deleteProject } from '@/app/projects/actions';
 import { Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   projectId: string;
@@ -16,9 +17,18 @@ export default function DeleteProjectButton({ projectId, projectName }: Props) {
   const router = useRouter();
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const { handleResult } = useDemoActionHandler();
 
   const { execute, isExecuting } = useAction(deleteProject, {
     onSuccess: (result) => {
+      // Handle demo mode
+      if (isDemoResult(result.data)) {
+        handleResult(result.data);
+        toast.success('Project deleted');
+        router.replace('/projects');
+        return;
+      }
+
       if (result.data?.success) {
         toast.success('Project deleted');
         // Use replace to prevent back-navigation to deleted project

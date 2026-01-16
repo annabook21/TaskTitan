@@ -6,6 +6,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { deleteTeam } from '@/app/team/actions';
 import { Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   teamId: string;
@@ -16,9 +17,18 @@ export default function DeleteTeamButton({ teamId, teamName }: Props) {
   const router = useRouter();
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const { handleResult } = useDemoActionHandler();
 
   const { execute, isExecuting } = useAction(deleteTeam, {
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // Handle demo mode
+      if (isDemoResult(result.data)) {
+        handleResult(result.data);
+        toast.success('Team deleted');
+        router.push('/team');
+        return;
+      }
+
       toast.success('Team deleted');
       router.push('/team');
     },

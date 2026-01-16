@@ -20,6 +20,7 @@ import {
   Settings,
   BarChart3,
 } from 'lucide-react';
+import DeleteTeamButton from './DeleteTeamButton';
 
 const roleIcons = {
   OWNER: Crown,
@@ -227,6 +228,7 @@ export default function DemoTeamDetailPage() {
                 <Plus className="w-5 h-5" />
                 New Project
               </Link>
+              {isOwnerOrAdmin && <DeleteTeamButton teamId={team.id} teamName={team.name} />}
             </div>
           </div>
 
