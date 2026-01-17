@@ -23,6 +23,7 @@ import {
 import { toast } from 'sonner';
 import type { NaturalLanguageComponentResult } from '@/lib/ai';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
+import { isDemoMode, demoStore } from '@/lib/demo';
 
 interface Props {
   projectId: string;
@@ -142,16 +143,61 @@ export default function SmartComponentCreator({ projectId }: Props) {
       toast.error('Please provide more detail');
       return;
     }
-    generateAction.execute({ projectId, userInput: userInput.trim() });
+
+    // In demo mode, pass project data from localStorage since server can't access it
+    if (isDemoMode()) {
+      const store = demoStore.getStore();
+      const project = store.projects.find((p) => p.id === projectId);
+      const existingComponents = store.components
+        .filter((c) => c.projectId === projectId)
+        .map((c) => ({ name: c.name, type: c.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG' }));
+
+      generateAction.execute({
+        projectId,
+        userInput: userInput.trim(),
+        demoProjectData: project
+          ? {
+              name: project.name,
+              description: project.description || '',
+              existingComponents,
+            }
+          : undefined,
+      });
+    } else {
+      generateAction.execute({ projectId, userInput: userInput.trim() });
+    }
   };
 
   const handleRefine = (request: string) => {
     if (!generatedComponent || !request.trim()) return;
-    refineAction.execute({
-      projectId,
-      currentComponent: generatedComponent,
-      refinementRequest: request.trim(),
-    });
+
+    // In demo mode, pass project data from localStorage since server can't access it
+    if (isDemoMode()) {
+      const store = demoStore.getStore();
+      const project = store.projects.find((p) => p.id === projectId);
+      const existingComponents = store.components
+        .filter((c) => c.projectId === projectId)
+        .map((c) => ({ name: c.name, type: c.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG' }));
+
+      refineAction.execute({
+        projectId,
+        currentComponent: generatedComponent,
+        refinementRequest: request.trim(),
+        demoProjectData: project
+          ? {
+              name: project.name,
+              description: project.description || '',
+              existingComponents,
+            }
+          : undefined,
+      });
+    } else {
+      refineAction.execute({
+        projectId,
+        currentComponent: generatedComponent,
+        refinementRequest: request.trim(),
+      });
+    }
   };
 
   const handleCreateFromPreview = () => {

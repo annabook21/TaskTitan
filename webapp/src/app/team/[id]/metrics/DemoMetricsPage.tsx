@@ -69,6 +69,18 @@ export default function DemoMetricsPage() {
     const completedComponents = components.filter((c) => c.status === 'COMPLETED');
     const inProgressComponents = components.filter((c) => c.status === 'IN_PROGRESS');
 
+    // Calculate average completion time from actual data (createdAt to updatedAt for completed components)
+    let averageCompletionTime = 0;
+    if (completedComponents.length > 0) {
+      const totalDays = completedComponents.reduce((sum, c) => {
+        const created = new Date(c.createdAt).getTime();
+        const completed = new Date(c.updatedAt).getTime();
+        const days = (completed - created) / (1000 * 60 * 60 * 24);
+        return sum + Math.max(0, days); // Ensure non-negative
+      }, 0);
+      averageCompletionTime = Math.round((totalDays / completedComponents.length) * 10) / 10;
+    }
+
     setMetrics({
       teamName: team.name,
       totalComponents: components.length,
@@ -76,7 +88,7 @@ export default function DemoMetricsPage() {
       inProgressComponents: inProgressComponents.length,
       totalEstimatedHours: components.reduce((sum, c) => sum + (c.estimatedHours || 0), 0),
       completedHours: completedComponents.reduce((sum, c) => sum + (c.estimatedHours || 0), 0),
-      averageCompletionTime: completedComponents.length > 0 ? 3.2 : 0, // Mock average days
+      averageCompletionTime,
       componentsByStatus,
       componentsByType,
       cycleEnabled: workflowConfig?.cycleEnabled ?? true,

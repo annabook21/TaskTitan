@@ -22,12 +22,38 @@ const componentResultSchema = z.object({
 const generateSmartComponentSchema = z.object({
   projectId: z.string().min(1),
   userInput: z.string().min(3, 'Please provide more detail').max(500),
+  // Demo mode data - passed from client since server can't access localStorage
+  demoProjectData: z
+    .object({
+      name: z.string(),
+      description: z.string(),
+      existingComponents: z.array(
+        z.object({
+          name: z.string(),
+          type: z.enum(['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG']),
+        }),
+      ),
+    })
+    .optional(),
 });
 
 const refineSmartComponentSchema = z.object({
   projectId: z.string().min(1),
   currentComponent: componentResultSchema,
   refinementRequest: z.string().min(1, 'Please enter a refinement').max(500),
+  // Demo mode data - passed from client since server can't access localStorage
+  demoProjectData: z
+    .object({
+      name: z.string(),
+      description: z.string(),
+      existingComponents: z.array(
+        z.object({
+          name: z.string(),
+          type: z.enum(['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG']),
+        }),
+      ),
+    })
+    .optional(),
 });
 
 const createFromPreviewSchema = z.object({
@@ -37,61 +63,64 @@ const createFromPreviewSchema = z.object({
 
 /**
  * Generate a component from natural language input
+ * Uses real Bedrock AI for both demo and production modes
  */
 export const generateSmartComponent = authActionClient
   .schema(generateSmartComponentSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { projectId, userInput } = parsedInput;
+    const { projectId, userInput, demoProjectData } = parsedInput;
     const { userId, isDemo } = ctx;
 
-    // Check if AI is configured
+    // Check if AI is configured (required for both demo and production)
     if (!isAIConfigured()) {
       throw new MyCustomError('AI features require Amazon Bedrock access. Please use manual mode.');
     }
 
-    // Demo mode - return a mock generated component
+    let projectName: string;
+    let projectDescription: string;
+    let existingComponents: Array<{ name: string; type: string }> = [];
+
     if (isDemo) {
-      return {
-        component: {
-          name: 'Generated Component',
-          description: `AI-generated component based on: "${userInput}"`,
-          type: 'TASK' as const,
-          estimatedHours: 8,
-          priority: 5,
-          suggestedDependencies: [],
-          reasoning: 'Demo mode - this is a placeholder component.',
+      // Demo mode - use project data passed from client (server can't access localStorage)
+      if (!demoProjectData) {
+        throw new MyCustomError('Demo project data not provided');
+      }
+      projectName = demoProjectData.name;
+      projectDescription = demoProjectData.description;
+      existingComponents = demoProjectData.existingComponents;
+    } else {
+      // Production mode - get project from database
+      const project = await prisma.project.findFirst({
+        where: {
+          id: projectId,
+          Team: { Membership: { some: { userId } } },
         },
-        suggestedFollowUps: ['Add more details', 'Change the type', 'Adjust estimate'],
-      };
+        include: {
+          Component: {
+            select: { name: true, type: true },
+          },
+        },
+      });
+
+      if (!project) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+
+      projectName = project.name;
+      projectDescription = project.description || '';
+      existingComponents = project.Component.map((c) => ({
+        name: c.name,
+        type: c.type,
+      }));
     }
 
-    // Get project context
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        Team: { Membership: { some: { userId } } },
-      },
-      include: {
-        Component: {
-          select: { name: true, type: true },
-        },
-      },
-    });
-
-    if (!project) {
-      throw new MyCustomError('Project not found or access denied');
-    }
-
-    // Generate component using AI
+    // Generate component using real Bedrock AI
     const result = await createComponentFromNaturalLanguage({
       userInput,
       projectContext: {
-        projectName: project.name,
-        projectDescription: project.description || '',
-        existingComponents: project.Component.map((c) => ({
-          name: c.name,
-          type: c.type,
-        })),
+        projectName,
+        projectDescription,
+        existingComponents,
       },
     });
 
@@ -107,59 +136,65 @@ export const generateSmartComponent = authActionClient
 
 /**
  * Refine a generated component using chat
+ * Uses real Bedrock AI for both demo and production modes
  */
 export const refineSmartComponent = authActionClient
   .schema(refineSmartComponentSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { projectId, currentComponent, refinementRequest } = parsedInput;
+    const { projectId, currentComponent, refinementRequest, demoProjectData } = parsedInput;
     const { userId, isDemo } = ctx;
 
-    // Check if AI is configured
+    // Check if AI is configured (required for both demo and production)
     if (!isAIConfigured()) {
       throw new MyCustomError('AI features require Amazon Bedrock access.');
     }
 
-    // Demo mode - return modified component
+    let projectName: string;
+    let projectDescription: string;
+    let existingComponents: Array<{ name: string; type: string }> = [];
+
     if (isDemo) {
-      return {
-        component: {
-          ...currentComponent,
-          description: `${currentComponent.description} (Refined: ${refinementRequest})`,
-          reasoning: `Updated based on: "${refinementRequest}"`,
+      // Demo mode - use project data passed from client (server can't access localStorage)
+      if (!demoProjectData) {
+        throw new MyCustomError('Demo project data not provided');
+      }
+      projectName = demoProjectData.name;
+      projectDescription = demoProjectData.description;
+      existingComponents = demoProjectData.existingComponents;
+    } else {
+      // Production mode - get project from database
+      const project = await prisma.project.findFirst({
+        where: {
+          id: projectId,
+          Team: { Membership: { some: { userId } } },
         },
-        explanation: `Applied your refinement: "${refinementRequest}"`,
-        suggestedFollowUps: ['Add more details', 'Change the scope', 'Adjust priority'],
-      };
+        include: {
+          Component: {
+            select: { name: true, type: true },
+          },
+        },
+      });
+
+      if (!project) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+
+      projectName = project.name;
+      projectDescription = project.description || '';
+      existingComponents = project.Component.map((c) => ({
+        name: c.name,
+        type: c.type,
+      }));
     }
 
-    // Get project context
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        Team: { Membership: { some: { userId } } },
-      },
-      include: {
-        Component: {
-          select: { name: true, type: true },
-        },
-      },
-    });
-
-    if (!project) {
-      throw new MyCustomError('Project not found or access denied');
-    }
-
-    // Refine component using AI
+    // Refine component using real Bedrock AI
     const result = await refineComponentWithChat({
       currentComponent,
       refinementRequest,
       projectContext: {
-        projectName: project.name,
-        projectDescription: project.description || '',
-        existingComponents: project.Component.map((c) => ({
-          name: c.name,
-          type: c.type,
-        })),
+        projectName,
+        projectDescription,
+        existingComponents,
       },
     });
 
