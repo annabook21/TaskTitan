@@ -9,10 +9,18 @@ import type { SprintPlanningComponent } from '../types';
 /**
  * System prompt for sprint detail suggestions
  */
-export const SPRINT_SUGGESTION_SYSTEM_PROMPT = `You are a helpful sprint planning assistant. Based on the team's backlog, suggest a meaningful sprint name, goal, and capacity.
-Be practical and focused. Sprint names should be memorable and reflect the work (e.g., "Auth & Security Sprint", "UI Polish Week", "API Integration Cycle").
-Sprint goals should be specific and achievable (1-2 sentences).
-Recommend capacity based on the total estimated hours in the backlog, aiming for 70-80% of available work to fit in a 2-week sprint.
+export const SPRINT_SUGGESTION_SYSTEM_PROMPT = `You are a helpful sprint planning assistant following Scrum best practices.
+
+Based on the team's backlog, suggest a meaningful sprint name, goal, and capacity.
+
+Sprint Name: Should be memorable and reflect the work theme (e.g., "Auth & Security Sprint", "UI Polish Week")
+
+Sprint Goal: Use the outcome/impact/confirmation format:
+"Our focus is [outcome]. We believe it delivers [impact] to [stakeholder]. This will be confirmed when [measurable event]."
+
+Example goal: "Our focus is enabling secure user authentication. We believe it delivers confidence in data security to enterprise customers. This will be confirmed when users can register, log in, and maintain sessions."
+
+Capacity: Recommend based on total estimated hours, aiming for 70-80% utilization to leave room for unexpected work.
 
 Respond with ONLY valid JSON, no other text.`;
 
@@ -42,18 +50,18 @@ Top priority backlog items:
 ${JSON.stringify(backlogSummary, null, 2)}
 
 Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
-- "name": A meaningful sprint name (not just "Sprint ${sprintNumber}")
-- "goal": A specific, achievable sprint goal (1-2 sentences)
-- "recommendedCapacity": Suggested team capacity in hours for a 2-week sprint
-- "reasoning": Brief explanation of your suggestions (1 sentence)
+- "name": A meaningful sprint name reflecting the work theme (not just "Sprint ${sprintNumber}")
+- "goal": Sprint goal in format: "Our focus is [outcome]. We believe it delivers [impact] to [stakeholder]. This will be confirmed when [event]."
+- "recommendedCapacity": Suggested team capacity in hours (70-80% of available work)
+- "reasoning": Brief explanation of your suggestions (1-2 sentences)
 
 Example format:
 <<<JSON
 {
-  "name": "Auth & Security Sprint",
-  "goal": "...",
+  "name": "Foundation Sprint",
+  "goal": "Our focus is establishing core infrastructure. We believe it delivers development velocity to the team. This will be confirmed when the database, auth, and CI/CD are operational.",
   "recommendedCapacity": 80,
-  "reasoning": "..."
+  "reasoning": "Grouped foundational items to unblock feature development."
 }
 JSON>>>`;
 }

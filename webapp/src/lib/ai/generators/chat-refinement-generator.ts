@@ -12,24 +12,29 @@ import { extractJsonFromResponse } from '../utils/response-parsing';
 import { logger } from '@/lib/logger';
 import type { ChatRefinementInput, ChatRefinementResult, NaturalLanguageComponentResult } from '../types';
 
-const CHAT_REFINEMENT_SYSTEM_PROMPT = `You are an expert software architect helping refine work items through conversation.
+const CHAT_REFINEMENT_SYSTEM_PROMPT = `You are an expert software architect helping refine work items through conversation, following agile best practices.
+
 You're given a component that was generated from a user's natural language input, and the user wants to modify it.
 
 Your job is to:
 1. Understand what the user wants to change
-2. Apply those changes to the component
-3. Explain what you changed and why (1-2 sentences)
-4. Suggest 2-3 follow-up refinements they might want
+2. Apply those changes following INVEST criteria (Independent, Negotiable, Valuable, Estimable, Small, Testable)
+3. Ensure the component has clear acceptance criteria
+4. Explain what you changed and why (1-2 sentences)
+5. Suggest 2-3 follow-up refinements they might want
 
-Component types and their scope:
-- EPIC: Large initiative spanning multiple features (weeks/months)
-- FEATURE: Distinct functionality that delivers user value (days/weeks)
-- STORY: Specific user-facing change or requirement (hours/days)
-- TASK: Technical work item (implementation, refactor, setup)
-- BUG: Defect or issue to fix
+Component types and sizing:
+- EPIC: Large initiative (40-200 hours, spans months)
+- FEATURE: Distinct capability (16-40 hours, 1-3 sprints)
+- STORY: User-facing change (2-16 hours, fits in one sprint)
+- TASK: Technical work item (1-8 hours)
+- BUG: Defect to fix (1-16 hours)
 
-Be helpful and direct. If the request is unclear, make your best interpretation and explain your reasoning.
-Keep estimates realistic (1-200 hours) and priorities meaningful (1-10).`;
+Naming conventions:
+- STORY/TASK: Verb-first, action-oriented (e.g., "Enable User Login", "Configure Database")
+- EPIC/FEATURE: Can be noun-based (e.g., "User Authentication System")
+
+Be helpful and direct. If the request is unclear, make your best interpretation and explain your reasoning.`;
 
 function buildChatRefinementPrompt(input: ChatRefinementInput): string {
   const contextInfo = input.projectContext
@@ -41,6 +46,10 @@ Existing Components:
 ${input.projectContext.existingComponents.map((c) => `- ${c.name} (${c.type})`).join('\n')}`
     : '';
 
+  const acceptanceCriteriaInfo = input.currentComponent.acceptanceCriteria?.length
+    ? `Acceptance Criteria: ${input.currentComponent.acceptanceCriteria.join('; ')}`
+    : 'Acceptance Criteria: None defined';
+
   return `Current Component:
 Name: ${input.currentComponent.name}
 Type: ${input.currentComponent.type}
@@ -48,6 +57,7 @@ Description: ${input.currentComponent.description}
 Estimated Hours: ${input.currentComponent.estimatedHours}
 Priority: ${input.currentComponent.priority}
 Dependencies: ${input.currentComponent.suggestedDependencies.length > 0 ? input.currentComponent.suggestedDependencies.join(', ') : 'None'}
+${acceptanceCriteriaInfo}
 Original Reasoning: ${input.currentComponent.reasoning}
 ${contextInfo}
 
@@ -56,7 +66,7 @@ User's refinement request: "${input.refinementRequest}"
 Apply the requested changes and return the updated component.
 
 Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
-- "component": The updated component object with all fields (name, description, type, estimatedHours, priority, suggestedDependencies, reasoning)
+- "component": The updated component object with all fields (name, description, type, estimatedHours, priority, suggestedDependencies, acceptanceCriteria, reasoning)
 - "explanation": A brief explanation of what you changed (1-2 sentences)
 - "suggestedFollowUps": Array of 2-3 suggested follow-up refinements as short phrases
 
@@ -64,15 +74,21 @@ Example format:
 <<<JSON
 {
   "component": {
-    "name": "User Login with OAuth",
-    "description": "Implements user authentication supporting email/password and OAuth providers (Google, GitHub). Includes session management and secure token handling.",
+    "name": "Enable User Login with OAuth",
+    "description": "Implements user authentication supporting email/password and OAuth providers (Google, GitHub). Provides secure access to personal data and enables personalized features.",
     "type": "FEATURE",
     "estimatedHours": 16,
     "priority": 8,
     "suggestedDependencies": [],
-    "reasoning": "Updated to include OAuth integration per user request, increasing scope and estimate."
+    "acceptanceCriteria": [
+      "User can log in with email/password",
+      "User can log in with Google OAuth",
+      "User can log in with GitHub OAuth",
+      "Invalid credentials show clear error message"
+    ],
+    "reasoning": "Updated to include OAuth integration per user request, increasing scope to FEATURE."
   },
-  "explanation": "I added OAuth provider support (Google, GitHub) and increased the estimate from 8 to 16 hours to account for the additional integration work.",
+  "explanation": "I added OAuth provider support and increased the estimate from 8 to 16 hours.",
   "suggestedFollowUps": [
     "Add two-factor authentication",
     "Include password reset flow",
@@ -125,6 +141,9 @@ export async function refineComponentWithChat(input: ChatRefinementInput): Promi
     result.component.priority = Math.max(1, Math.min(10, Number(result.component.priority) || 5));
     result.component.suggestedDependencies = Array.isArray(result.component.suggestedDependencies)
       ? result.component.suggestedDependencies
+      : [];
+    result.component.acceptanceCriteria = Array.isArray(result.component.acceptanceCriteria)
+      ? result.component.acceptanceCriteria.slice(0, 4)
       : [];
     result.suggestedFollowUps = Array.isArray(result.suggestedFollowUps) ? result.suggestedFollowUps.slice(0, 3) : [];
 

@@ -59,6 +59,9 @@ export async function createComponentFromNaturalLanguage(
     result.estimatedHours = Math.max(1, Math.min(200, Number(result.estimatedHours) || 8));
     result.priority = Math.max(1, Math.min(10, Number(result.priority) || 5));
     result.suggestedDependencies = Array.isArray(result.suggestedDependencies) ? result.suggestedDependencies : [];
+    result.acceptanceCriteria = Array.isArray(result.acceptanceCriteria)
+      ? result.acceptanceCriteria.slice(0, 4)
+      : [];
 
     return result;
   } catch (error) {

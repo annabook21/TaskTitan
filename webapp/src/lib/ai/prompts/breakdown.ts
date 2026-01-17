@@ -19,18 +19,31 @@ export function buildBreakdownSystemPrompt(parentType: 'EPIC' | 'FEATURE' | 'STO
   if (parentType === 'EPIC') {
     targetType = 'FEATURE';
     guidance = `Suggest 3-6 FEATURES that break down this Epic into distinct, valuable deliverables.
-Each Feature should be independently deliverable and provide user value.
+Each Feature should:
+- Be independently deliverable and provide user value
+- Have a clear name describing the capability
+- Include 2-3 acceptance criteria for completion
+- Estimate 16-40 hours (1-3 sprints)
 Think in terms of "What can we ship?" not "What tasks need doing?"`;
   } else if (parentType === 'FEATURE') {
     targetType = 'STORY';
     guidance = `Suggest 4-8 STORIES that implement this Feature.
-Each Story should be a specific user-facing change or requirement.
+Each Story should:
+- Be a specific user-facing change or requirement
+- Have an action-oriented name (verb-first: "Enable...", "Display...", "Allow...")
+- Include 2-4 testable acceptance criteria
+- Estimate 2-16 hours (fits in one sprint)
+- Follow INVEST: Independent, Negotiable, Valuable, Estimable, Small, Testable
 Think in terms of "As a user, I want to..." scenarios.`;
   } else {
     // STORY can break down into TASKs
     targetType = 'TASK';
     guidance = `Suggest 3-5 TASKS that implement this Story.
-Each Task should be a technical work item (API endpoint, database schema, UI component, tests).
+Each Task should:
+- Be a technical work item (API endpoint, database schema, UI component, tests)
+- Have a verb-first name ("Create...", "Configure...", "Implement...", "Add...")
+- Include 2-3 technical acceptance criteria
+- Estimate 1-8 hours
 Think in terms of "What needs to be built?" from an engineering perspective.`;
   }
 
@@ -80,7 +93,7 @@ ${contextInfo}
 Analyze this ${input.component.type} and suggest child ${targetType}s.
 
 Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
-- "suggestions": Array of child components with { name, description, type, estimatedHours, priority, suggestedDependencies }
+- "suggestions": Array of child components with { name, description, type, estimatedHours, priority, suggestedDependencies, acceptanceCriteria }
 - "reasoning": Why you chose this breakdown approach (2-3 sentences)
 - "recommendedApproach": Overall strategy for implementing this work (1-2 sentences)
 
@@ -88,12 +101,17 @@ Example format:
 <<<JSON
 {
   "suggestions": [{
-    "name": "...",
-    "description": "...",
+    "name": "Enable User Authentication",
+    "description": "Allow users to log in securely. This provides access control and personalization capabilities.",
     "type": "${targetType}",
     "estimatedHours": 16,
     "priority": 8,
-    "suggestedDependencies": []
+    "suggestedDependencies": [],
+    "acceptanceCriteria": [
+      "User can log in with valid credentials",
+      "Invalid login attempts show error message",
+      "Session expires after 24 hours of inactivity"
+    ]
   }],
   "reasoning": "...",
   "recommendedApproach": "..."

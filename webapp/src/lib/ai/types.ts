@@ -13,6 +13,7 @@ export interface GeneratedComponent {
   priority: number;
   suggestedDependencies: string[]; // Names of other components this depends on
   parentName?: string; // Optional name of parent component for hierarchy
+  acceptanceCriteria?: string[]; // Testable conditions for completion
 }
 
 export interface GeneratedSprint {
@@ -112,6 +113,7 @@ export interface NaturalLanguageComponentResult {
   priority: number;
   suggestedDependencies: string[];
   reasoning: string; // Why the AI chose this structure
+  acceptanceCriteria?: string[]; // Testable conditions for completion
 }
 
 // Component Breakdown Types
@@ -135,6 +137,7 @@ export interface SuggestedChildComponent {
   estimatedHours: number;
   priority: number;
   suggestedDependencies: string[];
+  acceptanceCriteria?: string[]; // Testable conditions for completion
 }
 
 export interface ComponentBreakdownResult {

@@ -63,6 +63,7 @@ export async function suggestComponentBreakdown(input: ComponentBreakdownInput):
       estimatedHours: Math.max(1, Math.min(200, Number(s.estimatedHours) || 8)),
       priority: Math.max(1, Math.min(10, Number(s.priority) || 5)),
       suggestedDependencies: Array.isArray(s.suggestedDependencies) ? s.suggestedDependencies : [],
+      acceptanceCriteria: Array.isArray(s.acceptanceCriteria) ? s.acceptanceCriteria.slice(0, 4) : [],
     }));
 
     return result;

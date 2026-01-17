@@ -112,6 +112,7 @@ export async function generateComponents(
       suggestedDependencies: Array.isArray(c.suggestedDependencies) ? c.suggestedDependencies : [],
       // For Scrum: strip parentName to enforce flat structure (epics handle grouping)
       parentName: isKanban ? c.parentName : undefined,
+      acceptanceCriteria: Array.isArray(c.acceptanceCriteria) ? c.acceptanceCriteria.slice(0, 4) : [],
     }));
 
     // Validate sprints (required for Scrum, absent for Kanban)
