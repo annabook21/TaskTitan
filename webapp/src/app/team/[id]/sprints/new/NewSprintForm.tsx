@@ -15,6 +15,13 @@ interface Props {
   suggestedEndDate: string;
 }
 
+interface SprintSuggestion {
+  name: string;
+  goal: string;
+  recommendedCapacity: number;
+  reasoning: string;
+}
+
 export default function NewSprintForm({ teamId, suggestedName, suggestedStartDate, suggestedEndDate }: Props) {
   const router = useRouter();
   const [name, setName] = useState(suggestedName);
@@ -37,7 +44,12 @@ export default function NewSprintForm({ teamId, suggestedName, suggestedStartDat
   const { execute: executeSuggest, isExecuting: isSuggesting } = useAction(aiSuggestSprint, {
     onSuccess: ({ data }) => {
       if (!data) return;
-      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      let resolved: SprintSuggestion;
+      if (isDemoResult(data)) {
+        resolved = handleResult(data) as SprintSuggestion;
+      } else {
+        resolved = data as SprintSuggestion;
+      }
       setName(resolved.name);
       setGoal(resolved.goal);
       setCapacity(resolved.recommendedCapacity.toString());

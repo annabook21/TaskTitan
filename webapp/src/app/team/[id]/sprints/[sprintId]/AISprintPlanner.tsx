@@ -28,12 +28,15 @@ export default function AISprintPlanner({ sprintId, defaultCapacity = 40 }: Prop
   const { execute: generatePlan, isExecuting: isGenerating } = useAction(aiPlanSprintAction, {
     onSuccess: ({ data }) => {
       if (!data) return;
-      const resolved = isDemoResult(data) ? (handleResult(data) as PlanResult) : data;
-      if (resolved) {
-        setPlan(resolved);
-        if (resolved.selectedComponentIds.length === 0) {
-          toast.info('No components available for this sprint');
-        }
+      let resolved: PlanResult;
+      if (isDemoResult(data)) {
+        resolved = handleResult(data) as PlanResult;
+      } else {
+        resolved = data as PlanResult;
+      }
+      setPlan(resolved);
+      if (resolved.selectedComponentIds.length === 0) {
+        toast.info('No components available for this sprint');
       }
     },
     onError: ({ error }) => {

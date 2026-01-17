@@ -363,7 +363,7 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
     case 'updateSprint':
       return { sprint: demoStore.updateSprint(input.sprintId as string, input) };
     case 'updateSprintStatus':
-      return { sprint: demoStore.updateSprint(input.sprintId as string, { status: input.status as string }) };
+      return { sprint: demoStore.updateSprint(input.sprintId as string, { status: input.status as 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' }) };
     case 'deleteSprint':
       return { success: demoStore.deleteSprint(input.sprintId as string) };
     case 'assignComponentToSprint':
@@ -502,7 +502,7 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
       const preview = demoStore.addComponentPreview({
         componentId,
         htmlContent,
-        prompt: component?.description || null,
+        prompt: component?.description || undefined,
       });
       return { preview };
     }
