@@ -258,7 +258,7 @@ export default function DemoProjectDetailPage() {
             {/* Main content area */}
             <div className="lg:col-span-3 space-y-8">
               {/* Dependency Graph */}
-              {project.components.length > 1 && project.dependencies.length > 0 && (
+              {project.components.length > 1 && (
                 <div>
                   <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                     <GitBranch className="w-5 h-5 text-cyan-400" />
