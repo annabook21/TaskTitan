@@ -2,7 +2,7 @@
 
 export const DEMO_COOKIE_NAME = 'tasktitan_demo_mode';
 export const DEMO_STORAGE_KEY = 'tasktitan_demo_data';
-export const DEMO_STORAGE_VERSION = 1;
+export const DEMO_STORAGE_VERSION = 2;
 
 export const DEMO_USER = {
   id: 'demo-user-001',
