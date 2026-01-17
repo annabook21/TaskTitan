@@ -23,6 +23,7 @@ export type {
   SprintPlanningComponent,
   SprintPlanningResult,
   SprintSuggestion,
+  TeamCapacityInfo,
   NaturalLanguageComponentInput,
   NaturalLanguageComponentResult,
   ComponentBreakdownInput,

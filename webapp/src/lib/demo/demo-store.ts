@@ -181,6 +181,9 @@ class DemoStore {
       teamId,
       role: 'OWNER',
       joinedAt: timestamp,
+      title: null,
+      hoursPerDay: 6,
+      availability: 100,
     };
 
     // Create default workflow config
@@ -271,6 +274,9 @@ class DemoStore {
     teamId: string;
     name: string;
     role: 'ADMIN' | 'MEMBER' | 'VIEWER';
+    title?: string;
+    hoursPerDay?: number;
+    availability?: number;
   }): DemoMembership {
     const store = this.getStore();
 
@@ -292,6 +298,9 @@ class DemoStore {
       teamId: input.teamId,
       role: input.role,
       joinedAt: now(),
+      title: input.title || null,
+      hoursPerDay: input.hoursPerDay ?? 6,
+      availability: input.availability ?? 100,
     };
 
     store.memberships.push(membership);
@@ -312,6 +321,44 @@ class DemoStore {
     membership.role = role;
     this.saveStore(store);
     return membership;
+  }
+
+  /**
+   * Calculate team sprint capacity using industry-standard formula:
+   * Capacity = Σ (member.hoursPerDay × availability% × sprintDays)
+   */
+  getTeamSprintCapacity(teamId: string, sprintDays: number): number {
+    const store = this.getStore();
+    const memberships = store.memberships.filter((m) => m.teamId === teamId);
+
+    return memberships.reduce((total, member) => {
+      const hoursPerDay = member.hoursPerDay ?? 6;
+      const availability = (member.availability ?? 100) / 100;
+      return total + hoursPerDay * availability * sprintDays;
+    }, 0);
+  }
+
+  /**
+   * Get team members formatted for AI generation
+   */
+  getTeamMembersForAI(teamId: string): Array<{
+    name: string;
+    title?: string;
+    hoursPerDay: number;
+    availability: number;
+  }> {
+    const store = this.getStore();
+    const memberships = store.memberships.filter((m) => m.teamId === teamId);
+
+    return memberships.map((m) => {
+      const user = store.users.find((u) => u.id === m.userId);
+      return {
+        name: user?.name || 'Unknown',
+        title: m.title ?? undefined,
+        hoursPerDay: m.hoursPerDay ?? 6,
+        availability: m.availability ?? 100,
+      };
+    });
   }
 
   // ============================================

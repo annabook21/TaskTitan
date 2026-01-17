@@ -107,13 +107,17 @@ model Dependency {
 }
 
 model Membership {
-  id       String   @id @default(cuid())
-  userId   String
-  teamId   String
-  role     Role     @default(MEMBER)
-  joinedAt DateTime @default(now())
-  Team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  User     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  userId       String
+  teamId       String
+  role         Role     @default(MEMBER)
+  joinedAt     DateTime @default(now())
+  // Capacity planning fields (industry standard formula)
+  title        String?              // e.g., "Frontend Developer", "QA Engineer"
+  hoursPerDay  Float?   @default(6) // Default: 6 hours (accounts for meetings)
+  availability Float?   @default(100) // Percentage 0-100
+  Team         Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
   @@index([teamId])

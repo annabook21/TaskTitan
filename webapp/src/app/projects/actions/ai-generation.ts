@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
-import { generateComponents, isAIConfigured } from '@/lib/ai';
+import { generateComponents, isAIConfigured, type TeamCapacityInfo } from '@/lib/ai';
 
 // Schemas
 const generateComponentsSchema = z.object({
@@ -26,6 +26,22 @@ const generateComponentsSchema = z.object({
           backlogName: z.string().nullable(),
         })
         .nullable(),
+      // Team capacity for realistic sprint sizing
+      teamCapacity: z
+        .object({
+          memberCount: z.number(),
+          members: z.array(
+            z.object({
+              name: z.string(),
+              title: z.string().optional(),
+              hoursPerDay: z.number(),
+              availability: z.number(),
+            }),
+          ),
+          sprintDays: z.number(),
+          totalCapacityHours: z.number(),
+        })
+        .optional(),
     })
     .optional(),
 });
@@ -90,6 +106,7 @@ export const generateAIComponents = authActionClient
     let projectDescription: string;
     let existingNames: string[] = [];
     let workflowConfig: Parameters<typeof generateComponents>[4] = null;
+    let teamCapacity: TeamCapacityInfo | undefined;
 
     if (isDemo) {
       // Demo mode - use project data passed from client (server can't access localStorage)
@@ -128,6 +145,11 @@ export const generateAIComponents = authActionClient
           updatedAt: new Date(),
         };
       }
+
+      // Use team capacity from demo data if provided
+      if (demoProjectData.teamCapacity) {
+        teamCapacity = demoProjectData.teamCapacity;
+      }
     } else {
       // Production mode - get project from database
       const project = await prisma.project.findFirst({
@@ -142,6 +164,12 @@ export const generateAIComponents = authActionClient
           Team: {
             include: {
               WorkflowConfig: true,
+              // Include memberships for capacity calculation
+              Membership: {
+                include: {
+                  User: { select: { name: true } },
+                },
+              },
             },
           },
         },
@@ -161,6 +189,30 @@ export const generateAIComponents = authActionClient
       projectDescription = project.description;
       existingNames = project.Component.map((c: { name: string }) => c.name);
       workflowConfig = project.Team.WorkflowConfig;
+
+      // Calculate team capacity for Scrum workflows
+      if (project.Team.WorkflowConfig?.cycleEnabled) {
+        const memberships = project.Team.Membership;
+        const sprintDays = (project.Team.WorkflowConfig.cycleDurationWeeks ?? 2) * 5;
+
+        const members = memberships.map((m) => ({
+          name: m.User.name || 'Unknown',
+          title: m.title ?? undefined,
+          hoursPerDay: m.hoursPerDay ?? 6,
+          availability: m.availability ?? 100,
+        }));
+
+        const totalCapacityHours = members.reduce((total, member) => {
+          return total + member.hoursPerDay * (member.availability / 100) * sprintDays;
+        }, 0);
+
+        teamCapacity = {
+          memberCount: members.length,
+          members,
+          sprintDays,
+          totalCapacityHours,
+        };
+      }
     }
 
     // Generate components using real Bedrock AI
@@ -172,6 +224,7 @@ export const generateAIComponents = authActionClient
       existingNames,
       generateEpics,
       workflowConfig,
+      teamCapacity,
     );
 
     return {

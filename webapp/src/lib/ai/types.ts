@@ -90,6 +90,19 @@ export interface SprintSuggestion {
   reasoning: string;
 }
 
+// Team Capacity Types (industry-standard formula)
+export interface TeamCapacityInfo {
+  memberCount: number;
+  members: Array<{
+    name: string;
+    title?: string;
+    hoursPerDay: number;
+    availability: number;
+  }>;
+  sprintDays: number;
+  totalCapacityHours: number;
+}
+
 // Natural Language Types
 export interface NaturalLanguageComponentInput {
   userInput: string;

@@ -77,6 +77,9 @@ export function generateDemoSeedData(): DemoDataStore {
         teamId,
         role: 'OWNER',
         joinedAt: now,
+        title: 'Product Owner',
+        hoursPerDay: 6,
+        availability: 100,
       },
     ],
 

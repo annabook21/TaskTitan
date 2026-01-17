@@ -29,8 +29,8 @@ export default function AISprintPlanner({ sprintId, defaultCapacity = 40 }: Prop
     onSuccess: ({ data }) => {
       if (!data) return;
       const resolved = isDemoResult(data) ? (handleResult(data) as PlanResult) : data;
-      if (resolved) {
-        setPlan(resolved);
+      if (resolved && 'selectedComponentIds' in resolved) {
+        setPlan(resolved as PlanResult);
         if (resolved.selectedComponentIds.length === 0) {
           toast.info('No components available for this sprint');
         }

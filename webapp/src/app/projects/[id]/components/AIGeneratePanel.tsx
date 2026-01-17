@@ -197,6 +197,29 @@ export default function AIGeneratePanel({
       const workflowConfig = project ? store.workflowConfigs.find((w) => w.teamId === project.teamId) : null;
       const existingComponentNames = store.components.filter((c) => c.projectId === projectId).map((c) => c.name);
 
+      // Calculate team capacity for Scrum workflows
+      let teamCapacity:
+        | {
+            memberCount: number;
+            members: Array<{ name: string; title?: string; hoursPerDay: number; availability: number }>;
+            sprintDays: number;
+            totalCapacityHours: number;
+          }
+        | undefined;
+
+      if (project && workflowConfig?.cycleEnabled) {
+        const sprintDays = (workflowConfig.cycleDurationWeeks ?? 2) * 5;
+        const members = demoStore.getTeamMembersForAI(project.teamId);
+        const totalCapacityHours = demoStore.getTeamSprintCapacity(project.teamId, sprintDays);
+
+        teamCapacity = {
+          memberCount: members.length,
+          members,
+          sprintDays,
+          totalCapacityHours,
+        };
+      }
+
       executeGenerate({
         projectId,
         // For Scrum: generateEpics controls optional epic groupings (sprints always generated)
@@ -216,6 +239,7 @@ export default function AIGeneratePanel({
                     backlogName: workflowConfig.backlogName,
                   }
                 : null,
+              teamCapacity,
             }
           : undefined,
       });

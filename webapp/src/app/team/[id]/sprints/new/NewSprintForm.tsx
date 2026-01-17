@@ -37,12 +37,14 @@ export default function NewSprintForm({ teamId, suggestedName, suggestedStartDat
   const { execute: executeSuggest, isExecuting: isSuggesting } = useAction(aiSuggestSprint, {
     onSuccess: ({ data }) => {
       if (!data) return;
-      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
-      setName(resolved.name);
-      setGoal(resolved.goal);
-      setCapacity(resolved.recommendedCapacity.toString());
-      setAiReasoning(resolved.reasoning);
-      toast.success('AI suggestions applied!');
+      const resolved = isDemoResult(data) ? handleResult(data) : data;
+      if (resolved && 'name' in resolved) {
+        setName(resolved.name as string);
+        setGoal(resolved.goal as string);
+        setCapacity((resolved.recommendedCapacity as number).toString());
+        setAiReasoning(resolved.reasoning as string);
+        toast.success('AI suggestions applied!');
+      }
     },
     onError: ({ error }) => {
       toast.error(error.serverError || 'Failed to get AI suggestions');

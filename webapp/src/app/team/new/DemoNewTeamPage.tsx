@@ -79,6 +79,9 @@ export default function DemoNewTeamPage() {
         teamId: newTeamId,
         role: 'OWNER',
         joinedAt: now,
+        title: null,
+        hoursPerDay: 6,
+        availability: 100,
       });
 
       // Get template settings (defaults to CUSTOM if not specified)

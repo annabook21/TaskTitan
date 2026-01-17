@@ -11,6 +11,7 @@
  */
 
 import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamCapacityInfo } from '../types';
 
 /**
  * Build system prompt based on workflow configuration
@@ -96,6 +97,7 @@ export const COMPONENT_GENERATION_SYSTEM_PROMPT = buildSystemPrompt(null);
  * Generates user prompt for component generation
  *
  * @param generateEpics - For Scrum: whether to create optional Epic groupings for backlog organization
+ * @param teamCapacity - Optional team capacity info for realistic sprint sizing
  */
 export function buildComponentGenerationPrompt(
   projectName: string,
@@ -103,6 +105,7 @@ export function buildComponentGenerationPrompt(
   existingComponents: string[],
   generateEpics: boolean,
   workflowConfig?: TeamWorkflowConfig | null,
+  teamCapacity?: TeamCapacityInfo,
 ): string {
   const isKanban = workflowConfig ? !workflowConfig.cycleEnabled : false;
   const cycleName = workflowConfig?.cycleName || 'Sprint';
@@ -153,13 +156,21 @@ JSON>>>`;
   ]`
     : '';
 
+  // Build team capacity constraint if available
+  const capacityConstraint = teamCapacity
+    ? `
+Team Capacity: ${teamCapacity.totalCapacityHours.toFixed(0)} hours per ${cycleName.toLowerCase()} (${teamCapacity.memberCount} member${teamCapacity.memberCount !== 1 ? 's' : ''})
+CONSTRAINT: Each ${cycleName.toLowerCase()} must not exceed 80% of capacity (${Math.floor(teamCapacity.totalCapacityHours * 0.8)} hours max)
+`
+    : '';
+
   return `Project Name: ${projectName}
 
 Project Description:
 ${projectDescription}
 
 ${existingComponents.length > 0 ? `Existing Components (do not suggest these again): ${existingComponents.join(', ')}` : ''}
-
+${capacityConstraint}
 Create a ${cycleName.toLowerCase()} plan with 8-15 work items organized into 2-4 ${cycleName.toLowerCase()}s.
 
 Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
@@ -171,8 +182,9 @@ Return your response between <<<JSON and JSON>>> markers. Between these markers,
   * ${cycleName}s contain the actual work items (Stories/Tasks)
   * Group logically by dependencies and priority
   * Each ${cycleName.toLowerCase()} should be 1-2 weeks
-  * Respect dependencies - items cannot be in a ${cycleName.toLowerCase()} before their dependencies
-  * Apply 80% capacity buffer: if items total 50 hours, set capacity to 62 (50/0.8)
+  * Respect dependencies - items cannot be in a ${cycleName.toLowerCase()} before their dependencies${teamCapacity ? `
+  * IMPORTANT: Total work per ${cycleName.toLowerCase()} must not exceed ${Math.floor(teamCapacity.totalCapacityHours * 0.8)} hours (80% of team capacity)` : `
+  * Apply 80% capacity buffer: if items total 50 hours, set capacity to 62 (50/0.8)`}
   * componentNames should reference exact names from the components array
 - "summary": brief architecture summary (2-3 sentences)
 - "enhancedDescription": improved project description (3-4 sentences)${epicInstructions}
