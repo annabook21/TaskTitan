@@ -6,6 +6,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { createSprint, aiSuggestSprint } from '@/app/sprints/actions';
 import { Loader2, Zap, Calendar, Target, Clock, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   teamId: string;
@@ -22,24 +23,26 @@ export default function NewSprintForm({ teamId, suggestedName, suggestedStartDat
   const [endDate, setEndDate] = useState(suggestedEndDate);
   const [capacity, setCapacity] = useState<string>('');
   const [aiReasoning, setAiReasoning] = useState<string | null>(null);
+  const { handleResult } = useDemoActionHandler();
 
   const { execute, isExecuting, result } = useAction(createSprint, {
     onSuccess: (data) => {
-      if (data.data?.sprint) {
-        router.push(`/team/${teamId}/sprints/${data.data.sprint.id}`);
+      const resolved = data.data ? (isDemoResult(data.data) ? (handleResult(data.data) as typeof data.data) : data.data) : null;
+      if (resolved?.sprint) {
+        router.push(`/team/${teamId}/sprints/${resolved.sprint.id}`);
       }
     },
   });
 
   const { execute: executeSuggest, isExecuting: isSuggesting } = useAction(aiSuggestSprint, {
     onSuccess: ({ data }) => {
-      if (data) {
-        setName(data.name);
-        setGoal(data.goal);
-        setCapacity(data.recommendedCapacity.toString());
-        setAiReasoning(data.reasoning);
-        toast.success('AI suggestions applied!');
-      }
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      setName(resolved.name);
+      setGoal(resolved.goal);
+      setCapacity(resolved.recommendedCapacity.toString());
+      setAiReasoning(resolved.reasoning);
+      toast.success('AI suggestions applied!');
     },
     onError: ({ error }) => {
       toast.error(error.serverError || 'Failed to get AI suggestions');

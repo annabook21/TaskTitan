@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { exportWireframeAction } from './preview-actions';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   htmlContent: string;
@@ -15,12 +16,14 @@ interface Props {
 
 export default function PreviewModal({ htmlContent, componentName, previewId, onClose }: Props) {
   const [isExporting, setIsExporting] = useState(false);
+  const { handleResult } = useDemoActionHandler();
 
   const { execute: executeExport } = useAction(exportWireframeAction, {
     onSuccess: ({ data }) => {
-      if (data?.downloadUrl) {
-        // Open signed URL in new tab for download
-        window.open(data.downloadUrl, '_blank');
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      if (resolved?.downloadUrl) {
+        window.open(resolved.downloadUrl, '_blank');
         toast.success('Wireframe exported successfully!');
       }
     },

@@ -20,6 +20,257 @@ export function isDemoResult(data: unknown): data is DemoActionResult {
   return typeof data === 'object' && data !== null && '_demo' in data && (data as DemoActionResult)._demo === true;
 }
 
+type DemoWireframeTemplate = {
+  layout: 'dashboard' | 'settings' | 'auth' | 'board' | 'timeline' | 'search' | 'inbox' | 'feature';
+  headline: string;
+  subheadline: string;
+  stats?: Array<{ label: string; value: string }>;
+  cards?: Array<{ title: string; body: string; tag?: string }>;
+  list?: Array<{ title: string; meta: string }>;
+  table?: { headers: string[]; rows: string[][] };
+};
+
+const wireframeTemplates: Array<{ keywords: string[]; template: DemoWireframeTemplate }> = [
+  {
+    keywords: ['dashboard', 'analytics', 'report', 'insight'],
+    template: {
+      layout: 'dashboard',
+      headline: 'Insights Overview',
+      subheadline: 'Key trends and operational signals at a glance.',
+      stats: [
+        { label: 'Active items', value: '128' },
+        { label: 'Cycle time', value: '3.4d' },
+        { label: 'Blocked', value: '7' },
+      ],
+      cards: [
+        { title: 'Throughput', body: 'Weekly throughput trending +12% over last 30 days.', tag: 'Trend' },
+        { title: 'Aging items', body: '5 items exceed the SLA threshold. Review blockers.', tag: 'Alert' },
+        { title: 'Quality', body: 'Review backlog and test coverage are stable.', tag: 'Quality' },
+      ],
+      list: [
+        { title: 'Top blocker: API rate limits', meta: 'Assigned to Platform' },
+        { title: 'Priority: Billing reconciliation', meta: 'Due in 3 days' },
+        { title: 'Escalation: Mobile crash report', meta: 'Investigating' },
+      ],
+    },
+  },
+  {
+    keywords: ['settings', 'preferences', 'profile', 'account'],
+    template: {
+      layout: 'settings',
+      headline: 'Account Settings',
+      subheadline: 'Manage your profile, preferences, and access.',
+      cards: [
+        { title: 'Profile', body: 'Update your name, avatar, and role details.' },
+        { title: 'Notifications', body: 'Control email and in-app alerts.', tag: 'Updated' },
+        { title: 'Security', body: 'Manage passwords and sign-in methods.' },
+      ],
+      list: [
+        { title: 'Default workspace', meta: 'Product Engineering' },
+        { title: 'Weekly digest', meta: 'Enabled' },
+        { title: 'Session timeout', meta: '30 minutes' },
+      ],
+    },
+  },
+  {
+    keywords: ['login', 'signin', 'sign in', 'auth', 'signup', 'register'],
+    template: {
+      layout: 'auth',
+      headline: 'Secure Access',
+      subheadline: 'Sign in with your work account to continue.',
+      cards: [
+        { title: 'Single sign-on', body: 'Connect with your corporate identity provider.' },
+        { title: 'Magic link', body: 'Get a secure sign-in link in your inbox.' },
+      ],
+      list: [
+        { title: 'SSO providers', meta: 'Okta, Google, Azure AD' },
+        { title: 'Security', meta: 'MFA recommended' },
+      ],
+    },
+  },
+  {
+    keywords: ['kanban', 'board', 'workflow'],
+    template: {
+      layout: 'board',
+      headline: 'Workflow Board',
+      subheadline: 'Track items across planning, execution, and review.',
+      cards: [
+        { title: 'Planning', body: '12 items queued for refinement.', tag: 'WIP 8' },
+        { title: 'In Progress', body: '6 active tasks with 2 blocked.', tag: 'WIP 5' },
+        { title: 'Review', body: '4 items awaiting approval.', tag: 'WIP 4' },
+      ],
+      list: [
+        { title: 'Urgent: Payment failure audit', meta: 'Owner: Sam' },
+        { title: 'Refactor: Notification routing', meta: 'Owner: Lee' },
+      ],
+    },
+  },
+  {
+    keywords: ['timeline', 'roadmap', 'plan'],
+    template: {
+      layout: 'timeline',
+      headline: 'Release Timeline',
+      subheadline: 'Coordinate milestones and delivery windows.',
+      list: [
+        { title: 'Sprint 18: Customer onboarding', meta: 'Mar 4 - Mar 17' },
+        { title: 'Sprint 19: Billing automation', meta: 'Mar 18 - Mar 31' },
+        { title: 'Sprint 20: Reporting refresh', meta: 'Apr 1 - Apr 14' },
+      ],
+      cards: [
+        { title: 'Risk', body: 'Payment gateway dependencies still pending.', tag: 'At risk' },
+        { title: 'Dependencies', body: 'Waiting on analytics schema changes.', tag: 'External' },
+      ],
+    },
+  },
+  {
+    keywords: ['search', 'browse', 'catalog', 'library'],
+    template: {
+      layout: 'search',
+      headline: 'Search & Discover',
+      subheadline: 'Find assets, components, and docs quickly.',
+      list: [
+        { title: 'Design system tokens', meta: 'Updated 2h ago' },
+        { title: 'Checkout flow checklist', meta: 'Updated yesterday' },
+        { title: 'Mobile UI kit', meta: 'Updated last week' },
+      ],
+      table: {
+        headers: ['Item', 'Owner', 'Status'],
+        rows: [
+          ['Onboarding guide', 'Ava', 'Approved'],
+          ['API reference', 'Jordan', 'Draft'],
+          ['Release checklist', 'Morgan', 'Approved'],
+        ],
+      },
+    },
+  },
+  {
+    keywords: ['chat', 'message', 'inbox', 'notification'],
+    template: {
+      layout: 'inbox',
+      headline: 'Team Inbox',
+      subheadline: 'Centralize updates and decision requests.',
+      list: [
+        { title: 'Design review requested', meta: '4 min ago' },
+        { title: 'Build failed: tests', meta: '12 min ago' },
+        { title: 'Deployment complete', meta: '1h ago' },
+      ],
+      cards: [
+        { title: 'Pinned', body: 'Customer escalation thread', tag: 'High' },
+        { title: 'Mentions', body: 'You were mentioned in 3 threads', tag: 'New' },
+      ],
+    },
+  },
+];
+
+function buildWireframeHtml(componentName: string, description: string | null): string {
+  const baseText = `${componentName} experience`;
+  const lowered = `${componentName} ${description || ''}`.toLowerCase();
+  const selected =
+    wireframeTemplates.find((entry) => entry.keywords.some((word) => lowered.includes(word)))?.template || {
+      layout: 'feature',
+      headline: componentName,
+      subheadline: description || 'Deliver a focused experience with clear actions and status.',
+      cards: [
+        { title: 'Primary action', body: `Start the ${baseText}.`, tag: 'Action' },
+        { title: 'Recent activity', body: 'Track the latest changes and updates.' },
+        { title: 'Next steps', body: 'Review open items and confirm priorities.' },
+      ],
+      list: [
+        { title: 'Owner assigned', meta: 'Today' },
+        { title: 'Requirements captured', meta: 'This week' },
+      ],
+    };
+
+  const statMarkup =
+    selected.stats?.map((stat) => `<div class="stat"><div class="stat-value">${stat.value}</div><div class="stat-label">${stat.label}</div></div>`).join('') ||
+    '';
+  const cardMarkup =
+    selected.cards
+      ?.map(
+        (card) => `<div class="card">
+  <div class="card-title">${card.title}</div>
+  <div class="card-body">${card.body}</div>
+  ${card.tag ? `<div class="tag">${card.tag}</div>` : ''}
+</div>`,
+      )
+      .join('') || '';
+  const listMarkup =
+    selected.list
+      ?.map(
+        (item) => `<div class="list-item">
+  <div class="list-title">${item.title}</div>
+  <div class="list-meta">${item.meta}</div>
+</div>`,
+      )
+      .join('') || '';
+  const tableMarkup = selected.table
+    ? `<table class="table">
+  <thead><tr>${selected.table.headers.map((header) => `<th>${header}</th>`).join('')}</tr></thead>
+  <tbody>
+    ${selected.table.rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')}
+  </tbody>
+</table>`
+    : '';
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${componentName} Wireframe</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: "Inter", "Segoe UI", sans-serif; background:#0f172a; color:#0f172a; margin:0; padding:32px; }
+      .page { max-width: 980px; margin: 0 auto; background:#f8fafc; border-radius:20px; padding:28px; }
+      .header { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+      .title { font-size:28px; font-weight:700; color:#0f172a; margin:0; }
+      .subtitle { margin:6px 0 0; color:#475569; }
+      .cta { padding:10px 16px; border-radius:10px; background:#0ea5e9; color:white; font-weight:600; border:none; }
+      .grid { display:grid; gap:16px; margin-top:20px; }
+      .grid.cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+      .grid.cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .stat { background:white; border-radius:14px; padding:16px; border:1px solid #e2e8f0; }
+      .stat-value { font-size:22px; font-weight:700; color:#0f172a; }
+      .stat-label { color:#64748b; font-size:12px; margin-top:4px; }
+      .card { background:white; border-radius:14px; padding:16px; border:1px solid #e2e8f0; position:relative; min-height:110px; }
+      .card-title { font-weight:600; margin-bottom:6px; color:#0f172a; }
+      .card-body { color:#475569; font-size:14px; }
+      .tag { position:absolute; top:12px; right:12px; font-size:11px; color:#0ea5e9; background:#e0f2fe; padding:4px 8px; border-radius:999px; }
+      .section { margin-top:24px; }
+      .section-title { font-weight:600; margin-bottom:12px; color:#0f172a; }
+      .list { display:grid; gap:12px; }
+      .list-item { background:white; border:1px solid #e2e8f0; border-radius:12px; padding:12px 14px; }
+      .list-title { font-weight:600; color:#0f172a; }
+      .list-meta { color:#64748b; font-size:12px; margin-top:4px; }
+      .table { width:100%; border-collapse:collapse; background:white; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; }
+      .table th, .table td { padding:10px 12px; font-size:13px; text-align:left; border-bottom:1px solid #e2e8f0; }
+      .table th { background:#f1f5f9; color:#334155; font-weight:600; }
+      .footer { margin-top:24px; color:#94a3b8; font-size:12px; text-align:right; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <div>
+          <h1 class="title">${selected.headline}</h1>
+          <p class="subtitle">${selected.subheadline}</p>
+        </div>
+        <button class="cta">Primary Action</button>
+      </div>
+
+      ${statMarkup ? `<div class="grid cols-3">${statMarkup}</div>` : ''}
+
+      ${cardMarkup ? `<div class="grid ${selected.layout === 'dashboard' ? 'cols-3' : 'cols-2'} section">${cardMarkup}</div>` : ''}
+
+      ${listMarkup ? `<div class="section"><div class="section-title">Highlights</div><div class="list">${listMarkup}</div></div>` : ''}
+
+      ${tableMarkup ? `<div class="section"><div class="section-title">Key items</div>${tableMarkup}</div>` : ''}
+
+      <div class="footer">Generated for ${componentName}</div>
+    </div>
+  </body>
+</html>`;
+}
+
 /**
  * Execute a demo action locally using the demo store
  */
@@ -46,6 +297,14 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
       return { project: demoStore.createProject(input as Parameters<typeof demoStore.createProject>[0]) };
     case 'updateProject':
       return { project: demoStore.updateProject(input.projectId as string, input) };
+    case 'updateProjectGitHubSettings':
+      return {
+        project: demoStore.updateProject(input.projectId as string, {
+          githubRepoUrl: input.githubRepoUrl as string | null,
+          githubWebhookSecret: input.githubWebhookSecret as string | null,
+          githubPrTargetStatus: input.githubPrTargetStatus as 'REVIEW' | 'COMPLETED' | null,
+        }),
+      };
     case 'deleteProject':
       return { success: demoStore.deleteProject(input.projectId as string) };
 
@@ -56,12 +315,55 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
       return { component: demoStore.updateComponent(input.componentId as string, input) };
     case 'deleteComponent':
       return { success: demoStore.deleteComponent(input.componentId as string) };
+    case 'updateComponentContext':
+      return {
+        component: demoStore.updateComponent(input.componentId as string, {
+          contextDecision: input.contextDecision as string | undefined,
+          contextRationale: input.contextRationale as string | undefined,
+          contextAlternatives: input.contextAlternatives as string | undefined,
+          contextLinks: (input.contextLinks as string[]) || [],
+          contextUpdatedAt: new Date().toISOString(),
+          contextUpdatedBy: input.updatedBy as string | undefined,
+        }),
+      };
+    case 'clearComponentContext':
+      return {
+        component: demoStore.updateComponent(input.componentId as string, {
+          contextDecision: null,
+          contextRationale: null,
+          contextAlternatives: null,
+          contextLinks: [],
+          contextAiSummary: null,
+          contextUpdatedAt: null,
+          contextUpdatedBy: null,
+        }),
+      };
+    case 'generateContextSummary': {
+      const store = demoStore.getStore();
+      const component = store.components.find((c) => c.id === input.componentId);
+      if (!component) {
+        return { component: null, keyPoints: [] };
+      }
+      const keyPoints = [
+        `Decision: ${component.contextDecision || 'Not set'}`,
+        `Rationale: ${component.contextRationale || 'Not set'}`,
+      ];
+      demoStore.updateComponent(component.id, {
+        contextAiSummary: keyPoints.join('\n'),
+      });
+      return {
+        component: demoStore.getComponent(component.id),
+        keyPoints,
+      };
+    }
 
     // Sprint actions
     case 'createSprint':
       return { sprint: demoStore.createSprint(input as Parameters<typeof demoStore.createSprint>[0]) };
     case 'updateSprint':
       return { sprint: demoStore.updateSprint(input.sprintId as string, input) };
+    case 'updateSprintStatus':
+      return { sprint: demoStore.updateSprint(input.sprintId as string, { status: input.status as string }) };
     case 'deleteSprint':
       return { success: demoStore.deleteSprint(input.sprintId as string) };
     case 'assignComponentToSprint':
@@ -88,16 +390,135 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
           input.description as string | undefined,
         ),
       };
-    case 'removeDependency':
+    case 'removeDependency': {
+      const dependentComponentId = input.dependentComponentId as string | undefined;
+      const requiredComponentId = input.requiredComponentId as string | undefined;
+      if (dependentComponentId && requiredComponentId) {
+        return {
+          success: demoStore.removeDependency(dependentComponentId, requiredComponentId),
+        };
+      }
+      const dependencyId = input.id as string | undefined;
+      if (dependencyId) {
+        const store = demoStore.getStore();
+        const dependency = store.dependencies.find((d) => d.id === dependencyId);
+        if (dependency) {
+          return {
+            success: demoStore.removeDependency(dependency.dependentComponentId, dependency.requiredComponentId),
+          };
+        }
+      }
       return {
-        success: demoStore.removeDependency(input.dependentComponentId as string, input.requiredComponentId as string),
+        success: false,
       };
+    }
 
     // Workflow config actions
     case 'updateWorkflowConfig':
       return {
         config: demoStore.updateWorkflowConfig(input.teamId as string, input),
       };
+
+    // Sprint planning actions (demo heuristics)
+    case 'aiPlanSprint': {
+      const store = demoStore.getStore();
+      const sprint = store.sprints.find((s) => s.id === input.sprintId);
+      if (!sprint) {
+        return {
+          selectedComponentIds: [],
+          totalHours: 0,
+          reasoning: 'Sprint not found in demo data.',
+          warnings: ['Sprint not found.'],
+        };
+      }
+
+      const capacityHours = (input.capacityHours as number) || 40;
+      const backlogComponents = store.components
+        .filter((c) => c.sprintId === null && c.status !== 'COMPLETED')
+        .sort((a, b) => b.priority - a.priority);
+
+      let totalHours = 0;
+      const selectedComponentIds: string[] = [];
+      const warnings: string[] = [];
+
+      for (const component of backlogComponents) {
+        const estimate = component.estimatedHours || 4;
+        if (totalHours + estimate <= capacityHours) {
+          selectedComponentIds.push(component.id);
+          totalHours += estimate;
+        }
+      }
+
+      if (selectedComponentIds.length === 0) {
+        warnings.push('No backlog components fit within the selected capacity.');
+      }
+
+      return {
+        selectedComponentIds,
+        totalHours,
+        reasoning:
+          selectedComponentIds.length > 0
+            ? 'Selected highest-priority backlog components that fit the capacity.'
+            : 'No suitable components found based on capacity.',
+        warnings,
+      };
+    }
+    case 'applySprintPlan': {
+      const componentIds = (input.componentIds as string[]) || [];
+      const sprintId = input.sprintId as string;
+      componentIds.forEach((componentId) => {
+        demoStore.assignComponentToSprint(componentId, sprintId);
+      });
+      return { success: true, assignedCount: componentIds.length };
+    }
+    case 'aiSuggestSprint': {
+      const store = demoStore.getStore();
+      const teamId = input.teamId as string;
+      const backlogComponents = store.components
+        .filter((c) => c.sprintId === null && c.status !== 'COMPLETED')
+        .sort((a, b) => b.priority - a.priority);
+      const sprintNumber = store.sprints.filter((s) => s.teamId === teamId).length + 1;
+      const totalHours = backlogComponents.reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
+      return {
+        name: `Sprint ${sprintNumber}`,
+        goal:
+          backlogComponents.length > 0
+            ? `Focus on ${backlogComponents.slice(0, 3).map((c) => c.name).join(', ')}`
+            : 'No backlog items available yet.',
+        recommendedCapacity: Math.max(40, Math.round(totalHours * 0.8)),
+        reasoning: 'Based on backlog size and estimated hours in demo data.',
+      };
+    }
+
+    // Wireframe preview actions
+    case 'generatePreview': {
+      const componentId = input.componentId as string;
+      const store = demoStore.getStore();
+      const component = store.components.find((c) => c.id === componentId);
+      const htmlContent = component
+        ? buildWireframeHtml(component.name, component.description)
+        : '<html><body><p>Wireframe preview unavailable.</p></body></html>';
+
+      const preview = demoStore.addComponentPreview({
+        componentId,
+        htmlContent,
+        prompt: component?.description || null,
+      });
+      return { preview };
+    }
+    case 'exportWireframe': {
+      const previewId = input.previewId as string;
+      const store = demoStore.getStore();
+      const preview = store.componentPreviews.find((p) => p.id === previewId);
+      if (!preview) {
+        return { downloadUrl: '', fileName: 'wireframe.html' };
+      }
+      const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(preview.htmlContent)}`;
+      return {
+        downloadUrl: dataUrl,
+        fileName: 'demo-wireframe.html',
+      };
+    }
 
     // Import actions
     case 'executeImport':

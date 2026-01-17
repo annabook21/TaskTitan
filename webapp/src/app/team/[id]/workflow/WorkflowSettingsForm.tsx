@@ -8,6 +8,7 @@ import { Loader2, Save, Layers, Zap, TrendingUp, Calendar, LayoutTemplate, Type 
 import type { TeamWorkflowConfig } from '@prisma/client';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplateKey, getTemplateSettings } from '@/lib/workflow-templates';
 import { CYCLE_NAME_OPTIONS, BACKLOG_NAME_OPTIONS } from '@/lib/terminology';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   teamId: string;
@@ -57,9 +58,13 @@ export default function WorkflowSettingsForm({ teamId, config }: Props) {
   // Other settings
   const [enforceEstimates, setEnforceEstimates] = useState(config?.enforceEstimates ?? false);
   const [autoArchiveCompleted, setAutoArchiveCompleted] = useState(config?.autoArchiveCompleted ?? false);
+  const { handleResult } = useDemoActionHandler();
 
   const { execute, isExecuting } = useAction(updateWorkflowConfig, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Workflow settings updated!');
     },
     onError: ({ error }) => {

@@ -15,6 +15,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface ComponentData {
   id: string;
@@ -44,9 +45,15 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
 
 export default function SprintComponents({ components, sprintId, teamId, canManage }: Props) {
   const router = useRouter();
+  const { handleResult } = useDemoActionHandler();
 
   const { execute: removeFromSprint, isExecuting } = useAction(assignComponentToSprint, {
-    onSuccess: () => router.refresh(),
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
+      router.refresh();
+    },
   });
 
   const handleRemove = (componentId: string) => {

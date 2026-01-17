@@ -17,7 +17,16 @@ const addDependencySchema = z.object({
  */
 export const addDependency = authActionClient.schema(addDependencySchema).action(async ({ parsedInput, ctx }) => {
   const { dependentComponentId, requiredComponentId, description } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return {
+      _demo: true,
+      _action: 'addDependency',
+      _input: { dependentComponentId, requiredComponentId, description },
+    };
+  }
 
   if (dependentComponentId === requiredComponentId) {
     throw new MyCustomError('A component cannot depend on itself');
@@ -92,7 +101,12 @@ export const removeDependency = authActionClient
   .schema(z.object({ id: z.string().cuid() }))
   .action(async ({ parsedInput, ctx }) => {
     const { id } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'removeDependency', _input: { id } };
+    }
 
     // Verify dependency exists AND user has access to the project
     const dependency = await prisma.dependency.findFirst({

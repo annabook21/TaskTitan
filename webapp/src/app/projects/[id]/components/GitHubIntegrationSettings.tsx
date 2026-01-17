@@ -6,6 +6,7 @@ import { updateProjectGitHubSettings } from '@/app/projects/actions';
 import { toast } from 'sonner';
 import { Github, Key, Copy } from 'lucide-react';
 import type { ComponentStatus } from '@prisma/client';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   projectId: string;
@@ -24,6 +25,7 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings }
       ? currentSettings.githubPrTargetStatus
       : 'REVIEW',
   );
+  const { handleResult } = useDemoActionHandler();
 
   const webhookUrl =
     typeof window !== 'undefined'
@@ -31,7 +33,10 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings }
       : '/api/webhooks/github';
 
   const { execute, isExecuting } = useAction(updateProjectGitHubSettings, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('GitHub integration updated');
     },
     onError: ({ error }) => {

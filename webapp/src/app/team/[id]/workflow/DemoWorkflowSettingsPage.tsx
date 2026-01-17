@@ -5,34 +5,17 @@ import { useParams } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import { ArrowLeft, Settings, Check } from 'lucide-react';
-
-interface WorkflowConfig {
-  workflowTemplate: string;
-  cycleEnabled: boolean;
-  cycleName: string;
-  cycleDurationDays: number;
-  componentTypes: string[];
-  componentStatuses: string[];
-  estimationEnabled: boolean;
-  estimationUnit: string;
-}
-
-const WORKFLOW_TEMPLATES = [
-  { value: 'SCRUM', label: 'Scrum', description: 'Time-boxed sprints with ceremonies' },
-  { value: 'KANBAN', label: 'Kanban', description: 'Continuous flow with WIP limits' },
-  { value: 'CUSTOM', label: 'Custom', description: 'Build your own workflow' },
-];
+import { ArrowLeft, Settings } from 'lucide-react';
+import WorkflowSettingsForm from './WorkflowSettingsForm';
+import type { TeamWorkflowConfig } from '@prisma/client';
 
 export default function DemoWorkflowSettingsPage() {
   const params = useParams();
   const teamId = params.id as string;
   const [teamName, setTeamName] = useState('');
-  const [config, setConfig] = useState<WorkflowConfig | null>(null);
+  const [config, setConfig] = useState<TeamWorkflowConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     const store = demoStore.getStore();
@@ -49,26 +32,25 @@ export default function DemoWorkflowSettingsPage() {
     const workflowConfig = store.workflowConfigs.find((w) => w.teamId === teamId);
     setConfig(
       workflowConfig
-        ? {
-            workflowTemplate: workflowConfig.workflowTemplate,
+        ? ({
+            id: workflowConfig.id,
+            teamId: workflowConfig.teamId,
+            wipLimitPlanning: workflowConfig.wipLimitPlanning,
+            wipLimitInProgress: workflowConfig.wipLimitInProgress,
+            wipLimitBlocked: workflowConfig.wipLimitBlocked,
+            wipLimitReview: workflowConfig.wipLimitReview,
             cycleEnabled: workflowConfig.cycleEnabled,
+            cycleDurationWeeks: workflowConfig.cycleDurationWeeks,
+            cycleStartDayOfWeek: workflowConfig.cycleStartDayOfWeek,
+            workflowTemplate: workflowConfig.workflowTemplate,
             cycleName: workflowConfig.cycleName,
-            cycleDurationDays: workflowConfig.cycleDurationWeeks * 7,
-            componentTypes: ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'],
-            componentStatuses: ['PLANNING', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'COMPLETED'],
-            estimationEnabled: workflowConfig.enforceEstimates,
-            estimationUnit: 'hours',
-          }
-        : {
-            workflowTemplate: 'SCRUM',
-            cycleEnabled: true,
-            cycleName: 'Sprint',
-            cycleDurationDays: 14,
-            componentTypes: ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'],
-            componentStatuses: ['PLANNING', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'COMPLETED'],
-            estimationEnabled: true,
-            estimationUnit: 'hours',
-          }
+            backlogName: workflowConfig.backlogName,
+            enforceEstimates: workflowConfig.enforceEstimates,
+            autoArchiveCompleted: workflowConfig.autoArchiveCompleted,
+            createdAt: new Date(workflowConfig.createdAt),
+            updatedAt: new Date(workflowConfig.updatedAt),
+          } as TeamWorkflowConfig)
+        : null,
     );
     setLoading(false);
   }, [teamId]);
@@ -77,49 +59,6 @@ export default function DemoWorkflowSettingsPage() {
     id: DEMO_USER.id,
     name: DEMO_USER.name,
     email: DEMO_USER.email,
-  };
-
-  const handleSave = () => {
-    if (!config) return;
-    setSaving(true);
-
-    // Update localStorage
-    const store = demoStore.getStore();
-    const existingIndex = store.workflowConfigs.findIndex((w) => w.teamId === teamId);
-    const existingConfig = existingIndex >= 0 ? store.workflowConfigs[existingIndex] : null;
-    const now = new Date().toISOString();
-
-    const newConfig = {
-      id: existingConfig?.id || `wf-${teamId}`,
-      teamId,
-      wipLimitPlanning: existingConfig?.wipLimitPlanning ?? null,
-      wipLimitInProgress: existingConfig?.wipLimitInProgress ?? null,
-      wipLimitBlocked: existingConfig?.wipLimitBlocked ?? null,
-      wipLimitReview: existingConfig?.wipLimitReview ?? null,
-      cycleEnabled: config.cycleEnabled,
-      cycleDurationWeeks: Math.ceil(config.cycleDurationDays / 7),
-      cycleStartDayOfWeek: existingConfig?.cycleStartDayOfWeek ?? 1,
-      workflowTemplate: config.workflowTemplate,
-      cycleName: config.cycleName,
-      backlogName: existingConfig?.backlogName ?? 'Backlog',
-      enforceEstimates: config.estimationEnabled,
-      autoArchiveCompleted: existingConfig?.autoArchiveCompleted ?? false,
-      createdAt: existingConfig?.createdAt || now,
-      updatedAt: now,
-    };
-
-    if (existingIndex >= 0) {
-      store.workflowConfigs[existingIndex] = newConfig;
-    } else {
-      store.workflowConfigs.push(newConfig);
-    }
-    demoStore.saveStore(store);
-
-    setTimeout(() => {
-      setSaving(false);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    }, 500);
   };
 
   if (loading) {
@@ -133,7 +72,7 @@ export default function DemoWorkflowSettingsPage() {
     );
   }
 
-  if (notFound || !config) {
+  if (notFound) {
     return (
       <div className="min-h-screen flex flex-col">
         <Header user={user} />
@@ -176,125 +115,7 @@ export default function DemoWorkflowSettingsPage() {
             </div>
           </div>
 
-          {/* Settings Form */}
-          <div className="space-y-8">
-            {/* Workflow Template */}
-            <div className="component-card">
-              <h2 className="text-lg font-semibold mb-4">Workflow Template</h2>
-              <div className="grid gap-4 sm:grid-cols-3">
-                {WORKFLOW_TEMPLATES.map((template) => (
-                  <button
-                    key={template.value}
-                    onClick={() => setConfig({ ...config, workflowTemplate: template.value })}
-                    className={`p-4 rounded-xl border text-left transition-colors ${
-                      config.workflowTemplate === template.value
-                        ? 'border-cyan-500 bg-cyan-500/10'
-                        : 'border-slate-700 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="font-medium">{template.label}</div>
-                    <div className="text-sm text-slate-400">{template.description}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Sprint/Cycle Settings */}
-            <div className="component-card">
-              <h2 className="text-lg font-semibold mb-4">Time-Boxing</h2>
-              <div className="space-y-4">
-                <label className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={config.cycleEnabled}
-                    onChange={(e) => setConfig({ ...config, cycleEnabled: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
-                  />
-                  <span>Enable time-boxed cycles</span>
-                </label>
-
-                {config.cycleEnabled && (
-                  <div className="grid gap-4 sm:grid-cols-2 mt-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">Cycle Name</label>
-                      <input
-                        type="text"
-                        value={config.cycleName}
-                        onChange={(e) => setConfig({ ...config, cycleName: e.target.value })}
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">
-                        Duration (days)
-                      </label>
-                      <input
-                        type="number"
-                        value={config.cycleDurationDays}
-                        onChange={(e) =>
-                          setConfig({ ...config, cycleDurationDays: parseInt(e.target.value) || 14 })
-                        }
-                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Estimation Settings */}
-            <div className="component-card">
-              <h2 className="text-lg font-semibold mb-4">Estimation</h2>
-              <div className="space-y-4">
-                <label className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={config.estimationEnabled}
-                    onChange={(e) => setConfig({ ...config, estimationEnabled: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
-                  />
-                  <span>Enable time estimation</span>
-                </label>
-
-                {config.estimationEnabled && (
-                  <div className="mt-4">
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Estimation Unit
-                    </label>
-                    <select
-                      value={config.estimationUnit}
-                      onChange={(e) => setConfig({ ...config, estimationUnit: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg focus:outline-none focus:border-cyan-500"
-                    >
-                      <option value="hours">Hours</option>
-                      <option value="points">Story Points</option>
-                      <option value="days">Days</option>
-                    </select>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Save Button */}
-            <div className="flex justify-end">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="btn-primary flex items-center gap-2"
-              >
-                {saved ? (
-                  <>
-                    <Check className="w-5 h-5" />
-                    Saved
-                  </>
-                ) : saving ? (
-                  'Saving...'
-                ) : (
-                  'Save Changes'
-                )}
-              </button>
-            </div>
-          </div>
+          <WorkflowSettingsForm teamId={teamId} config={config} />
         </div>
       </main>
     </div>

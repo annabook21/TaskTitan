@@ -17,7 +17,12 @@ export const assignComponent = authActionClient
   )
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, assigneeId } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'assignComponent', _input: { componentId, userId: assigneeId } };
+    }
 
     // Verify user has access to project through team membership
     const component = await prisma.component.findFirst({
@@ -87,7 +92,12 @@ export const unassignComponent = authActionClient
   )
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, assigneeId } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'unassignComponent', _input: { componentId, userId: assigneeId } };
+    }
 
     // Verify user has access to project through team membership
     const component = await prisma.component.findFirst({

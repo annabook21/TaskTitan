@@ -26,7 +26,12 @@ const suggestSprintSchema = z.object({
  */
 export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).action(async ({ parsedInput, ctx }) => {
   const { sprintId, capacityHours } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'aiPlanSprint', _input: { sprintId, capacityHours } };
+  }
 
   const sprint = await prisma.sprint.findUnique({
     where: { id: sprintId },
@@ -93,7 +98,12 @@ export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).ac
  */
 export const applySprintPlan = authActionClient.schema(applySprintPlanSchema).action(async ({ parsedInput, ctx }) => {
   const { sprintId, componentIds } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'applySprintPlan', _input: { sprintId, componentIds } };
+  }
 
   const sprint = await prisma.sprint.findUnique({
     where: { id: sprintId },
@@ -133,7 +143,12 @@ export const applySprintPlan = authActionClient.schema(applySprintPlanSchema).ac
  */
 export const aiSuggestSprint = authActionClient.schema(suggestSprintSchema).action(async ({ parsedInput, ctx }) => {
   const { teamId } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'aiSuggestSprint', _input: { teamId } };
+  }
 
   // Verify user is member of team
   const team = await prisma.team.findUnique({

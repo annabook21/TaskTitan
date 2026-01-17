@@ -6,6 +6,7 @@ import { assignComponent, unassignComponent } from '@/app/projects/actions';
 import { UserPlus, X, Check, Loader2, User as UserIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import type { User } from '@prisma/client';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   componentId: string;
@@ -17,9 +18,13 @@ interface Props {
 export default function AssignmentPanel({ componentId, componentName, currentAssignees, teamMembers }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const assigneeIds = new Set(currentAssignees.map((u) => u.id));
+  const { handleResult } = useDemoActionHandler();
 
   const { execute: executeAssign, isExecuting: isAssigning } = useAction(assignComponent, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Member assigned');
     },
     onError: ({ error }) => {
@@ -28,7 +33,10 @@ export default function AssignmentPanel({ componentId, componentName, currentAss
   });
 
   const { execute: executeUnassign, isExecuting: isUnassigning } = useAction(unassignComponent, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Member unassigned');
     },
     onError: ({ error }) => {

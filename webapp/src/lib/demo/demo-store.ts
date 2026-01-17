@@ -1,7 +1,7 @@
 // Demo data store - localStorage CRUD operations mimicking Prisma patterns
 // This provides a client-side data layer for demo mode
 
-import { DEMO_STORAGE_KEY, DEMO_STORAGE_VERSION } from './constants';
+import { DEMO_STORAGE_KEY, DEMO_STORAGE_VERSION, DEMO_USER } from './constants';
 import { generateDemoSeedData } from './demo-seed';
 import type {
   DemoDataStore,
@@ -15,6 +15,7 @@ import type {
   DemoActivity,
   DemoWorkflowConfig,
   DemoUser,
+  DemoStatusHistory,
   DemoTeamWithRelations,
   DemoProjectWithRelations,
   DemoComponentWithRelations,
@@ -33,6 +34,22 @@ function generateId(prefix: string): string {
  */
 function now(): string {
   return new Date().toISOString();
+}
+
+function createStatusHistoryEntry(input: {
+  componentId: string;
+  status: DemoComponent['status'];
+  enteredAt?: string;
+}): DemoStatusHistory {
+  const enteredAt = input.enteredAt ?? now();
+  return {
+    id: generateId('status'),
+    componentId: input.componentId,
+    status: input.status,
+    enteredAt,
+    exitedAt: null,
+    durationMs: null,
+  };
 }
 
 class DemoStore {
@@ -377,7 +394,13 @@ class DemoStore {
 
   updateProject(
     projectId: string,
-    input: { name?: string; description?: string; githubRepoUrl?: string | null },
+    input: {
+      name?: string;
+      description?: string;
+      githubRepoUrl?: string | null;
+      githubWebhookSecret?: string | null;
+      githubPrTargetStatus?: DemoProject['githubPrTargetStatus'] | null;
+    },
   ): DemoProject | null {
     const store = this.getStore();
     const projectIndex = store.projects.findIndex((p) => p.id === projectId);
@@ -387,6 +410,8 @@ class DemoStore {
     if (input.name !== undefined) project.name = input.name;
     if (input.description !== undefined) project.description = input.description;
     if (input.githubRepoUrl !== undefined) project.githubRepoUrl = input.githubRepoUrl;
+    if (input.githubWebhookSecret !== undefined) project.githubWebhookSecret = input.githubWebhookSecret;
+    if (input.githubPrTargetStatus !== undefined) project.githubPrTargetStatus = input.githubPrTargetStatus;
     project.updatedAt = now();
 
     this.saveStore(store);
@@ -511,6 +536,13 @@ class DemoStore {
     };
 
     store.components.push(component);
+    store.statusHistory.push(
+      createStatusHistoryEntry({
+        componentId,
+        status: component.status,
+        enteredAt: component.statusEnteredAt,
+      }),
+    );
     this.saveStore(store);
 
     return component;
@@ -546,6 +578,7 @@ class DemoStore {
 
     const component = store.components[componentIndex];
     const oldStatus = component.status;
+    const updatedAt = now();
 
     // Update fields
     Object.keys(input).forEach((key) => {
@@ -558,13 +591,46 @@ class DemoStore {
 
     // Track status change
     if (input.status && input.status !== oldStatus) {
-      component.statusEnteredAt = now();
+      component.statusEnteredAt = updatedAt;
+      // Close previous status entry
+      const previousStatusEntries = store.statusHistory.filter(
+        (entry) => entry.componentId === componentId && entry.exitedAt === null,
+      );
+      previousStatusEntries.forEach((entry) => {
+        entry.exitedAt = updatedAt;
+        entry.durationMs = new Date(updatedAt).getTime() - new Date(entry.enteredAt).getTime();
+      });
+      store.statusHistory.push(
+        createStatusHistoryEntry({
+          componentId,
+          status: component.status,
+          enteredAt: component.statusEnteredAt,
+        }),
+      );
     }
 
-    component.updatedAt = now();
+    component.updatedAt = updatedAt;
     this.saveStore(store);
 
     return component;
+  }
+
+  addComponentPreview(input: { componentId: string; htmlContent: string; prompt?: string; generatedBy?: string }) {
+    const store = this.getStore();
+    const timestamp = now();
+    const preview = {
+      id: generateId('preview'),
+      componentId: input.componentId,
+      htmlContent: input.htmlContent,
+      prompt: input.prompt ?? null,
+      generatedBy: input.generatedBy ?? DEMO_USER.id,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    store.componentPreviews.push(preview);
+    this.saveStore(store);
+    return preview;
   }
 
   deleteComponent(componentId: string): boolean {

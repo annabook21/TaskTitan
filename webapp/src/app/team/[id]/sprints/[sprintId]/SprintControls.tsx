@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAction } from 'next-safe-action/hooks';
 import { updateSprintStatus, deleteSprint } from '@/app/sprints/actions';
 import { PlayCircle, CheckCircle2, XCircle, Trash2, Loader2 } from 'lucide-react';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   sprint: {
@@ -17,13 +18,24 @@ interface Props {
 export default function SprintControls({ sprint, teamId }: Props) {
   const router = useRouter();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const { handleResult } = useDemoActionHandler();
 
   const { execute: executeStatus, isExecuting: isUpdatingStatus } = useAction(updateSprintStatus, {
-    onSuccess: () => router.refresh(),
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
+      router.refresh();
+    },
   });
 
   const { execute: executeDelete, isExecuting: isDeleting } = useAction(deleteSprint, {
-    onSuccess: () => router.push(`/team/${teamId}/sprints`),
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
+      router.push(`/team/${teamId}/sprints`);
+    },
   });
 
   const handleStartSprint = () => {

@@ -8,6 +8,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { createTeam } from '../actions';
 import { toast } from 'sonner';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplateKey } from '@/lib/workflow-templates';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 const TEMPLATE_ICONS: Record<WorkflowTemplateKey, React.ReactNode> = {
   SCRUM: <RotateCcw className="w-6 h-6" />,
@@ -24,12 +25,15 @@ export default function NewTeamForm() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplateKey | null>(null);
+  const { handleResult } = useDemoActionHandler();
 
   const { execute, isExecuting } = useAction(createTeam, {
     onSuccess: ({ data }) => {
-      if (data?.team) {
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      if ('team' in resolved && resolved.team) {
         toast.success('Team created!');
-        router.push(`/team/${data.team.id}`);
+        router.push(`/team/${resolved.team.id}`);
       }
     },
     onError: ({ error }) => {

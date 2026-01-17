@@ -25,6 +25,7 @@ import type { ComponentStatus, ComponentType, User, SprintStatus } from '@prisma
 import AssignmentPanel from './AssignmentPanel';
 import PreviewModal from './PreviewModal';
 import ComponentContextPanel from './ComponentContextPanel';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Sprint {
   id: string;
@@ -120,6 +121,7 @@ export default function ComponentCard({ component, teamMembers, availableSprints
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isSprintOpen, setIsSprintOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const { handleResult } = useDemoActionHandler();
 
   // Calculate aging
   const daysInStatus = getDaysInStatus(component.statusEnteredAt);
@@ -130,7 +132,10 @@ export default function ComponentCard({ component, teamMembers, availableSprints
     (component.status === 'REVIEW' && daysInStatus >= 5);
 
   const { execute, isExecuting } = useAction(updateComponent, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Component updated');
       setIsStatusOpen(false);
     },
@@ -140,7 +145,10 @@ export default function ComponentCard({ component, teamMembers, availableSprints
   });
 
   const { execute: executeSprint, isExecuting: isSprintExecuting } = useAction(assignComponentToSprint, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Sprint updated');
       setIsSprintOpen(false);
     },
@@ -151,7 +159,9 @@ export default function ComponentCard({ component, teamMembers, availableSprints
 
   const { execute: executeGeneratePreview, isExecuting: isGeneratingPreview } = useAction(generatePreviewAction, {
     onSuccess: ({ data }) => {
-      if (data?.preview) {
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      if (resolved?.preview) {
         toast.success('Wireframe generated!');
         setShowPreview(true);
       }

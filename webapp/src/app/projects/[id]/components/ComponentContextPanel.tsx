@@ -9,6 +9,7 @@ import {
 } from './context-actions';
 import { FileText, Sparkles, X, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface ComponentContextData {
   id: string;
@@ -35,11 +36,15 @@ export default function ComponentContextPanel({ component }: Props) {
   const [newLink, setNewLink] = useState('');
   const [showKeyPoints, setShowKeyPoints] = useState(false);
   const [keyPoints, setKeyPoints] = useState<string[]>([]);
+  const { handleResult } = useDemoActionHandler();
 
   const hasContext = Boolean(component.contextDecision || component.contextRationale);
 
   const { execute: saveContext, isExecuting: isSaving } = useAction(updateComponentContextAction, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Context saved');
       setIsEditing(false);
     },
@@ -50,8 +55,10 @@ export default function ComponentContextPanel({ component }: Props) {
 
   const { execute: generateSummary, isExecuting: isGenerating } = useAction(generateContextSummaryAction, {
     onSuccess: ({ data }) => {
-      if (data?.keyPoints) {
-        setKeyPoints(data.keyPoints);
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      if (resolved?.keyPoints) {
+        setKeyPoints(resolved.keyPoints);
         setShowKeyPoints(true);
         toast.success('AI summary generated');
       }
@@ -62,7 +69,10 @@ export default function ComponentContextPanel({ component }: Props) {
   });
 
   const { execute: clearContext, isExecuting: isClearing } = useAction(clearComponentContextAction, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Context cleared');
       setDecision('');
       setRationale('');

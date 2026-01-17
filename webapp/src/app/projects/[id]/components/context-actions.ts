@@ -21,7 +21,23 @@ export const updateComponentContextAction = authActionClient
   .schema(updateContextSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, contextDecision, contextRationale, contextAlternatives, contextLinks } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return {
+        _demo: true,
+        _action: 'updateComponentContext',
+        _input: {
+          componentId,
+          contextDecision,
+          contextRationale,
+          contextAlternatives,
+          contextLinks,
+          updatedBy: userId,
+        },
+      };
+    }
 
     // Verify user has access to this component
     const component = await prisma.component.findFirst({
@@ -70,7 +86,12 @@ export const generateContextSummaryAction = authActionClient
   .schema(generateContextSummarySchema)
   .action(async ({ parsedInput, ctx }) => {
     const { componentId } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'generateContextSummary', _input: { componentId } };
+    }
 
     // Fetch component with access check
     const component = await prisma.component.findFirst({
@@ -131,7 +152,12 @@ export const clearComponentContextAction = authActionClient
   .schema(clearContextSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { componentId } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'clearComponentContext', _input: { componentId } };
+    }
 
     // Verify user has access
     const component = await prisma.component.findFirst({

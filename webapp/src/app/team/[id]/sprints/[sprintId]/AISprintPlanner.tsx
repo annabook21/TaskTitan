@@ -5,6 +5,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { aiPlanSprintAction, applySprintPlan } from '@/app/sprints/actions';
 import { Sparkles, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   sprintId: string;
@@ -22,12 +23,15 @@ export default function AISprintPlanner({ sprintId, defaultCapacity = 40 }: Prop
   const [isOpen, setIsOpen] = useState(false);
   const [capacity, setCapacity] = useState(defaultCapacity);
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const { handleResult } = useDemoActionHandler();
 
   const { execute: generatePlan, isExecuting: isGenerating } = useAction(aiPlanSprintAction, {
     onSuccess: ({ data }) => {
-      if (data) {
-        setPlan(data);
-        if (data.selectedComponentIds.length === 0) {
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as PlanResult) : data;
+      if (resolved) {
+        setPlan(resolved);
+        if (resolved.selectedComponentIds.length === 0) {
           toast.info('No components available for this sprint');
         }
       }
@@ -39,7 +43,9 @@ export default function AISprintPlanner({ sprintId, defaultCapacity = 40 }: Prop
 
   const { execute: applyPlan, isExecuting: isApplying } = useAction(applySprintPlan, {
     onSuccess: ({ data }) => {
-      toast.success(`Added ${data?.assignedCount} components to sprint!`);
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as { assignedCount?: number }) : data;
+      toast.success(`Added ${resolved?.assignedCount ?? 0} components to sprint!`);
       setPlan(null);
       setIsOpen(false);
     },

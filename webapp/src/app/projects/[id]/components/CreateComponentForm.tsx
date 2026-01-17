@@ -5,6 +5,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { createComponent } from '@/app/projects/actions';
 import { Plus, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {
   projectId: string;
@@ -16,9 +17,13 @@ export default function CreateComponentForm({ projectId }: Props) {
   const [description, setDescription] = useState('');
   const [estimatedHours, setEstimatedHours] = useState('');
   const [priority, setPriority] = useState('0');
+  const { handleResult } = useDemoActionHandler();
 
   const { execute, isExecuting } = useAction(createComponent, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       toast.success('Component created!');
       setIsOpen(false);
       setName('');

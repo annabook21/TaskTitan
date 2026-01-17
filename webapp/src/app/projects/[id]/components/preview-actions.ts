@@ -38,7 +38,12 @@ export const generatePreviewAction = authActionClient
   .schema(generatePreviewSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { componentId } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'generatePreview', _input: { componentId } };
+    }
 
     try {
       // Fetch component with project access check
@@ -132,7 +137,12 @@ export const exportWireframeAction = authActionClient
   .schema(exportWireframeSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { previewId } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return { _demo: true, _action: 'exportWireframe', _input: { previewId } };
+    }
 
     try {
       // Fetch preview with access check

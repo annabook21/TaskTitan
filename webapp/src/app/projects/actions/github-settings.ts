@@ -20,7 +20,16 @@ export const updateProjectGitHubSettings = authActionClient
   .schema(updateProjectGitHubSettingsSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { id, githubRepoUrl, githubWebhookSecret, githubPrTargetStatus } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return {
+        _demo: true,
+        _action: 'updateProjectGitHubSettings',
+        _input: { projectId: id, githubRepoUrl, githubWebhookSecret, githubPrTargetStatus },
+      };
+    }
 
     // Verify user has access and is owner or admin
     const project = await prisma.project.findFirst({

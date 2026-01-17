@@ -8,6 +8,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { createProject } from '../actions';
 import { createTeam } from '@/app/team/actions';
 import { toast } from 'sonner';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Team {
   id: string;
@@ -23,6 +24,7 @@ interface NewProjectFormProps {
 export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectFormProps) {
   const router = useRouter();
   const hasExistingTeams = teams.length > 0;
+  const { handleResult } = useDemoActionHandler();
 
   // If user has teams and one is preselected, skip to project step
   const [step, setStep] = useState<'team' | 'project'>(
@@ -44,8 +46,10 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
 
   const { execute: executeCreateTeam, isExecuting: isCreatingTeam } = useAction(createTeam, {
     onSuccess: ({ data }) => {
-      if (data?.team) {
-        setTeamId(data.team.id);
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      if ('team' in resolved && resolved.team) {
+        setTeamId(resolved.team.id);
         setStep('project');
         toast.success('Team created!');
       }
@@ -57,10 +61,13 @@ export default function NewProjectForm({ teams, preselectedTeamId }: NewProjectF
 
   const { execute: executeCreateProject, isExecuting: isCreatingProject } = useAction(createProject, {
     onSuccess: ({ data }) => {
-      if (data?.project) {
+      if (!data) return;
+      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
+      if ('project' in resolved && resolved.project) {
         toast.success('Project created!');
-        // Redirect with generateAI flag if auto-generate is enabled
-        const url = autoGenerateAI ? `/projects/${data.project.id}?generateAI=true` : `/projects/${data.project.id}`;
+        const url = autoGenerateAI
+          ? `/projects/${resolved.project.id}?generateAI=true`
+          : `/projects/${resolved.project.id}`;
         router.push(url);
       }
     },

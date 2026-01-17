@@ -1,72 +1,118 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
-import type { DemoComponent, DemoSprint, DemoDependency } from '@/lib/demo/types';
 import Header from '@/components/Header';
 import Link from 'next/link';
+import type { Role, User } from '@prisma/client';
 import {
   ArrowLeft,
-  Layers,
-  Clock,
-  ChevronRight,
-  GitBranch,
-  Zap,
   Plus,
+  Layers,
+  GitBranch,
+  Users,
+  Clock,
   PlayCircle,
   PauseCircle,
+  Zap,
 } from 'lucide-react';
+import ComponentCard from './components/ComponentCard';
 import SmartComponentCreator from './components/SmartComponentCreator';
-import AIGeneratePanel from './components/AIGeneratePanel';
-import DeleteProjectButton from './DeleteProjectButton';
-import SprintTimeline from './components/SprintTimeline';
 import DependencyGraph from './components/DependencyGraph';
+import AIGeneratePanelWrapper from './components/AIGeneratePanelWrapper';
+import TimelineView from './components/TimelineView';
+import DeleteProjectButton from './DeleteProjectButton';
+import GitHubIntegrationSettings from './components/GitHubIntegrationSettings';
+import SprintTimeline from './components/SprintTimeline';
 import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
-
-const statusColors: Record<string, string> = {
-  PLANNING: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
-  IN_PROGRESS: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
-  REVIEW: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-  BLOCKED: 'bg-red-500/20 text-red-300 border-red-500/30',
-  COMPLETED: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-};
-
-const typeColors: Record<string, string> = {
-  EPIC: 'bg-purple-500/20 text-purple-300',
-  FEATURE: 'bg-blue-500/20 text-blue-300',
-  STORY: 'bg-cyan-500/20 text-cyan-300',
-  TASK: 'bg-slate-500/20 text-slate-300',
-  BUG: 'bg-red-500/20 text-red-300',
-};
 
 interface ProjectData {
   id: string;
   name: string;
   description: string | null;
-  teamName: string;
   teamId: string;
-  components: DemoComponent[];
-  sprints: DemoSprint[];
-  dependencies: DemoDependency[];
-  updatedAt: string;
+  teamName: string;
+  ownerId: string;
+  githubRepoUrl: string | null;
+  githubWebhookSecret: string | null;
+  githubPrTargetStatus: 'REVIEW' | 'COMPLETED' | null;
+  components: ComponentData[];
+  availableSprints: SprintData[];
+  teamMembers: TeamMember[];
+  activities: ActivityData[];
   cycleEnabled: boolean;
   cycleName: string;
+  wipLimits: Record<string, number | null>;
+  updatedAt: string;
 }
+
+interface SprintData {
+  id: string;
+  name: string;
+  status: 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  startDate: Date;
+  endDate: Date;
+  goal: string | null;
+  capacity: number | null;
+}
+
+interface TeamMember extends User {
+  role: Role;
+}
+
+interface ActivityData {
+  id: string;
+  type: string;
+  createdAt: string;
+  user: TeamMember;
+}
+
+interface ComponentData {
+  id: string;
+  name: string;
+  description: string | null;
+  type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
+  status: 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
+  priority: number;
+  estimatedHours: number | null;
+  dueDate: Date | null;
+  sprintId: string | null;
+  sprint: SprintData | null;
+  githubPrUrl: string | null;
+  assignments: { user: TeamMember }[];
+  dependsOn: { requiredComponent: { id: string; name: string; status: ComponentData['status'] } }[];
+  dependedOnBy: { dependentComponent: { id: string; name: string; status: ComponentData['status'] } }[];
+  Preview?: { id: string; htmlContent: string }[];
+  contextDecision: string | null;
+  contextRationale: string | null;
+  contextAlternatives: string | null;
+  contextLinks: string[];
+  contextAiSummary: string | null;
+  statusEnteredAt?: Date;
+  cycleTimeDays?: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  projectId: string;
+}
+
+const statusConfig = {
+  PLANNING: { label: 'Planning', color: 'violet' },
+  IN_PROGRESS: { label: 'In Progress', color: 'cyan' },
+  BLOCKED: { label: 'Blocked', color: 'red' },
+  REVIEW: { label: 'Review', color: 'amber' },
+  COMPLETED: { label: 'Completed', color: 'emerald' },
+} as const;
 
 export default function DemoProjectDetailPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
   const projectId = params.id as string;
-  const generateAI = searchParams.get('generateAI') === 'true';
   const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
-  // Load project data from demo store
   const loadProjectData = () => {
     const store = demoStore.getStore();
-
     const projectData = store.projects.find((p) => p.id === projectId);
     if (!projectData) {
       setNotFound(true);
@@ -74,46 +120,217 @@ export default function DemoProjectDetailPage() {
       return;
     }
 
+    const membership = store.memberships.find((m) => m.userId === DEMO_USER.id && m.teamId === projectData.teamId);
+    if (!membership) {
+      setNotFound(true);
+      setLoading(false);
+      return;
+    }
+
     const team = store.teams.find((t) => t.id === projectData.teamId);
-    const components = store.components.filter((c) => c.projectId === projectId);
     const workflowConfig = store.workflowConfigs.find((w) => w.teamId === projectData.teamId);
 
-    // Load sprints for this team
-    const sprints = store.sprints.filter((s) => s.teamId === projectData.teamId);
+    const teamMemberships = store.memberships.filter((m) => m.teamId === projectData.teamId);
+    const roleByUserId = new Map(teamMemberships.map((member) => [member.userId, member.role]));
+    const fallbackRole: Role = 'MEMBER';
 
-    // Load dependencies for components in this project
-    const componentIds = new Set(components.map((c) => c.id));
-    const dependencies = store.dependencies.filter(
-      (d) => componentIds.has(d.dependentComponentId) || componentIds.has(d.requiredComponentId)
-    );
+    const toUser = (userId: string): User => {
+      const user = store.users.find((u) => u.id === userId);
+      if (!user) {
+        return {
+          id: userId,
+          name: null,
+          email: 'unknown@example.com',
+          avatarUrl: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+      }
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+        createdAt: new Date(user.createdAt),
+        updatedAt: new Date(user.updatedAt),
+      };
+    };
+
+    const teamMembers = teamMemberships.map((member) => ({
+      ...toUser(member.userId),
+      role: member.role,
+    }));
+
+    const sprints = store.sprints
+      .filter((s) => s.teamId === projectData.teamId)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        status: s.status,
+        startDate: s.startDate ? new Date(s.startDate) : new Date(),
+        endDate: s.endDate ? new Date(s.endDate) : new Date(),
+        goal: s.goal,
+        capacity: s.capacity,
+      }))
+      .sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+    const availableSprints = sprints.filter((s) => s.status === 'PLANNING' || s.status === 'ACTIVE');
+    const sprintById = new Map(sprints.map((s) => [s.id, s]));
+
+    const activities = store.activities
+      .filter((a) => a.projectId === projectId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .map((activity) => {
+        const user = toUser(activity.userId);
+        return {
+          id: activity.id,
+          type: activity.type,
+          createdAt: activity.createdAt,
+          user: {
+            ...user,
+            role: roleByUserId.get(user.id) ?? fallbackRole,
+          },
+        };
+      })
+      .slice(0, 10);
+
+    const components = store.components
+      .filter((c) => c.projectId === projectId)
+      .map((component) => {
+        const assignments = store.assignments
+          .filter((a) => a.componentId === component.id)
+          .map((assignment) => {
+            const user = toUser(assignment.userId);
+            return {
+              user: {
+                ...user,
+                role: roleByUserId.get(user.id) ?? fallbackRole,
+              },
+            };
+          });
+
+        const dependsOn = store.dependencies
+          .filter((d) => d.dependentComponentId === component.id)
+          .map((d) => {
+            const required = store.components.find((c) => c.id === d.requiredComponentId);
+            return {
+              requiredComponent: {
+                id: d.requiredComponentId,
+                name: required?.name || 'Unknown',
+                status: required?.status || 'PLANNING',
+              },
+            };
+          });
+
+        const dependedOnBy = store.dependencies
+          .filter((d) => d.requiredComponentId === component.id)
+          .map((d) => {
+            const dependent = store.components.find((c) => c.id === d.dependentComponentId);
+            return {
+              dependentComponent: {
+                id: d.dependentComponentId,
+                name: dependent?.name || 'Unknown',
+                status: dependent?.status || 'PLANNING',
+              },
+            };
+          });
+
+        const previews = store.componentPreviews
+          .filter((p) => p.componentId === component.id)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map((preview) => ({
+            id: preview.id,
+            htmlContent: preview.htmlContent,
+          }));
+
+        const history = store.statusHistory
+          .filter((h) => h.componentId === component.id)
+          .sort((a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime());
+        const currentStatusEntry = history.find((h) => !h.exitedAt) || history[history.length - 1];
+        let cycleTimeDays: number | null = null;
+        if (component.status === 'COMPLETED') {
+          const inProgress = history.find((h) => h.status === 'IN_PROGRESS');
+          const completed = history.find((h) => h.status === 'COMPLETED');
+          if (inProgress && completed) {
+            const cycleTimeMs =
+              new Date(completed.enteredAt).getTime() - new Date(inProgress.enteredAt).getTime();
+            cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10;
+          } else {
+            const createdAt = new Date(component.createdAt).getTime();
+            const updatedAt = new Date(component.updatedAt).getTime();
+            if (updatedAt > createdAt) {
+              cycleTimeDays = Math.round(((updatedAt - createdAt) / (1000 * 60 * 60 * 24)) * 10) / 10;
+            }
+          }
+        }
+
+        return {
+          id: component.id,
+          name: component.name,
+          description: component.description,
+          type: component.type,
+          status: component.status,
+          priority: component.priority,
+          estimatedHours: component.estimatedHours,
+          dueDate: component.dueDate ? new Date(component.dueDate) : null,
+          sprintId: component.sprintId,
+          sprint: component.sprintId ? sprintById.get(component.sprintId) || null : null,
+          githubPrUrl: component.githubPrUrl,
+          assignments,
+          dependsOn,
+          dependedOnBy,
+          Preview: previews.length > 0 ? previews : undefined,
+          contextDecision: component.contextDecision,
+          contextRationale: component.contextRationale,
+          contextAlternatives: component.contextAlternatives,
+          contextLinks: component.contextLinks,
+          contextAiSummary: component.contextAiSummary,
+          statusEnteredAt: currentStatusEntry ? new Date(currentStatusEntry.enteredAt) : new Date(component.statusEnteredAt),
+          cycleTimeDays,
+          createdAt: new Date(component.createdAt),
+          updatedAt: new Date(component.updatedAt),
+          projectId: component.projectId,
+        };
+      })
+      .sort((a, b) => b.priority - a.priority || a.createdAt.getTime() - b.createdAt.getTime())
+      .slice(0, 200);
 
     setProject({
       id: projectData.id,
       name: projectData.name,
       description: projectData.description,
-      teamName: team?.name || 'Unknown Team',
       teamId: projectData.teamId,
+      teamName: team?.name || 'Unknown Team',
+      ownerId: projectData.ownerId,
+      githubRepoUrl: projectData.githubRepoUrl,
+      githubWebhookSecret: projectData.githubWebhookSecret,
+      githubPrTargetStatus: projectData.githubPrTargetStatus as 'REVIEW' | 'COMPLETED' | null,
       components,
-      sprints,
-      dependencies,
-      updatedAt: projectData.updatedAt,
+      availableSprints,
+      teamMembers,
+      activities,
       cycleEnabled: workflowConfig?.cycleEnabled ?? true,
       cycleName: workflowConfig?.cycleName || 'Sprint',
+      wipLimits: {
+        PLANNING: workflowConfig?.wipLimitPlanning ?? null,
+        IN_PROGRESS: workflowConfig?.wipLimitInProgress ?? null,
+        BLOCKED: workflowConfig?.wipLimitBlocked ?? null,
+        REVIEW: workflowConfig?.wipLimitReview ?? null,
+        COMPLETED: null,
+      },
+      updatedAt: projectData.updatedAt,
     });
     setLoading(false);
   };
 
-  // Load on mount
   useEffect(() => {
     loadProjectData();
   }, [projectId]);
 
-  // Listen for demo store updates to refresh data
   useEffect(() => {
     const handleStoreUpdate = () => {
       loadProjectData();
     };
-
     window.addEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
     return () => {
       window.removeEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
@@ -125,6 +342,25 @@ export default function DemoProjectDetailPage() {
     name: DEMO_USER.name,
     email: DEMO_USER.email,
   };
+
+  const componentsByStatus = useMemo(() => {
+    if (!project) {
+      return {
+        PLANNING: [],
+        IN_PROGRESS: [],
+        BLOCKED: [],
+        REVIEW: [],
+        COMPLETED: [],
+      };
+    }
+    return {
+      PLANNING: project.components.filter((c) => c.status === 'PLANNING'),
+      IN_PROGRESS: project.components.filter((c) => c.status === 'IN_PROGRESS'),
+      BLOCKED: project.components.filter((c) => c.status === 'BLOCKED'),
+      REVIEW: project.components.filter((c) => c.status === 'REVIEW'),
+      COMPLETED: project.components.filter((c) => c.status === 'COMPLETED'),
+    };
+  }, [project]);
 
   if (loading) {
     return (
@@ -154,18 +390,11 @@ export default function DemoProjectDetailPage() {
     );
   }
 
-  // Organize components by hierarchy
-  const topLevelComponents = project.components.filter((c) => !c.parentId);
-  const getChildren = (parentId: string) => project.components.filter((c) => c.parentId === parentId);
-
-  // Stats
-  const statusCounts = project.components.reduce(
-    (acc, c) => {
-      acc[c.status] = (acc[c.status] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
+  const cycleNamePlural = `${project.cycleName}s`;
+  const isKanban = !project.cycleEnabled;
+  const currentMembership = project.teamMembers.find((member) => member.id === DEMO_USER.id);
+  const canManageGitHub = currentMembership?.role === 'OWNER' || currentMembership?.role === 'ADMIN';
+  const isOwner = project.ownerId === DEMO_USER.id;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -187,18 +416,17 @@ export default function DemoProjectDetailPage() {
             <div>
               <div className="flex items-center gap-3 mb-2">
                 <h1 className="text-3xl font-bold">{project.name}</h1>
-                <Link
-                  href={`/team/${project.teamId}`}
-                  className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded hover:bg-slate-700"
-                >
-                  {project.teamName}
-                </Link>
+                <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">{project.teamName}</span>
               </div>
               {project.description && <p className="text-slate-400 max-w-2xl">{project.description}</p>}
-              <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
+              <div className="flex items-center gap-4 mt-4 text-sm text-slate-500">
                 <span className="flex items-center gap-1.5">
                   <Layers className="w-4 h-4" />
                   {project.components.length} components
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Users className="w-4 h-4" />
+                  {project.teamMembers.length} team members
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Clock className="w-4 h-4" />
@@ -208,39 +436,27 @@ export default function DemoProjectDetailPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <AIGeneratePanel
+              <AIGeneratePanelWrapper
                 projectId={project.id}
                 hasDescription={!!project.description && project.description.length >= 20}
-                autoOpen={generateAI}
                 cycleEnabled={project.cycleEnabled}
                 cycleName={project.cycleName}
               />
               <SmartComponentCreator projectId={project.id} />
-              <DeleteProjectButton projectId={project.id} projectName={project.name} />
             </div>
           </div>
 
-          {/* Status Overview */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-            {['PLANNING', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'COMPLETED'].map((status) => (
-              <div key={status} className={`component-card border ${statusColors[status]}`}>
-                <div className="text-2xl font-bold">{statusCounts[status] || 0}</div>
-                <div className="text-xs opacity-70">{status.replace('_', ' ')}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Sprint Timeline - only show if cycles are enabled and sprints exist */}
-          {project.cycleEnabled && project.sprints.length > 0 && (
+          {/* Sprint Timeline */}
+          {project.cycleEnabled && project.availableSprints.length > 0 && (
             <SprintTimeline
-              sprints={project.sprints.map((s) => ({
-                id: s.id,
-                name: s.name,
-                goal: s.goal,
-                startDate: s.startDate ? new Date(s.startDate) : new Date(),
-                endDate: s.endDate ? new Date(s.endDate) : new Date(),
-                status: s.status,
-                capacity: s.capacity,
+              sprints={project.availableSprints.map((sprint) => ({
+                id: sprint.id,
+                name: sprint.name,
+                goal: sprint.goal,
+                startDate: sprint.startDate,
+                endDate: sprint.endDate,
+                status: sprint.status,
+                capacity: sprint.capacity,
               }))}
               components={project.components.map((c) => ({
                 id: c.id,
@@ -253,109 +469,147 @@ export default function DemoProjectDetailPage() {
             />
           )}
 
-          {/* Main Content Grid */}
+          {/* Main Content */}
           <div className="grid lg:grid-cols-4 gap-8">
-            {/* Main content area */}
-            <div className="lg:col-span-3 space-y-8">
-              {/* Dependency Graph */}
-              {project.components.length > 1 && (
-                <div>
-                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <GitBranch className="w-5 h-5 text-cyan-400" />
-                    Dependency Graph
-                  </h2>
-                  <DependencyGraph
-                    components={project.components.map((c) => {
-                      // Build dependency relationships for this component
-                      const dependsOn = project.dependencies
-                        .filter((d) => d.dependentComponentId === c.id)
-                        .map((d) => {
-                          const reqComp = project.components.find((comp) => comp.id === d.requiredComponentId);
-                          return {
-                            requiredComponent: {
-                              id: d.requiredComponentId,
-                              name: reqComp?.name || 'Unknown',
-                            },
-                          };
-                        });
-
-                      const dependedOnBy = project.dependencies
-                        .filter((d) => d.requiredComponentId === c.id)
-                        .map((d) => {
-                          const depComp = project.components.find((comp) => comp.id === d.dependentComponentId);
-                          return {
-                            dependentComponent: {
-                              id: d.dependentComponentId,
-                              name: depComp?.name || 'Unknown',
-                            },
-                          };
-                        });
-
-                      return {
-                        id: c.id,
-                        name: c.name,
-                        status: c.status,
-                        dependsOn,
-                        dependedOnBy,
-                      };
-                    })}
+            {/* Kanban Board */}
+            <div className="lg:col-span-3">
+              {project.components.length === 0 ? (
+                <div className="component-card text-center py-16">
+                  <Layers className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+                  <h2 className="text-xl font-medium text-slate-300 mb-2">No components yet</h2>
+                  <p className="text-slate-500 mb-6 max-w-md mx-auto">
+                    Break down your project into components. Each component represents a distinct piece of functionality
+                    that can be developed independently.
+                  </p>
+                  <SmartComponentCreator projectId={project.id} />
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {/* Timeline View */}
+                  <TimelineView
+                    components={project.components.map((c) => ({
+                      id: c.id,
+                      name: c.name,
+                      status: c.status,
+                      estimatedHours: c.estimatedHours,
+                      dueDate: c.dueDate,
+                      createdAt: c.createdAt,
+                      assignments: c.assignments,
+                      dependsOn: c.dependsOn.map((d) => ({
+                        requiredComponent: {
+                          id: d.requiredComponent.id,
+                          name: d.requiredComponent.name,
+                          status: d.requiredComponent.status,
+                        },
+                      })),
+                    }))}
                   />
+
+                  {/* Dependency Graph */}
+                  {project.components.length > 1 && (
+                    <div>
+                      <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <GitBranch className="w-5 h-5 text-cyan-400" />
+                        Dependency Graph
+                      </h2>
+                      <DependencyGraph components={project.components} />
+                    </div>
+                  )}
+
+                  {/* Status Columns */}
+                  <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    {(Object.entries(componentsByStatus) as [keyof typeof statusConfig, ComponentData[]][]).map(
+                      ([status, statusComponents]) => {
+                        const wipLimit = project.wipLimits[status];
+                        const isOverLimit = wipLimit && statusComponents.length > wipLimit;
+                        const isAtLimit = wipLimit && statusComponents.length === wipLimit;
+
+                        return (
+                          <div
+                            key={status}
+                            className={`space-y-3 rounded-lg p-3 -m-3 transition-colors ${
+                              isOverLimit
+                                ? 'bg-red-500/5 border-2 border-red-500/40'
+                                : isAtLimit
+                                  ? 'bg-amber-500/5 border-2 border-amber-500/30'
+                                  : ''
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <h3 className={`text-sm font-medium flex items-center gap-2 text-${statusConfig[status].color}-400`}>
+                                <span className={`w-2 h-2 rounded-full bg-${statusConfig[status].color}-500`} />
+                                {statusConfig[status].label}
+                                <span className="text-slate-500 font-normal">({statusComponents.length})</span>
+                                {wipLimit && (
+                                  <span
+                                    className={`text-xs px-1.5 py-0.5 rounded ${
+                                      isOverLimit
+                                        ? 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
+                                        : isAtLimit
+                                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                          : 'bg-slate-700 text-slate-400'
+                                    }`}
+                                  >
+                                    {statusComponents.length}/{wipLimit}
+                                  </span>
+                                )}
+                              </h3>
+                              {isOverLimit && <span className="text-xs text-red-400 font-medium">WIP exceeded!</span>}
+                            </div>
+
+                            <div className="space-y-3 min-h-[100px]">
+                              {statusComponents.map((component) => (
+                                <ComponentCard
+                                  key={component.id}
+                                  component={component}
+                                  teamMembers={project.teamMembers}
+                                  availableSprints={project.availableSprints}
+                                  showAging={isKanban}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      },
+                    )}
+                  </div>
                 </div>
               )}
-
-              {/* Components List */}
-              <div>
-                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-cyan-400" />
-                  Components
-                </h2>
-
-                {project.components.length === 0 ? (
-                  <div className="component-card text-center py-12">
-                    <Layers className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-slate-300 mb-2">No components yet</h3>
-                    <p className="text-slate-500 mb-6">
-                      Start by adding your first component or use AI to generate them
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {topLevelComponents.map((component) => (
-                      <ComponentItem key={component.id} component={component} getChildren={getChildren} depth={0} />
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* Sidebar */}
             <div className="space-y-6">
-              {/* Sprints sidebar - only show when cycles are enabled */}
+              {/* Cycles/Sprints */}
               {project.cycleEnabled && (
                 <div className="component-card">
                   <h3 className="font-medium mb-4 flex items-center gap-2">
                     <Zap className="w-4 h-4 text-amber-400" />
-                    {project.cycleName}s
+                    {cycleNamePlural}
                   </h3>
-                  {project.sprints.length === 0 ? (
+                  {project.availableSprints.length === 0 ? (
                     <div className="text-center py-4">
-                      <p className="text-sm text-slate-500 mb-3">No {project.cycleName.toLowerCase()}s yet</p>
-                      <p className="text-xs text-slate-600">
-                        Use AI Generate to create {project.cycleName.toLowerCase()}s with work items
-                      </p>
+                      <p className="text-sm text-slate-500 mb-3">No active {project.cycleName.toLowerCase()}s</p>
+                      <Link
+                        href={`/team/${project.teamId}/sprints/new`}
+                        className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/20 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Create {project.cycleName}
+                      </Link>
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {project.sprints.map((sprint) => {
+                      {project.availableSprints.map((sprint) => {
                         const sprintComponents = project.components.filter((c) => c.sprintId === sprint.id);
                         const completed = sprintComponents.filter((c) => c.status === 'COMPLETED').length;
                         const total = sprintComponents.length;
                         const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
 
                         return (
-                          <div
+                          <Link
                             key={sprint.id}
-                            className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50"
+                            href={`/team/${project.teamId}/sprints/${sprint.id}`}
+                            className="block p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors border border-slate-700/50 hover:border-amber-500/30"
                           >
                             <div className="flex items-center justify-between mb-2">
                               <span className="font-medium text-slate-200 flex items-center gap-2">
@@ -383,90 +637,95 @@ export default function DemoProjectDetailPage() {
                                 style={{ width: `${progress}%` }}
                               />
                             </div>
-                          </div>
+                          </Link>
                         );
                       })}
+                      <Link
+                        href={`/team/${project.teamId}/sprints`}
+                        className="block text-center text-sm text-slate-400 hover:text-amber-400 mt-2"
+                      >
+                        View all {project.cycleName.toLowerCase()}s →
+                      </Link>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Project info */}
+              {/* Team Members */}
               <div className="component-card">
-                <h3 className="font-medium mb-4 text-slate-300">Project Info</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Team</span>
-                    <span className="text-slate-300">{project.teamName}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Workflow</span>
-                    <span className="text-slate-300">{project.cycleEnabled ? 'Scrum' : 'Kanban'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Components</span>
-                    <span className="text-slate-300">{project.components.length}</span>
-                  </div>
-                  {project.dependencies.length > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Dependencies</span>
-                      <span className="text-slate-300">{project.dependencies.length}</span>
+                <h3 className="font-medium mb-4 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-violet-400" />
+                  Team Members
+                </h3>
+                <div className="space-y-3">
+                  {project.teamMembers.map((member) => (
+                    <div key={member.id} className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-sm font-medium">
+                        {member.name?.[0] || member.email[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-slate-200 truncate">{member.name || member.email}</div>
+                        <div className="text-xs text-slate-500">{member.role.toLowerCase()}</div>
+                      </div>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
+
+              {/* Recent Activity */}
+              <div className="component-card">
+                <h3 className="font-medium mb-4 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  Recent Activity
+                </h3>
+                {project.activities.length === 0 ? (
+                  <p className="text-sm text-slate-500">No activity yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {project.activities.slice(0, 5).map((activity) => (
+                      <div key={activity.id} className="text-sm">
+                        <div className="text-slate-300">
+                          <span className="font-medium">{activity.user.name || activity.user.email}</span>{' '}
+                          <span className="text-slate-500">{activity.type.replace(/_/g, ' ').toLowerCase()}</span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {new Date(activity.createdAt).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* GitHub Integration - only for owner or admin */}
+              {canManageGitHub && (
+                <GitHubIntegrationSettings
+                  projectId={project.id}
+                  currentSettings={{
+                    githubRepoUrl: project.githubRepoUrl,
+                    githubWebhookSecret: project.githubWebhookSecret,
+                    githubPrTargetStatus: project.githubPrTargetStatus,
+                  }}
+                />
+              )}
+
+              {/* Danger Zone - only for owner */}
+              {isOwner ? (
+                <div className="component-card border-red-500/30">
+                  <h3 className="text-sm font-medium text-red-400 mb-3">Danger Zone</h3>
+                  <DeleteProjectButton projectId={project.id} projectName={project.name} />
+                </div>
+              ) : (
+                <div className="component-card border-slate-700">
+                  <p className="text-xs text-slate-500">
+                    Owner: {project.ownerId} | You: {DEMO_USER.id}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </main>
-    </div>
-  );
-}
-
-function ComponentItem({
-  component,
-  getChildren,
-  depth,
-}: {
-  component: DemoComponent;
-  getChildren: (parentId: string) => DemoComponent[];
-  depth: number;
-}) {
-  const children = getChildren(component.id);
-  const [expanded, setExpanded] = useState(depth < 2);
-
-  return (
-    <div className={depth > 0 ? 'ml-6 border-l border-slate-700 pl-4' : ''}>
-      <div
-        className="component-card flex items-center gap-4 cursor-pointer hover:bg-slate-800/80"
-        onClick={() => children.length > 0 && setExpanded(!expanded)}
-      >
-        {children.length > 0 && (
-          <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-        )}
-        {children.length === 0 && <div className="w-4" />}
-
-        <span className={`text-xs px-2 py-0.5 rounded ${typeColors[component.type]}`}>{component.type}</span>
-
-        <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-slate-200 truncate">{component.name}</h3>
-          {component.description && <p className="text-sm text-slate-500 truncate">{component.description}</p>}
-        </div>
-
-        <span className={`text-xs px-2 py-1 rounded border ${statusColors[component.status]}`}>
-          {component.status.replace('_', ' ')}
-        </span>
-
-        {component.estimatedHours && <span className="text-xs text-slate-500">{component.estimatedHours}h</span>}
-      </div>
-
-      {expanded && children.length > 0 && (
-        <div className="mt-2 space-y-2">
-          {children.map((child) => (
-            <ComponentItem key={child.id} component={child} getChildren={getChildren} depth={depth + 1} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

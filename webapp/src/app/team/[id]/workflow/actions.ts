@@ -69,7 +69,16 @@ export const updateWorkflowConfig = authActionClient
   .schema(workflowConfigSchema)
   .action(async ({ parsedInput, ctx }) => {
     const { teamId, ...configData } = parsedInput;
-    const { userId } = ctx;
+    const { userId, isDemo } = ctx;
+
+    // Demo mode - return marker for client-side handling
+    if (isDemo) {
+      return {
+        _demo: true,
+        _action: 'updateWorkflowConfig',
+        _input: { teamId, ...configData },
+      };
+    }
 
     // Check if user is owner or admin
     const membership = await prisma.membership.findFirst({

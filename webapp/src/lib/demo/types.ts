@@ -127,7 +127,7 @@ export interface DemoWorkflowConfig {
 export interface DemoComponentPreview {
   id: string;
   componentId: string;
-  svgContent: string;
+  htmlContent: string;
   prompt: string | null;
   generatedBy: string;
   createdAt: string;

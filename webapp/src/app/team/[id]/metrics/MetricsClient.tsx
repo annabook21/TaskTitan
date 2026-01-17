@@ -16,6 +16,8 @@ import {
 } from './actions';
 import { BarChart3, Clock, TrendingUp, Layers, Loader2, AlertTriangle, Activity } from 'lucide-react';
 import type { TeamWorkflowConfig } from '@prisma/client';
+import { demoStore, isDemoMode } from '@/lib/demo';
+import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 
 interface Props {
   teamId: string;
@@ -50,6 +52,8 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
   const [statusDist, setStatusDist] = useState<StatusDistribution[]>([]);
   const [cfdData, setCfdData] = useState<CumulativeFlowData[]>([]);
   const [agingData, setAgingData] = useState<AgingData[]>([]);
+  const [demoRefreshKey, setDemoRefreshKey] = useState(0);
+  const demoMode = isDemoMode();
 
   // Determine if this is a Kanban (continuous flow) team
   const isKanban = !workflowConfig?.cycleEnabled;
@@ -92,15 +96,183 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
   });
 
   useEffect(() => {
-    fetchCycleTime({ teamId, days });
-    fetchThroughput({ teamId, days });
-    fetchStatus({ teamId });
-    // Kanban-specific metrics
-    if (isKanban) {
-      fetchCfd({ teamId, days });
-      fetchAging({ teamId });
+    if (!demoMode) {
+      fetchCycleTime({ teamId, days });
+      fetchThroughput({ teamId, days });
+      fetchStatus({ teamId });
+      if (isKanban) {
+        fetchCfd({ teamId, days });
+        fetchAging({ teamId });
+      }
+      return;
     }
-  }, [teamId, days, isKanban]);
+
+    const store = demoStore.getStore();
+    const teamProjects = store.projects.filter((p) => p.teamId === teamId);
+    const projectIds = new Set(teamProjects.map((p) => p.id));
+    const components = store.components.filter((c) => projectIds.has(c.projectId));
+    const componentIds = new Set(components.map((c) => c.id));
+    const statusHistory = store.statusHistory.filter((h) => componentIds.has(h.componentId));
+
+    // Status distribution
+    const statusCountMap: Record<string, number> = {};
+    components.forEach((c) => {
+      statusCountMap[c.status] = (statusCountMap[c.status] || 0) + 1;
+    });
+    setStatusDist(
+      Object.entries(statusCountMap).map(([status, count]) => ({
+        status,
+        count,
+      })),
+    );
+
+    // Cycle time stats
+    const cycleTimes: number[] = [];
+    components
+      .filter((c) => c.status === 'COMPLETED')
+      .forEach((component) => {
+        const history = statusHistory.filter((h) => h.componentId === component.id);
+        const inProgress = history.find((h) => h.status === 'IN_PROGRESS');
+        const completed = history.find((h) => h.status === 'COMPLETED');
+        if (inProgress && completed) {
+          const diffMs = new Date(completed.enteredAt).getTime() - new Date(inProgress.enteredAt).getTime();
+          if (diffMs > 0) cycleTimes.push(diffMs / (1000 * 60 * 60 * 24));
+          return;
+        }
+        const createdAt = new Date(component.createdAt).getTime();
+        const updatedAt = new Date(component.updatedAt).getTime();
+        if (updatedAt > createdAt) cycleTimes.push((updatedAt - createdAt) / (1000 * 60 * 60 * 24));
+      });
+
+    if (cycleTimes.length > 0) {
+      cycleTimes.sort((a, b) => a - b);
+      const stats: CycleTimeStats = {
+        average: cycleTimes.reduce((sum, ct) => sum + ct, 0) / cycleTimes.length,
+        median: cycleTimes[Math.floor(cycleTimes.length / 2)],
+        p85: cycleTimes[Math.floor(cycleTimes.length * 0.85)],
+        p95: cycleTimes[Math.floor(cycleTimes.length * 0.95)],
+        count: cycleTimes.length,
+      };
+      setCycleTimeStats(stats);
+    } else {
+      setCycleTimeStats(null);
+    }
+
+    // Throughput data
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    const completionEvents: Date[] = [];
+    components
+      .filter((c) => c.status === 'COMPLETED')
+      .forEach((component) => {
+        const history = statusHistory.filter((h) => h.componentId === component.id);
+        const completed = history.find((h) => h.status === 'COMPLETED');
+        const completedAt = completed ? new Date(completed.enteredAt) : new Date(component.updatedAt);
+        if (completedAt >= startDate) completionEvents.push(completedAt);
+      });
+
+    const weeklyThroughput: Map<string, number> = new Map();
+    completionEvents.forEach((event) => {
+      const date = new Date(event);
+      const dayOfWeek = date.getDay();
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      date.setDate(date.getDate() + diff);
+      const weekKey = date.toISOString().split('T')[0];
+      weeklyThroughput.set(weekKey, (weeklyThroughput.get(weekKey) || 0) + 1);
+    });
+
+    const throughput = Array.from(weeklyThroughput.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const totalCompleted = completionEvents.length;
+    const dailyAverage = totalCompleted / days;
+    const weeklyAverage = totalCompleted / (days / 7);
+    setThroughputData({ data: throughput, totalCompleted, dailyAverage, weeklyAverage });
+
+    // Cumulative flow data (approximate)
+    if (isKanban) {
+      const cfd: CumulativeFlowData[] = [];
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+
+      for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        const dayCounts: Record<string, number> = {
+          PLANNING: 0,
+          IN_PROGRESS: 0,
+          BLOCKED: 0,
+          REVIEW: 0,
+          COMPLETED: 0,
+        };
+
+        if (statusHistory.length === 0) {
+          components.forEach((component) => {
+            dayCounts[component.status] += 1;
+          });
+        } else {
+          const dayEnd = new Date(d);
+          dayEnd.setHours(23, 59, 59, 999);
+          statusHistory.forEach((entry) => {
+            const enteredAt = new Date(entry.enteredAt);
+            const exitedAt = entry.exitedAt ? new Date(entry.exitedAt) : null;
+            if (enteredAt <= dayEnd && (!exitedAt || exitedAt > dayEnd)) {
+              dayCounts[entry.status] += 1;
+            }
+          });
+        }
+
+        cfd.push({
+          date: dateStr,
+          PLANNING: dayCounts.PLANNING,
+          IN_PROGRESS: dayCounts.IN_PROGRESS,
+          BLOCKED: dayCounts.BLOCKED,
+          REVIEW: dayCounts.REVIEW,
+          COMPLETED: dayCounts.COMPLETED,
+        });
+      }
+
+      setCfdData(cfd);
+
+      // Aging analysis
+      const agingByStatus: Record<string, number[]> = {
+        PLANNING: [],
+        IN_PROGRESS: [],
+        BLOCKED: [],
+        REVIEW: [],
+      };
+      const now = new Date().getTime();
+      components
+        .filter((c) => c.status !== 'COMPLETED')
+        .forEach((component) => {
+          const enteredAt = new Date(component.statusEnteredAt || component.createdAt).getTime();
+          const daysInStatus = (now - enteredAt) / (1000 * 60 * 60 * 24);
+          if (agingByStatus[component.status]) {
+            agingByStatus[component.status].push(daysInStatus);
+          }
+        });
+
+      setAgingData(
+        Object.entries(agingByStatus).map(([status, values]) => ({
+          status,
+          avgDays: values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0,
+          maxDays: values.length ? Math.max(...values) : 0,
+          itemCount: values.length,
+        })),
+      );
+    }
+  }, [teamId, days, isKanban, demoMode, demoRefreshKey, fetchCycleTime, fetchThroughput, fetchStatus, fetchCfd, fetchAging]);
+
+  useEffect(() => {
+    if (!demoMode) return;
+    const handleStoreUpdate = () => {
+      setDemoRefreshKey((key) => key + 1);
+    };
+    window.addEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    return () => {
+      window.removeEventListener(DEMO_STORE_UPDATE_EVENT, handleStoreUpdate);
+    };
+  }, [demoMode]);
 
   const isLoading = loadingCycleTime || loadingThroughput || loadingStatus || loadingCfd || loadingAging;
 

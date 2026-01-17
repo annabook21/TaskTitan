@@ -95,7 +95,12 @@ export const createSprint = authActionClient.schema(createSprintSchema).action(a
  */
 export const updateSprint = authActionClient.schema(updateSprintSchema).action(async ({ parsedInput, ctx }) => {
   const { id, ...updates } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'updateSprint', _input: { sprintId: id, ...updates } };
+  }
 
   const sprint = await prisma.sprint.findUnique({
     where: { id },
@@ -137,7 +142,12 @@ export const updateSprint = authActionClient.schema(updateSprintSchema).action(a
  */
 export const updateSprintStatus = authActionClient.schema(sprintStatusSchema).action(async ({ parsedInput, ctx }) => {
   const { id, status } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'updateSprintStatus', _input: { sprintId: id, status } };
+  }
 
   const sprint = await prisma.sprint.findUnique({
     where: { id },

@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { inviteMember } from '../actions';
 import { X, UserPlus, Loader2 } from 'lucide-react';
+import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
+import { isDemoMode } from '@/lib/demo';
 
 interface Props {
   teamId: string;
@@ -14,9 +16,14 @@ interface Props {
 export default function InviteMemberForm({ teamId, onClose, onSuccess }: Props) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'ADMIN' | 'MEMBER' | 'VIEWER'>('MEMBER');
+  const { handleResult } = useDemoActionHandler();
+  const demoMode = isDemoMode();
 
   const { execute, isExecuting, result } = useAction(inviteMember, {
-    onSuccess: () => {
+    onSuccess: ({ data }) => {
+      if (data && isDemoResult(data)) {
+        handleResult(data);
+      }
       onSuccess();
       onClose();
     },
@@ -62,7 +69,9 @@ export default function InviteMemberForm({ teamId, onClose, onSuccess }: Props) 
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all text-slate-100 placeholder-slate-500"
               required
             />
-            <p className="text-xs text-slate-500 mt-2">The user must have an existing account</p>
+            {!demoMode && (
+              <p className="text-xs text-slate-500 mt-2">The user must have an existing account</p>
+            )}
           </div>
 
           <div>
