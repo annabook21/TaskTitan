@@ -84,15 +84,34 @@ export async function generateComponents(
 
     const isKanban = !workflowConfig?.cycleEnabled;
 
+    // For Scrum: EPIC and FEATURE should NOT be generated as work items
+    // They should only exist as optional backlog groupings (in the epics array)
+    // Convert any EPIC/FEATURE components to STORY to enforce sprint-first design
+    const sanitizeComponentType = (type: string, isKanban: boolean): 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG' => {
+      const upperType = type?.toUpperCase();
+      if (upperType === 'BUG') return 'BUG';
+      if (upperType === 'TASK') return 'TASK';
+      // For Scrum: convert EPIC/FEATURE to STORY (these should be in epics array, not components)
+      if (!isKanban && (upperType === 'EPIC' || upperType === 'FEATURE')) {
+        return 'STORY';
+      }
+      if (upperType === 'STORY') return 'STORY';
+      if (upperType === 'EPIC') return 'EPIC';
+      if (upperType === 'FEATURE') return 'FEATURE';
+      return 'STORY'; // Default
+    };
+
     // Ensure all components have required fields
+    // For Scrum: remove parentName since we use flat work items (hierarchy via epics array only)
     result.components = result.components.map((c, index) => ({
       name: c.name || `Component ${index + 1}`,
       description: c.description || '',
-      type: c.type || 'STORY', // Default to STORY if not provided
+      type: sanitizeComponentType(c.type, isKanban),
       estimatedHours: Math.max(1, Math.min(200, Number(c.estimatedHours) || 8)),
       priority: Math.max(1, Math.min(10, Number(c.priority) || 5)),
       suggestedDependencies: Array.isArray(c.suggestedDependencies) ? c.suggestedDependencies : [],
-      parentName: c.parentName,
+      // For Scrum: strip parentName to enforce flat structure (epics handle grouping)
+      parentName: isKanban ? c.parentName : undefined,
     }));
 
     // Validate sprints (required for Scrum, absent for Kanban)
