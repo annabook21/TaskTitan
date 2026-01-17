@@ -23,11 +23,19 @@ export interface GeneratedSprint {
   capacity?: number; // Suggested capacity in hours
 }
 
+// Epic groupings for backlog organization (optional, like Jira's Epic panel)
+export interface GeneratedEpic {
+  name: string;
+  description: string;
+  componentNames: string[]; // Names of Stories/Tasks that belong to this epic
+}
+
 export interface AIGenerationResult {
   components: GeneratedComponent[];
   summary: string;
   enhancedDescription?: string; // Optional enhanced project description
-  sprints?: GeneratedSprint[]; // Optional sprint plan
+  sprints?: GeneratedSprint[]; // Sprint plan (required for Scrum, absent for Kanban)
+  epics?: GeneratedEpic[]; // Optional epic groupings for backlog organization
 }
 
 // Import Analysis Types

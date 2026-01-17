@@ -3,6 +3,10 @@
  *
  * AI-powered component generation based on project descriptions.
  * Supports workflow-aware generation (Scrum vs Kanban vs custom workflows).
+ *
+ * KEY DESIGN (matches Jira/Linear):
+ * - SCRUM: Sprints are ALWAYS generated. Epics are OPTIONAL backlog groupings.
+ * - KANBAN: Flat work items, no sprints, no hierarchy.
  */
 
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
@@ -20,14 +24,14 @@ import type { TeamWorkflowConfig } from '@prisma/client';
  * @param projectName - Name of the project
  * @param projectDescription - Detailed description of the project
  * @param existingComponents - Optional array of existing component names to avoid duplicates
- * @param generateCycles - Whether to also generate a cycle/sprint plan (default: false)
+ * @param generateEpics - For Scrum: whether to create optional Epic groupings (default: false)
  * @param workflowConfig - Optional team workflow configuration for workflow-aware generation
  */
 export async function generateComponents(
   projectName: string,
   projectDescription: string,
   existingComponents: string[] = [],
-  generateCycles: boolean = false,
+  generateEpics: boolean = false,
   workflowConfig?: TeamWorkflowConfig | null,
 ): Promise<AIGenerationResult> {
   const client = getBedrockClient();
@@ -38,7 +42,7 @@ export async function generateComponents(
     projectName,
     projectDescription,
     existingComponents,
-    generateCycles,
+    generateEpics,
     workflowConfig,
   );
 
@@ -78,6 +82,8 @@ export async function generateComponents(
       throw new Error('Invalid response format: missing components array');
     }
 
+    const isKanban = !workflowConfig?.cycleEnabled;
+
     // Ensure all components have required fields
     result.components = result.components.map((c, index) => ({
       name: c.name || `Component ${index + 1}`,
@@ -88,6 +94,26 @@ export async function generateComponents(
       suggestedDependencies: Array.isArray(c.suggestedDependencies) ? c.suggestedDependencies : [],
       parentName: c.parentName,
     }));
+
+    // Validate sprints (required for Scrum, absent for Kanban)
+    if (!isKanban && result.sprints && Array.isArray(result.sprints)) {
+      result.sprints = result.sprints.map((s, index) => ({
+        name: s.name || `Sprint ${index + 1}`,
+        goal: s.goal || '',
+        durationWeeks: Math.max(1, Math.min(6, Number(s.durationWeeks) || 2)),
+        componentNames: Array.isArray(s.componentNames) ? s.componentNames : [],
+        capacity: s.capacity ? Math.max(1, Number(s.capacity)) : undefined,
+      }));
+    }
+
+    // Validate epics (optional backlog organization)
+    if (result.epics && Array.isArray(result.epics)) {
+      result.epics = result.epics.map((e) => ({
+        name: e.name || 'Unnamed Epic',
+        description: e.description || '',
+        componentNames: Array.isArray(e.componentNames) ? e.componentNames : [],
+      }));
+    }
 
     result.summary = result.summary || 'AI-generated component breakdown for your project.';
 

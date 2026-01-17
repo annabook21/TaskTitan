@@ -9,7 +9,8 @@ import { generateComponents, isAIConfigured } from '@/lib/ai';
 // Schemas
 const generateComponentsSchema = z.object({
   projectId: z.string().min(1),
-  generateSprints: z.boolean().optional(),
+  // For Scrum: whether to create optional Epic groupings (sprints are always generated)
+  generateEpics: z.boolean().optional(),
   // Demo mode data - passed from client since server can't access localStorage
   demoProjectData: z
     .object({
@@ -54,17 +55,30 @@ const applyAIComponentsSchema = z.object({
       }),
     )
     .optional(),
+  // Optional epic groupings for backlog organization
+  epics: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        componentNames: z.array(z.string()),
+      }),
+    )
+    .optional(),
 });
 
 /**
  * Generates AI component suggestions based on project description
  * Respects team workflow configuration for Scrum vs Kanban vs custom workflows
  * Uses real Bedrock AI for both demo and production modes
+ *
+ * For Scrum: Sprints are ALWAYS generated. Epics are OPTIONAL backlog groupings.
+ * For Kanban: Flat work items, no sprints, no hierarchy.
  */
 export const generateAIComponents = authActionClient
   .schema(generateComponentsSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { projectId, generateSprints = false, demoProjectData } = parsedInput;
+    const { projectId, generateEpics = false, demoProjectData } = parsedInput;
     const { userId, isDemo } = ctx;
 
     // Check if AI is configured (required for both demo and production)
@@ -150,11 +164,13 @@ export const generateAIComponents = authActionClient
     }
 
     // Generate components using real Bedrock AI
+    // For Scrum: sprints are always generated, epics are optional
+    // For Kanban: flat work items only
     const result = await generateComponents(
       projectName,
       projectDescription,
       existingNames,
-      generateSprints,
+      generateEpics,
       workflowConfig,
     );
 
@@ -163,16 +179,18 @@ export const generateAIComponents = authActionClient
       summary: result.summary,
       enhancedDescription: result.enhancedDescription,
       sprints: result.sprints,
+      epics: result.epics,
     };
   });
 
 /**
  * Applies AI-generated components to the project (creates them in database)
+ * Creates work items (Stories/Tasks), assigns them to sprints, and optionally creates Epic groupings
  */
 export const applyAIComponents = authActionClient
   .schema(applyAIComponentsSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { projectId, components, enhancedDescription, sprints } = parsedInput;
+    const { projectId, components, enhancedDescription, sprints, epics } = parsedInput;
     const { userId, isDemo } = ctx;
 
     // Demo mode - return marker for client-side handling
@@ -180,7 +198,7 @@ export const applyAIComponents = authActionClient
       return {
         _demo: true,
         _action: 'applyAIComponents',
-        _input: { projectId, components, enhancedDescription, sprints },
+        _input: { projectId, components, enhancedDescription, sprints, epics },
       };
     }
 
@@ -345,6 +363,41 @@ export const applyAIComponents = authActionClient
       }
     }
 
+    // Create epic groupings if provided (optional backlog organization)
+    // Epics are created as EPIC type components that group related Stories/Tasks
+    let createdEpics = 0;
+    if (epics && epics.length > 0) {
+      for (const epic of epics) {
+        // Create the epic as a top-level component
+        const createdEpic = await prisma.component.create({
+          data: {
+            name: epic.name,
+            description: epic.description,
+            type: 'EPIC',
+            projectId,
+            priority: 5, // Default priority for epics
+            estimatedHours: 0, // Epics don't have direct estimates, sum of children
+            parentId: null,
+          },
+        });
+
+        // Update child components to have this epic as their parent
+        const childIds = epic.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null);
+
+        if (childIds.length > 0) {
+          await prisma.component.updateMany({
+            where: {
+              id: { in: childIds as string[] },
+              projectId,
+            },
+            data: { parentId: createdEpic.id },
+          });
+        }
+
+        createdEpics++;
+      }
+    }
+
     // Log activity
     await prisma.activity.create({
       data: {
@@ -355,6 +408,7 @@ export const applyAIComponents = authActionClient
           aiGenerated: true,
           componentCount: createdComponents.length,
           sprintCount: createdSprints,
+          epicCount: createdEpics,
         },
       },
     });
@@ -366,6 +420,7 @@ export const applyAIComponents = authActionClient
       created: createdComponents.length,
       dependencies: dependenciesToCreate.length,
       sprints: createdSprints,
+      epics: createdEpics,
     };
   });
 

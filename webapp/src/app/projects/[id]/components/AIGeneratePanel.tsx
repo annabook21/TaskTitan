@@ -39,6 +39,12 @@ interface GeneratedSprint {
   capacity?: number;
 }
 
+interface GeneratedEpic {
+  name: string;
+  description: string;
+  componentNames: string[];
+}
+
 interface Props {
   projectId: string;
   hasDescription: boolean;
@@ -57,10 +63,12 @@ export default function AIGeneratePanel({
   const [isOpen, setIsOpen] = useState(autoOpen);
   const [generatedComponents, setGeneratedComponents] = useState<GeneratedComponent[]>([]);
   const [generatedSprints, setGeneratedSprints] = useState<GeneratedSprint[]>([]);
+  const [generatedEpics, setGeneratedEpics] = useState<GeneratedEpic[]>([]);
   const [summary, setSummary] = useState('');
   const [enhancedDescription, setEnhancedDescription] = useState('');
   const [selectedComponents, setSelectedComponents] = useState<Set<string>>(new Set());
-  const [generateCycles, setGenerateCycles] = useState(cycleEnabled);
+  // For Scrum: epics are optional backlog organization (sprints are always generated)
+  const [generateEpics, setGenerateEpics] = useState(false);
   const [hasAttemptedAutoGeneration, setHasAttemptedAutoGeneration] = useState(false);
   const { handleResult } = useDemoActionHandler();
 
@@ -116,6 +124,7 @@ export default function AIGeneratePanel({
       interface GenerateResult {
         components: GeneratedComponent[];
         sprints?: GeneratedSprint[];
+        epics?: GeneratedEpic[];
         summary: string;
         enhancedDescription?: string;
       }
@@ -124,6 +133,7 @@ export default function AIGeneratePanel({
         const result = data as unknown as GenerateResult;
         setGeneratedComponents(result.components);
         setGeneratedSprints(result.sprints || []);
+        setGeneratedEpics(result.epics || []);
         setSummary(result.summary);
         setEnhancedDescription(result.enhancedDescription || '');
         // Select all by default
@@ -145,6 +155,7 @@ export default function AIGeneratePanel({
         created: number;
         dependencies: number;
         sprints: number;
+        epics: number;
       }
 
       let result: ApplyResult | undefined;
@@ -156,14 +167,15 @@ export default function AIGeneratePanel({
       }
 
       if (result) {
-        const message =
-          result.sprints && result.sprints > 0
-            ? `Created ${result.created} components, ${result.dependencies} dependencies, and ${result.sprints} sprints`
-            : `Created ${result.created} components with ${result.dependencies} dependencies`;
-        toast.success(message);
+        const parts = [`Created ${result.created} work items`];
+        if (result.sprints > 0) parts.push(`${result.sprints} ${cycleNameLower}s`);
+        if (result.epics > 0) parts.push(`${result.epics} epics`);
+        if (result.dependencies > 0) parts.push(`${result.dependencies} dependencies`);
+        toast.success(parts.join(', '));
         setIsOpen(false);
         setGeneratedComponents([]);
         setGeneratedSprints([]);
+        setGeneratedEpics([]);
         setSelectedComponents(new Set());
       }
     },
@@ -176,6 +188,7 @@ export default function AIGeneratePanel({
   const handleGenerate = () => {
     setGeneratedComponents([]);
     setGeneratedSprints([]);
+    setGeneratedEpics([]);
 
     // In demo mode, pass project data from localStorage since server can't access it
     if (isDemoMode()) {
@@ -186,7 +199,9 @@ export default function AIGeneratePanel({
 
       executeGenerate({
         projectId,
-        generateSprints: generateCycles,
+        // For Scrum: generateEpics controls optional epic groupings (sprints always generated)
+        // For Kanban: this is ignored
+        generateEpics,
         demoProjectData: project
           ? {
               name: project.name,
@@ -205,14 +220,14 @@ export default function AIGeneratePanel({
           : undefined,
       });
     } else {
-      executeGenerate({ projectId, generateSprints: generateCycles });
+      executeGenerate({ projectId, generateEpics });
     }
   };
 
   const handleApply = () => {
     const toApply = generatedComponents.filter((c) => selectedComponents.has(c.name));
     if (toApply.length === 0) {
-      toast.error('Please select at least one component');
+      toast.error('Please select at least one work item');
       return;
     }
     executeApply({
@@ -220,6 +235,7 @@ export default function AIGeneratePanel({
       components: toApply,
       enhancedDescription,
       sprints: generatedSprints.length > 0 ? generatedSprints : undefined,
+      epics: generatedEpics.length > 0 ? generatedEpics : undefined,
     });
   };
 
@@ -274,8 +290,14 @@ export default function AIGeneratePanel({
               <Sparkles className="w-5 h-5 text-cyan-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold">AI Component Generator</h2>
-              <p className="text-sm text-slate-400">Generate component suggestions from your project description</p>
+              <h2 className="text-lg font-semibold">
+                {cycleEnabled ? `AI ${cycleName} Planner` : 'AI Work Item Generator'}
+              </h2>
+              <p className="text-sm text-slate-400">
+                {cycleEnabled
+                  ? `Generate ${cycleNameLower}s with work items from your project description`
+                  : 'Generate work items from your project description'}
+              </p>
             </div>
           </div>
           <button onClick={() => setIsOpen(false)} className="p-1 text-slate-400 hover:text-slate-200 rounded">
@@ -299,10 +321,13 @@ export default function AIGeneratePanel({
                     <Sparkles className="w-8 h-8 text-cyan-400" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-medium text-slate-200 mb-2">Ready to generate components?</h3>
+                    <h3 className="text-xl font-medium text-slate-200 mb-2">
+                      {cycleEnabled ? `Ready to generate ${cycleNameLower} plan?` : 'Ready to generate work items?'}
+                    </h3>
                     <p className="text-slate-400 max-w-md mx-auto">
-                      AI will analyze your project description and suggest logical components with estimated hours,
-                      priorities, and dependencies.
+                      {cycleEnabled
+                        ? `AI will create ${cycleNameLower}s with Stories and Tasks based on your project description. Work items will be organized into time-boxed iterations.`
+                        : 'AI will analyze your project and suggest independent work items with estimated hours, priorities, and dependencies.'}
                     </p>
                   </div>
 
@@ -314,21 +339,22 @@ export default function AIGeneratePanel({
                   )}
 
                   <div className="flex flex-col items-center gap-4">
+                    {/* For Scrum: Sprints are primary, Epics are optional backlog organization */}
                     {cycleEnabled && (
                       <label className="flex items-center gap-3 cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={generateCycles}
-                          onChange={(e) => setGenerateCycles(e.target.checked)}
+                          checked={generateEpics}
+                          onChange={(e) => setGenerateEpics(e.target.checked)}
                           className="w-4 h-4 rounded border-cyan-500/50 bg-slate-800 text-cyan-500 focus:ring-2 focus:ring-cyan-500/50"
                         />
-                        <span className="text-sm text-slate-300">Also generate {cycleNameLower} plan</span>
+                        <span className="text-sm text-slate-300">Also create Epic groupings for backlog organization</span>
                       </label>
                     )}
 
                     <button onClick={handleGenerate} disabled={isGenerating || !hasDescription} className="btn-primary">
                       <Sparkles className="w-5 h-5" />
-                      Generate {generateCycles && cycleEnabled ? `Components & ${cycleNamePlural}` : 'Components'}
+                      {cycleEnabled ? `Generate ${cycleName} Plan` : 'Generate Work Items'}
                     </button>
                   </div>
                 </div>
@@ -533,7 +559,7 @@ export default function AIGeneratePanel({
               <div className="flex items-center justify-center gap-6 text-sm text-slate-400 py-2">
                 <span className="flex items-center gap-2">
                   <Layers className="w-4 h-4" />
-                  {selectedComponents.size} components
+                  {selectedComponents.size} work items
                 </span>
                 <span className="flex items-center gap-2">
                   <Clock className="w-4 h-4" />
@@ -546,6 +572,12 @@ export default function AIGeneratePanel({
                   <span className="flex items-center gap-2">
                     <Zap className="w-4 h-4" />
                     {generatedSprints.length} {cycleNameLower}s
+                  </span>
+                )}
+                {generatedEpics.length > 0 && (
+                  <span className="flex items-center gap-2">
+                    <Layers className="w-4 h-4" />
+                    {generatedEpics.length} epics
                   </span>
                 )}
               </div>
@@ -570,7 +602,7 @@ export default function AIGeneratePanel({
                 className="btn-primary"
               >
                 {isApplying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                Apply {selectedComponents.size} Components
+                Apply {selectedComponents.size} Work Items
               </button>
             </div>
           </div>

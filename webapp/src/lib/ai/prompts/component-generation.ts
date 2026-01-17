@@ -3,6 +3,11 @@
  *
  * System and user prompts for AI-powered component generation.
  * Supports workflow-aware generation (Scrum vs Kanban vs custom workflows).
+ *
+ * KEY DESIGN PRINCIPLE (matches Jira/Linear):
+ * - SCRUM: Sprints are PRIMARY. Generate Stories/Tasks that go ON the sprint board.
+ *          Epics are OPTIONAL backlog organization (like Jira's Epic panel).
+ * - KANBAN: Flat work items with continuous flow. No sprints, no hierarchy.
  */
 
 import type { TeamWorkflowConfig } from '@prisma/client';
@@ -40,38 +45,38 @@ For each component you suggest:
 Respond with ONLY valid JSON, no other text.`;
   }
 
-  // Default: Scrum/hierarchical workflow
-  return `You are an expert software architect helping teams break down projects into components.
-Your job is to analyze a project description and suggest logical components that can be developed independently.
+  // SCRUM workflow: Sprint-first approach (like Jira/Linear)
+  const cycleName = workflowConfig?.cycleName || 'Sprint';
 
-This team uses time-boxed iterations. Create HIERARCHICAL component structures:
-- EPIC for large initiatives spanning multiple features
-- FEATURE within epics for significant functionality
-- STORY for specific user-facing work
-- TASK for technical work items
+  return `You are an expert software architect helping teams plan sprint-based development.
+Your job is to analyze a project description and create a sprint plan with work items.
 
-Component Types (use these for the "type" field):
-- EPIC: Large initiative spanning multiple features (20-80+ hours, e.g., "User Management System", "Payment Processing")
-- FEATURE: Significant feature within an epic (8-24 hours, e.g., "OAuth Integration", "Shopping Cart")
-- STORY: Specific user-facing functionality (2-8 hours, e.g., "User Login Form", "Product Search")
-- TASK: Technical work item (1-4 hours, e.g., "Setup Database Schema", "Configure AWS S3")
-- BUG: Defect or issue to fix
+This team uses SCRUM with time-boxed ${cycleName.toLowerCase()}s. Your PRIMARY output is ${cycleName.toLowerCase()}s containing work items:
 
-For each component you suggest:
-1. Give it a clear, concise name (e.g., "User Authentication", "Product Catalog", "Shopping Cart")
-2. Write a brief description of what it does and its responsibilities
-3. Assign the correct TYPE based on scope (EPIC for large initiatives, FEATURE for significant features, STORY for specific functionality)
-4. Estimate the development hours (be realistic: TASK 1-4h, STORY 2-8h, FEATURE 8-24h, EPIC 20-80h)
-5. Assign a priority from 1-10 (10 = highest priority, usually core/foundational components)
-6. Identify which other suggested components this depends on (by name)
-7. Optionally specify parentName to create hierarchy (e.g., STORY has parentName pointing to FEATURE)
+CORE CONCEPT (like Jira):
+- ${cycleName.toUpperCase()}S are the primary unit - work is organized INTO ${cycleName.toLowerCase()}s
+- STORIES and TASKS go ON the ${cycleName.toLowerCase()} board - these are the actual work
+- EPICS are optional backlog organization - they group related Stories but do NOT go in ${cycleName.toLowerCase()}s
 
-Consider:
-- Frontend components (UI, forms, pages) - usually STORY or FEATURE level
-- Backend components (API endpoints, services) - usually FEATURE level
-- Data layer components (models, database schemas) - usually TASK or FEATURE level
-- Integration components (third-party services, auth) - usually FEATURE or EPIC level
-- Infrastructure components (deployment, monitoring) - usually TASK level
+Work Item Types (for the "type" field):
+- STORY: User-facing functionality (2-8 hours, e.g., "User Login Form", "Product Search Page")
+- TASK: Technical work item (1-4 hours, e.g., "Setup Database Schema", "Configure CI/CD")
+- BUG: Defect or issue to fix (1-8 hours)
+
+For each work item:
+1. Clear, actionable name describing deliverable work
+2. Brief description of what needs to be built
+3. TYPE: STORY for user-facing, TASK for technical
+4. Estimated hours (STORY: 2-8h, TASK: 1-4h)
+5. Priority 1-10 (10 = highest)
+6. Dependencies on other items (by name)
+
+${cycleName} Planning:
+- Create 2-4 ${cycleName.toLowerCase()}s covering the project scope
+- Each ${cycleName.toLowerCase()} should have a clear goal
+- Group related work items logically
+- Respect dependencies - items cannot be in a ${cycleName.toLowerCase()} before their dependencies
+- Apply 80% capacity buffer for realistic planning
 
 Respond with ONLY valid JSON, no other text.`;
 }
@@ -84,37 +89,64 @@ export const COMPONENT_GENERATION_SYSTEM_PROMPT = buildSystemPrompt(null);
 
 /**
  * Generates user prompt for component generation
+ *
+ * @param generateEpics - For Scrum: whether to create optional Epic groupings for backlog organization
  */
 export function buildComponentGenerationPrompt(
   projectName: string,
   projectDescription: string,
   existingComponents: string[],
-  generateCycles: boolean,
+  generateEpics: boolean,
   workflowConfig?: TeamWorkflowConfig | null,
 ): string {
   const isKanban = workflowConfig ? !workflowConfig.cycleEnabled : false;
   const cycleName = workflowConfig?.cycleName || 'Sprint';
 
-  // Don't generate cycles for Kanban teams
-  const shouldGenerateCycles = generateCycles && !isKanban;
+  if (isKanban) {
+    // KANBAN: Flat work items, no sprints, no hierarchy
+    return `Project Name: ${projectName}
 
-  const cycleInstructions = shouldGenerateCycles
+Project Description:
+${projectDescription}
+
+${existingComponents.length > 0 ? `Existing Components (do not suggest these again): ${existingComponents.join(', ')}` : ''}
+
+Create 8-15 independent work items that can flow through your board. Keep items small (1-8 hours) and minimize dependencies.
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
+- "components": array of work items with { name, description, type, estimatedHours, priority, suggestedDependencies }
+- "summary": a brief summary of the overall architecture approach (2-3 sentences)
+- "enhancedDescription": an improved, detailed project description (3-4 sentences)
+
+Example format:
+<<<JSON
+{
+  "components": [
+    { "name": "Setup Project Structure", "description": "Initialize project with build tools and folder structure", "type": "TASK", "estimatedHours": 2, "priority": 10, "suggestedDependencies": [] },
+    { "name": "User Login Form", "description": "Create login page with email/password fields and validation", "type": "STORY", "estimatedHours": 6, "priority": 9, "suggestedDependencies": ["Setup Project Structure"] }
+  ],
+  "summary": "...",
+  "enhancedDescription": "..."
+}
+JSON>>>`;
+  }
+
+  // SCRUM: Sprint-first approach - sprints are ALWAYS generated
+  const epicInstructions = generateEpics
     ? `
-- "${cycleName.toLowerCase()}s": array of 2-4 ${cycleName.toLowerCase()} objects with { name, goal, durationWeeks, componentNames, capacity }
-  * Group components logically by dependencies and priority
-  * Early ${cycleName.toLowerCase()}s should focus on foundational/high-priority components
-  * Later ${cycleName.toLowerCase()}s build on earlier work
-  * Each ${cycleName.toLowerCase()} should be 1-2 weeks
-  * IMPORTANT: Respect dependencies - a component cannot be in a ${cycleName.toLowerCase()} before its dependencies
-  * IMPORTANT: Apply 80% capacity buffer - if ${cycleName.toLowerCase()} components total 50 hours, set capacity to 62 hours (50/0.8)
-  * This buffer accounts for meetings, code review, testing, and unexpected issues
-  * Capacity calculation: sum of component estimatedHours divided by 0.8 (80% utilization)
-  * componentNames should reference the exact component names from the components array`
+- "epics": array of epic groupings with { name, description, componentNames }
+  * Epics are for BACKLOG ORGANIZATION only (like Jira's Epic panel)
+  * Group related Stories/Tasks under thematic Epics
+  * componentNames should reference exact names from the components array
+  * Epics do NOT go in ${cycleName.toLowerCase()}s - only Stories/Tasks do`
     : '';
 
-  const structureGuidance = isKanban
-    ? 'Create 8-15 independent work items that can flow through your board. Keep items small (1-8 hours) and minimize dependencies.'
-    : 'Analyze this project and suggest 5-12 components that would be needed to build it.\nCreate a logical hierarchy where possible (EPIC → FEATURE → STORY).';
+  const epicExample = generateEpics
+    ? `,
+  "epics": [
+    { "name": "User Authentication", "description": "All auth-related functionality", "componentNames": ["User Login Form", "User Registration", "Password Reset"] }
+  ]`
+    : '';
 
   return `Project Name: ${projectName}
 
@@ -123,28 +155,37 @@ ${projectDescription}
 
 ${existingComponents.length > 0 ? `Existing Components (do not suggest these again): ${existingComponents.join(', ')}` : ''}
 
-${structureGuidance}
+Create a ${cycleName.toLowerCase()} plan with 8-15 work items organized into 2-4 ${cycleName.toLowerCase()}s.
 
 Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
-- "components": array of component objects with { name, description, type, estimatedHours, priority, suggestedDependencies${isKanban ? '' : ', parentName?'} }
-- "summary": a brief summary of the overall architecture approach (2-3 sentences)
-- "enhancedDescription": an improved, detailed project description (3-4 sentences) that includes key features, tech stack suggestions, and target users${cycleInstructions}
+- "components": array of work items (Stories/Tasks) with { name, description, type, estimatedHours, priority, suggestedDependencies }
+  * Use STORY for user-facing work (2-8 hours)
+  * Use TASK for technical work (1-4 hours)
+  * Do NOT create EPICs or FEATUREs as components - those are optional groupings
+- "sprints": array of 2-4 ${cycleName.toLowerCase()}s with { name, goal, durationWeeks, componentNames, capacity }
+  * ${cycleName}s contain the actual work items (Stories/Tasks)
+  * Group logically by dependencies and priority
+  * Each ${cycleName.toLowerCase()} should be 1-2 weeks
+  * Respect dependencies - items cannot be in a ${cycleName.toLowerCase()} before their dependencies
+  * Apply 80% capacity buffer: if items total 50 hours, set capacity to 62 (50/0.8)
+  * componentNames should reference exact names from the components array
+- "summary": brief architecture summary (2-3 sentences)
+- "enhancedDescription": improved project description (3-4 sentences)${epicInstructions}
 
 Example format:
 <<<JSON
 {
   "components": [
-    ${
-      isKanban
-        ? `{ "name": "Setup Project Structure", "description": "...", "type": "TASK", "estimatedHours": 2, "priority": 10, "suggestedDependencies": [] },
-    { "name": "User Login", "description": "...", "type": "STORY", "estimatedHours": 6, "priority": 9, "suggestedDependencies": ["Setup Project Structure"] }`
-        : `{ "name": "User Management", "description": "...", "type": "EPIC", "estimatedHours": 40, "priority": 9, "suggestedDependencies": [] },
-    { "name": "User Registration", "description": "...", "type": "FEATURE", "estimatedHours": 12, "priority": 9, "suggestedDependencies": [], "parentName": "User Management" },
-    { "name": "Email Verification", "description": "...", "type": "STORY", "estimatedHours": 4, "priority": 8, "suggestedDependencies": ["User Registration"], "parentName": "User Registration" }`
-    }
+    { "name": "User Login Form", "description": "Login page with email/password fields, validation, and error handling", "type": "STORY", "estimatedHours": 6, "priority": 10, "suggestedDependencies": [] },
+    { "name": "Setup Database Schema", "description": "Create user tables and indexes for authentication", "type": "TASK", "estimatedHours": 3, "priority": 10, "suggestedDependencies": [] },
+    { "name": "User Registration", "description": "Registration form with email verification flow", "type": "STORY", "estimatedHours": 8, "priority": 9, "suggestedDependencies": ["Setup Database Schema"] }
+  ],
+  "sprints": [
+    { "name": "Foundation", "goal": "Set up core infrastructure and authentication", "durationWeeks": 2, "componentNames": ["Setup Database Schema", "User Login Form"], "capacity": 12 },
+    { "name": "User Onboarding", "goal": "Complete user registration and onboarding flow", "durationWeeks": 2, "componentNames": ["User Registration"], "capacity": 10 }
   ],
   "summary": "...",
-  "enhancedDescription": "..."
+  "enhancedDescription": "..."${epicExample}
 }
 JSON>>>`;
 }
