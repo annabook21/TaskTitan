@@ -74,10 +74,11 @@ class DemoStore {
       const data = JSON.parse(raw) as DemoDataStore;
       // Check version and migrate if needed
       if (data.version !== DEMO_STORAGE_VERSION) {
-        // For now, just reset to fresh seed data on version mismatch
-        const seedData = generateDemoSeedData();
-        this.saveStore(seedData);
-        return seedData;
+        // Migrate existing data by adding missing fields
+        const migratedData = this.migrateData(data);
+        migratedData.version = DEMO_STORAGE_VERSION;
+        this.saveStore(migratedData);
+        return migratedData;
       }
       return data;
     } catch {
@@ -86,6 +87,21 @@ class DemoStore {
       this.saveStore(seedData);
       return seedData;
     }
+  }
+
+  /**
+   * Migrate data from older versions to the current version
+   */
+  private migrateData(data: DemoDataStore): DemoDataStore {
+    // Migrate memberships to include capacity planning fields
+    data.memberships = data.memberships.map((m) => ({
+      ...m,
+      title: (m as Record<string, unknown>).title ?? null,
+      hoursPerDay: (m as Record<string, unknown>).hoursPerDay ?? 6,
+      availability: (m as Record<string, unknown>).availability ?? 100,
+    })) as DemoDataStore['memberships'];
+
+    return data;
   }
 
   /**
