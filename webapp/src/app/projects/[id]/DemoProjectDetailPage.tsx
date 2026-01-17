@@ -36,6 +36,8 @@ interface ProjectData {
   teamId: string;
   components: DemoComponent[];
   updatedAt: string;
+  cycleEnabled: boolean;
+  cycleName: string;
 }
 
 export default function DemoProjectDetailPage() {
@@ -60,6 +62,7 @@ export default function DemoProjectDetailPage() {
 
     const team = store.teams.find((t) => t.id === projectData.teamId);
     const components = store.components.filter((c) => c.projectId === projectId);
+    const workflowConfig = store.workflowConfigs.find((w) => w.teamId === projectData.teamId);
 
     setProject({
       id: projectData.id,
@@ -69,6 +72,8 @@ export default function DemoProjectDetailPage() {
       teamId: projectData.teamId,
       components,
       updatedAt: projectData.updatedAt,
+      cycleEnabled: workflowConfig?.cycleEnabled ?? true,
+      cycleName: workflowConfig?.cycleName || 'Sprint',
     });
     setLoading(false);
   };
@@ -182,6 +187,8 @@ export default function DemoProjectDetailPage() {
                 projectId={project.id}
                 hasDescription={!!project.description && project.description.length >= 20}
                 autoOpen={generateAI}
+                cycleEnabled={project.cycleEnabled}
+                cycleName={project.cycleName}
               />
               <SmartComponentCreator projectId={project.id} />
               <DeleteProjectButton projectId={project.id} projectName={project.name} />
