@@ -363,85 +363,256 @@ function generateAIComponentsInDemo(input: GenerateAIComponentsInput) {
   // Analyze description for keywords to generate relevant components
   const descLower = description.toLowerCase();
 
-  // Common project patterns and their components
+  // Common project patterns and their components - with detailed descriptions like production AI
   const patterns = [
     {
       keywords: ['auth', 'login', 'signup', 'user', 'account', 'password', 'oauth'],
-      epic: 'User Authentication',
+      epic: 'User Authentication System',
+      epicDesc:
+        'Complete authentication infrastructure including secure user registration, login flows, password management, and session handling. Implements industry-standard security practices with JWT tokens, secure cookie handling, and protection against common attack vectors.',
       features: [
-        { name: 'User Registration', desc: 'Allow users to create accounts', hours: 16, priority: 5 },
-        { name: 'User Login', desc: 'Secure login with email/password', hours: 12, priority: 5 },
-        { name: 'Password Reset', desc: 'Forgot password flow with email verification', hours: 8, priority: 4 },
-        { name: 'Session Management', desc: 'Handle user sessions and tokens', hours: 8, priority: 4 },
+        {
+          name: 'User Registration Flow',
+          desc: 'Implement a complete user registration experience with email validation, password strength requirements, terms acceptance, and optional social sign-up integration. Includes duplicate email detection, rate limiting for abuse prevention, and welcome email automation.',
+          hours: 16,
+          priority: 5,
+        },
+        {
+          name: 'Secure Login System',
+          desc: 'Build a robust login system with email/password authentication, remember-me functionality, and failed attempt tracking. Includes brute-force protection, CAPTCHA integration after multiple failures, and audit logging for security compliance.',
+          hours: 12,
+          priority: 5,
+        },
+        {
+          name: 'Password Reset & Recovery',
+          desc: 'Implement a secure password reset flow with time-limited tokens, email verification, and password history checking. Includes security questions as backup, account recovery options, and notification of password changes to the user.',
+          hours: 8,
+          priority: 4,
+        },
+        {
+          name: 'Session & Token Management',
+          desc: 'Handle user sessions with JWT tokens, automatic refresh logic, and secure logout. Implements token rotation, concurrent session limits, forced logout capability, and session activity tracking for security auditing.',
+          hours: 8,
+          priority: 4,
+        },
       ],
     },
     {
       keywords: ['ecommerce', 'shop', 'product', 'cart', 'checkout', 'payment', 'store', 'buy'],
       epic: 'E-Commerce Platform',
+      epicDesc:
+        'Full-featured e-commerce solution with product management, shopping cart, secure checkout, and payment processing. Designed for scalability, conversion optimization, and seamless customer experience across devices.',
       features: [
-        { name: 'Product Catalog', desc: 'Browse and search products', hours: 20, priority: 5 },
-        { name: 'Shopping Cart', desc: 'Add/remove items, update quantities', hours: 16, priority: 5 },
-        { name: 'Checkout Flow', desc: 'Multi-step checkout process', hours: 24, priority: 5 },
-        { name: 'Payment Integration', desc: 'Stripe/PayPal payment processing', hours: 20, priority: 4 },
-        { name: 'Order History', desc: 'View past orders and status', hours: 12, priority: 3 },
+        {
+          name: 'Product Catalog System',
+          desc: 'Build a comprehensive product catalog with categories, filtering, search, and sorting capabilities. Includes product variants (size, color), inventory tracking, rich media galleries, and SEO-optimized product pages with structured data.',
+          hours: 20,
+          priority: 5,
+        },
+        {
+          name: 'Shopping Cart Experience',
+          desc: 'Create an intuitive shopping cart with add/remove items, quantity updates, saved for later, and persistent cart across sessions. Includes mini-cart preview, stock validation, price calculations with taxes, and abandoned cart recovery.',
+          hours: 16,
+          priority: 5,
+        },
+        {
+          name: 'Multi-Step Checkout Flow',
+          desc: 'Design a streamlined checkout process with address collection, shipping options, order review, and confirmation. Implements guest checkout option, address validation, promo code support, and order summary with itemized totals.',
+          hours: 24,
+          priority: 5,
+        },
+        {
+          name: 'Payment Gateway Integration',
+          desc: 'Integrate Stripe/PayPal for secure payment processing with PCI compliance. Includes credit card handling, saved payment methods, payment verification, refund processing, and receipt generation with email confirmation.',
+          hours: 20,
+          priority: 4,
+        },
+        {
+          name: 'Order History & Tracking',
+          desc: 'Provide customers with complete order history, status tracking, and reorder functionality. Includes order details view, tracking number integration, delivery notifications, and invoice/receipt downloads.',
+          hours: 12,
+          priority: 3,
+        },
       ],
     },
     {
       keywords: ['dashboard', 'admin', 'analytics', 'report', 'metrics', 'chart'],
       epic: 'Analytics Dashboard',
+      epicDesc:
+        'Comprehensive analytics platform providing actionable insights through interactive visualizations, customizable reports, and real-time data monitoring. Enables data-driven decision making with intuitive interfaces.',
       features: [
-        { name: 'Dashboard Overview', desc: 'Key metrics at a glance', hours: 16, priority: 5 },
-        { name: 'Data Visualization', desc: 'Charts and graphs for insights', hours: 20, priority: 4 },
-        { name: 'Report Generation', desc: 'Export reports in various formats', hours: 12, priority: 3 },
-        { name: 'Real-time Updates', desc: 'Live data refresh', hours: 16, priority: 3 },
+        {
+          name: 'Dashboard Overview',
+          desc: 'Create a customizable dashboard homepage with key performance indicators, trend indicators, and quick-glance widgets. Includes configurable layouts, date range selectors, comparison periods, and personalized metric preferences.',
+          hours: 16,
+          priority: 5,
+        },
+        {
+          name: 'Interactive Data Visualization',
+          desc: 'Implement rich charting capabilities with line graphs, bar charts, pie charts, and heatmaps. Includes drill-down functionality, tooltips with detailed data, chart animations, and responsive design for all screen sizes.',
+          hours: 20,
+          priority: 4,
+        },
+        {
+          name: 'Report Generation Engine',
+          desc: 'Build a flexible reporting system with customizable templates, scheduled generation, and multi-format export (PDF, Excel, CSV). Includes report builder UI, parameter selection, and automated email distribution.',
+          hours: 12,
+          priority: 3,
+        },
+        {
+          name: 'Real-time Data Updates',
+          desc: 'Implement WebSocket-based live data refresh with configurable update intervals. Includes visual indicators for data freshness, automatic reconnection handling, and selective component updates for performance.',
+          hours: 16,
+          priority: 3,
+        },
       ],
     },
     {
       keywords: ['api', 'backend', 'server', 'rest', 'graphql', 'endpoint'],
       epic: 'API Development',
+      epicDesc:
+        'Robust API infrastructure with well-designed endpoints, comprehensive documentation, and production-ready security. Built for scalability, maintainability, and developer experience.',
       features: [
-        { name: 'API Architecture', desc: 'Design RESTful or GraphQL API', hours: 16, priority: 5 },
-        { name: 'Authentication Middleware', desc: 'Secure API endpoints', hours: 12, priority: 5 },
-        { name: 'Rate Limiting', desc: 'Protect against abuse', hours: 8, priority: 4 },
-        { name: 'API Documentation', desc: 'OpenAPI/Swagger docs', hours: 8, priority: 3 },
+        {
+          name: 'API Architecture & Design',
+          desc: 'Design a clean, consistent API structure following REST or GraphQL best practices. Includes resource modeling, URL conventions, HTTP method usage, response formats, error handling patterns, and versioning strategy.',
+          hours: 16,
+          priority: 5,
+        },
+        {
+          name: 'Authentication & Authorization Middleware',
+          desc: 'Implement secure API authentication with JWT validation, API key support, and role-based access control. Includes permission checking, token validation, and integration with identity providers.',
+          hours: 12,
+          priority: 5,
+        },
+        {
+          name: 'Rate Limiting & Throttling',
+          desc: 'Protect API from abuse with configurable rate limits per endpoint, user, or API key. Includes quota tracking, graceful degradation, retry-after headers, and usage analytics for capacity planning.',
+          hours: 8,
+          priority: 4,
+        },
+        {
+          name: 'API Documentation Portal',
+          desc: 'Create comprehensive API documentation with OpenAPI/Swagger specification. Includes interactive API explorer, code samples in multiple languages, authentication guides, and changelog tracking.',
+          hours: 8,
+          priority: 3,
+        },
       ],
     },
     {
       keywords: ['mobile', 'app', 'ios', 'android', 'react native', 'flutter'],
       epic: 'Mobile Application',
+      epicDesc:
+        'Cross-platform mobile application with native-like performance, offline capabilities, and engaging user experience. Optimized for both iOS and Android with shared codebase efficiency.',
       features: [
-        { name: 'Mobile UI Framework', desc: 'Set up mobile app structure', hours: 20, priority: 5 },
-        { name: 'Navigation', desc: 'App navigation and routing', hours: 12, priority: 5 },
-        { name: 'Offline Support', desc: 'Work without internet connection', hours: 16, priority: 3 },
-        { name: 'Push Notifications', desc: 'Engage users with notifications', hours: 12, priority: 4 },
+        {
+          name: 'Mobile App Foundation',
+          desc: 'Set up the mobile application architecture with component structure, state management, and API integration layer. Includes theming system, asset management, environment configuration, and build pipeline setup.',
+          hours: 20,
+          priority: 5,
+        },
+        {
+          name: 'Navigation & Routing',
+          desc: 'Implement intuitive app navigation with stack navigation, tab bars, and drawer menus. Includes deep linking support, navigation state persistence, transition animations, and back button handling.',
+          hours: 12,
+          priority: 5,
+        },
+        {
+          name: 'Offline-First Architecture',
+          desc: 'Enable full app functionality without internet connection using local storage and sync queues. Includes data caching, conflict resolution, background sync, and network status indicators.',
+          hours: 16,
+          priority: 3,
+        },
+        {
+          name: 'Push Notification System',
+          desc: 'Integrate push notifications for user engagement with customizable notification types. Includes notification permissions handling, deep linking from notifications, notification center, and analytics tracking.',
+          hours: 12,
+          priority: 4,
+        },
       ],
     },
     {
       keywords: ['social', 'profile', 'follow', 'feed', 'post', 'comment', 'like'],
       epic: 'Social Features',
+      epicDesc:
+        'Engaging social functionality that connects users, enables content sharing, and builds community. Designed for viral growth, user retention, and meaningful interactions.',
       features: [
-        { name: 'User Profiles', desc: 'View and edit user profiles', hours: 16, priority: 5 },
-        { name: 'Activity Feed', desc: 'News feed with posts and updates', hours: 20, priority: 5 },
-        { name: 'Comments System', desc: 'Comment on posts and content', hours: 12, priority: 4 },
-        { name: 'Follow/Friend System', desc: 'Connect with other users', hours: 16, priority: 4 },
+        {
+          name: 'User Profile System',
+          desc: 'Build comprehensive user profiles with avatar upload, bio editing, and activity history. Includes profile customization options, privacy settings, profile completeness indicators, and public/private profile toggle.',
+          hours: 16,
+          priority: 5,
+        },
+        {
+          name: 'Activity Feed Engine',
+          desc: 'Create an engaging activity feed with algorithmic content ordering and infinite scroll. Includes content type variety, engagement actions, share functionality, and personalized feed preferences.',
+          hours: 20,
+          priority: 5,
+        },
+        {
+          name: 'Commenting & Discussions',
+          desc: 'Implement threaded comments with replies, mentions, and rich text formatting. Includes comment moderation tools, spam detection, edit/delete functionality, and notification triggers for replies.',
+          hours: 12,
+          priority: 4,
+        },
+        {
+          name: 'Social Graph & Connections',
+          desc: 'Build follow/friend system with mutual connections, follow suggestions, and connection management. Includes follower/following lists, connection requests, blocking functionality, and relationship-based feed filtering.',
+          hours: 16,
+          priority: 4,
+        },
       ],
     },
     {
       keywords: ['search', 'filter', 'sort', 'query', 'find'],
       epic: 'Search & Discovery',
+      epicDesc:
+        'Powerful search infrastructure enabling users to find exactly what they need quickly. Combines full-text search, smart filtering, and personalized recommendations.',
       features: [
-        { name: 'Full-text Search', desc: 'Search across content', hours: 16, priority: 4 },
-        { name: 'Advanced Filters', desc: 'Filter results by criteria', hours: 12, priority: 4 },
-        { name: 'Search Suggestions', desc: 'Autocomplete and suggestions', hours: 8, priority: 3 },
+        {
+          name: 'Full-text Search Engine',
+          desc: 'Implement comprehensive search across all content types with relevance ranking. Includes fuzzy matching, stemming, synonym support, highlighting of matches, and search analytics for improvement.',
+          hours: 16,
+          priority: 4,
+        },
+        {
+          name: 'Advanced Filter System',
+          desc: 'Build faceted filtering with dynamic filter options based on results. Includes multi-select filters, range sliders, saved filter presets, and real-time result count updates.',
+          hours: 12,
+          priority: 4,
+        },
+        {
+          name: 'Search Autocomplete & Suggestions',
+          desc: 'Enhance search with type-ahead suggestions, recent searches, and trending queries. Includes keyboard navigation, category suggestions, and personalized recommendations based on history.',
+          hours: 8,
+          priority: 3,
+        },
       ],
     },
     {
       keywords: ['notification', 'alert', 'email', 'sms', 'message'],
-      epic: 'Notifications',
+      epic: 'Notification System',
+      epicDesc:
+        'Multi-channel notification infrastructure keeping users informed and engaged. Supports email, in-app, and push notifications with smart delivery and user preferences.',
       features: [
-        { name: 'Email Notifications', desc: 'Send email alerts', hours: 12, priority: 4 },
-        { name: 'In-App Notifications', desc: 'Real-time in-app alerts', hours: 16, priority: 4 },
-        { name: 'Notification Preferences', desc: 'User notification settings', hours: 8, priority: 3 },
+        {
+          name: 'Email Notification Service',
+          desc: 'Build transactional and marketing email system with template management. Includes HTML email templates, personalization, delivery tracking, bounce handling, and unsubscribe management.',
+          hours: 12,
+          priority: 4,
+        },
+        {
+          name: 'In-App Notification Center',
+          desc: 'Create real-time in-app notification system with notification center UI. Includes unread counts, mark as read, notification grouping, action buttons, and notification history.',
+          hours: 16,
+          priority: 4,
+        },
+        {
+          name: 'Notification Preferences Hub',
+          desc: 'Implement user-controlled notification settings by channel and type. Includes granular preferences, quiet hours, digest options, and preference sync across devices.',
+          hours: 8,
+          priority: 3,
+        },
       ],
     },
   ];
@@ -449,68 +620,68 @@ function generateAIComponentsInDemo(input: GenerateAIComponentsInput) {
   // Find matching patterns
   const matchedPatterns = patterns.filter((p) => p.keywords.some((k) => descLower.includes(k)));
 
-  // If no patterns match, create generic components
+  // If no patterns match, create generic components with detailed descriptions
   if (matchedPatterns.length === 0) {
     components.push(
       {
-        name: 'Core Features',
-        description: 'Main functionality for ' + project.name,
+        name: 'Core Application Features',
+        description: `Primary functionality and business logic for ${project.name}. This epic encompasses the essential features that deliver the core value proposition to users, including the main workflows, data processing, and user interactions that define the product experience.`,
         type: 'EPIC',
         estimatedHours: 40,
         priority: 5,
         suggestedDependencies: [],
       },
       {
-        name: 'User Interface',
-        description: 'Design and implement the user interface',
+        name: 'User Interface & Experience',
+        description: 'Design and implement a responsive, accessible user interface following modern UX principles. Includes component library development, layout system, theming support, responsive breakpoints, and accessibility compliance (WCAG 2.1). Ensures consistent visual language across all application screens.',
         type: 'FEATURE',
         estimatedHours: 24,
         priority: 5,
         suggestedDependencies: [],
-        parentName: 'Core Features',
+        parentName: 'Core Application Features',
       },
       {
-        name: 'Backend Logic',
-        description: 'Server-side business logic',
+        name: 'Backend Services & Logic',
+        description: 'Implement server-side business logic with clean architecture patterns. Includes API endpoint development, service layer implementation, business rule validation, error handling, and logging. Follows separation of concerns and testability best practices.',
         type: 'FEATURE',
         estimatedHours: 24,
         priority: 5,
         suggestedDependencies: [],
-        parentName: 'Core Features',
+        parentName: 'Core Application Features',
       },
       {
-        name: 'Data Storage',
-        description: 'Database schema and data layer',
+        name: 'Data Layer & Storage',
+        description: 'Design and implement the data persistence layer with optimized schema design. Includes database modeling, migration scripts, query optimization, indexing strategy, and data integrity constraints. Implements repository pattern for clean data access abstraction.',
         type: 'FEATURE',
         estimatedHours: 16,
         priority: 4,
         suggestedDependencies: [],
-        parentName: 'Core Features',
+        parentName: 'Core Application Features',
       },
       {
-        name: 'Testing & QA',
-        description: 'Unit tests, integration tests, and QA',
+        name: 'Quality Assurance & Testing',
+        description: 'Comprehensive testing strategy including unit tests, integration tests, and end-to-end testing. Covers test automation setup, CI/CD integration, code coverage targets, and manual QA processes. Ensures reliability and catches regressions before production deployment.',
         type: 'EPIC',
         estimatedHours: 20,
         priority: 4,
-        suggestedDependencies: ['Core Features'],
+        suggestedDependencies: ['Core Application Features'],
       },
       {
-        name: 'Documentation',
-        description: 'User guides and technical documentation',
+        name: 'Documentation & Guides',
+        description: 'Create comprehensive documentation including user guides, API documentation, and technical architecture docs. Includes inline code documentation, README files, deployment guides, and troubleshooting resources for both users and developers.',
         type: 'FEATURE',
         estimatedHours: 12,
         priority: 3,
-        suggestedDependencies: ['Core Features'],
+        suggestedDependencies: ['Core Application Features'],
       },
     );
   } else {
     // Generate components from matched patterns
     for (const pattern of matchedPatterns) {
-      // Add Epic
+      // Add Epic with detailed description
       components.push({
         name: pattern.epic,
-        description: `${pattern.epic} functionality for ${project.name}`,
+        description: pattern.epicDesc || `${pattern.epic} functionality for ${project.name}`,
         type: 'EPIC',
         estimatedHours: pattern.features.reduce((sum, f) => sum + f.hours, 0),
         priority: 5,
@@ -601,16 +772,17 @@ function generateAIComponentsInDemo(input: GenerateAIComponentsInput) {
 function applyAIComponentsInDemo(input: ApplyAIComponentsInput) {
   const { projectId, components, enhancedDescription, sprints } = input;
 
-  const store = demoStore.getStore();
-  const project = store.projects.find((p) => p.id === projectId);
-
+  // Get the project first to get teamId
+  const project = demoStore.getProject(projectId);
   if (!project) {
     return { created: 0, dependencies: 0, sprints: 0 };
   }
 
-  // Update project description if enhanced
+  const teamId = project.teamId;
+
+  // Update project description if enhanced (use updateProject to persist)
   if (enhancedDescription) {
-    project.description = enhancedDescription;
+    demoStore.updateProject(projectId, { description: enhancedDescription });
   }
 
   const nameToId = new Map<string, string>();
@@ -678,7 +850,7 @@ function applyAIComponentsInDemo(input: ApplyAIComponentsInput) {
       const createdSprint = demoStore.createSprint({
         name: sprint.name,
         goal: sprint.goal,
-        teamId: project.teamId,
+        teamId,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
         capacity: sprint.capacity,
@@ -695,8 +867,6 @@ function applyAIComponentsInDemo(input: ApplyAIComponentsInput) {
       sprintCount++;
     }
   }
-
-  demoStore.saveStore(store);
 
   return {
     created,

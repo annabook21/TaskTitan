@@ -10,6 +10,23 @@ import { generateComponents, isAIConfigured } from '@/lib/ai';
 const generateComponentsSchema = z.object({
   projectId: z.string().min(1),
   generateSprints: z.boolean().optional(),
+  // Demo mode data - passed from client since server can't access localStorage
+  demoProjectData: z
+    .object({
+      name: z.string(),
+      description: z.string(),
+      existingComponentNames: z.array(z.string()),
+      workflowConfig: z
+        .object({
+          cycleEnabled: z.boolean(),
+          cycleDurationWeeks: z.number(),
+          workflowTemplate: z.enum(['SCRUM', 'KANBAN', 'CUSTOM']).nullable(),
+          cycleName: z.string().nullable(),
+          backlogName: z.string().nullable(),
+        })
+        .nullable(),
+    })
+    .optional(),
 });
 
 const applyAIComponentsSchema = z.object({
@@ -42,63 +59,100 @@ const applyAIComponentsSchema = z.object({
 /**
  * Generates AI component suggestions based on project description
  * Respects team workflow configuration for Scrum vs Kanban vs custom workflows
+ * Uses real Bedrock AI for both demo and production modes
  */
 export const generateAIComponents = authActionClient
   .schema(generateComponentsSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { projectId, generateSprints = false } = parsedInput;
+    const { projectId, generateSprints = false, demoProjectData } = parsedInput;
     const { userId, isDemo } = ctx;
 
-    // Demo mode - return marker for client-side handling
-    if (isDemo) {
-      return {
-        _demo: true,
-        _action: 'generateAIComponents',
-        _input: { projectId, generateSprints },
-      };
-    }
-
-    // Check if AI is configured
+    // Check if AI is configured (required for both demo and production)
     if (!isAIConfigured()) {
       throw new MyCustomError('AI features require Amazon Bedrock access in your AWS account.');
     }
 
-    // Get the project with team workflow configuration
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        Team: { Membership: { some: { userId } } },
-      },
-      include: {
-        Component: {
-          select: { name: true },
+    let projectName: string;
+    let projectDescription: string;
+    let existingNames: string[] = [];
+    let workflowConfig: Parameters<typeof generateComponents>[4] = null;
+
+    if (isDemo) {
+      // Demo mode - use project data passed from client (server can't access localStorage)
+      if (!demoProjectData) {
+        throw new MyCustomError('Demo project data not provided');
+      }
+
+      if (!demoProjectData.description || demoProjectData.description.trim().length < 20) {
+        throw new MyCustomError(
+          'Please add a detailed project description (at least 20 characters) to generate components',
+        );
+      }
+
+      projectName = demoProjectData.name;
+      projectDescription = demoProjectData.description;
+      existingNames = demoProjectData.existingComponentNames;
+
+      // Convert demo workflow config to match Prisma type shape
+      if (demoProjectData.workflowConfig) {
+        workflowConfig = {
+          id: 'demo-workflow',
+          teamId: 'demo-team',
+          wipLimitPlanning: null,
+          wipLimitInProgress: null,
+          wipLimitBlocked: null,
+          wipLimitReview: null,
+          cycleEnabled: demoProjectData.workflowConfig.cycleEnabled,
+          cycleDurationWeeks: demoProjectData.workflowConfig.cycleDurationWeeks,
+          cycleStartDayOfWeek: 1,
+          workflowTemplate: demoProjectData.workflowConfig.workflowTemplate,
+          cycleName: demoProjectData.workflowConfig.cycleName,
+          backlogName: demoProjectData.workflowConfig.backlogName,
+          enforceEstimates: false,
+          autoArchiveCompleted: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+      }
+    } else {
+      // Production mode - get project from database
+      const project = await prisma.project.findFirst({
+        where: {
+          id: projectId,
+          Team: { Membership: { some: { userId } } },
         },
-        Team: {
-          include: {
-            WorkflowConfig: true,
+        include: {
+          Component: {
+            select: { name: true },
+          },
+          Team: {
+            include: {
+              WorkflowConfig: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    if (!project) {
-      throw new MyCustomError('Project not found or access denied');
+      if (!project) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+
+      if (!project.description || project.description.trim().length < 20) {
+        throw new MyCustomError(
+          'Please add a detailed project description (at least 20 characters) to generate components',
+        );
+      }
+
+      projectName = project.name;
+      projectDescription = project.description;
+      existingNames = project.Component.map((c: { name: string }) => c.name);
+      workflowConfig = project.Team.WorkflowConfig;
     }
 
-    if (!project.description || project.description.trim().length < 20) {
-      throw new MyCustomError(
-        'Please add a detailed project description (at least 20 characters) to generate components',
-      );
-    }
-
-    const existingNames = project.Component.map((c: { name: string }) => c.name);
-    const workflowConfig = project.Team.WorkflowConfig;
-
-    // Generate components using AI (optionally with cycles/sprints)
-    // Pass workflow config so AI can generate appropriate structure (flat for Kanban, hierarchical for Scrum)
+    // Generate components using real Bedrock AI
     const result = await generateComponents(
-      project.name,
-      project.description,
+      projectName,
+      projectDescription,
       existingNames,
       generateSprints,
       workflowConfig,

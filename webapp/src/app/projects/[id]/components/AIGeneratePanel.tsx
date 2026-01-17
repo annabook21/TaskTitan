@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAction } from 'next-safe-action/hooks';
 import { generateAIComponents, applyAIComponents } from '@/app/projects/actions';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
+import { isDemoMode, demoStore } from '@/lib/demo';
 import {
   Sparkles,
   X,
@@ -111,7 +112,7 @@ export default function AIGeneratePanel({
     onSuccess: ({ data }) => {
       if (!isMountedRef.current || !data) return;
 
-      // Handle demo mode by processing locally
+      // Both demo and production mode now return real AI results directly
       interface GenerateResult {
         components: GeneratedComponent[];
         sprints?: GeneratedSprint[];
@@ -119,15 +120,8 @@ export default function AIGeneratePanel({
         enhancedDescription?: string;
       }
 
-      let result: GenerateResult | undefined;
-
-      if (isDemoResult(data)) {
-        result = handleResult(data) as unknown as GenerateResult;
-      } else if ('components' in data && data.components) {
-        result = data as unknown as GenerateResult;
-      }
-
-      if (result) {
+      if ('components' in data && data.components) {
+        const result = data as unknown as GenerateResult;
         setGeneratedComponents(result.components);
         setGeneratedSprints(result.sprints || []);
         setSummary(result.summary);
@@ -182,7 +176,37 @@ export default function AIGeneratePanel({
   const handleGenerate = () => {
     setGeneratedComponents([]);
     setGeneratedSprints([]);
-    executeGenerate({ projectId, generateSprints: generateCycles });
+
+    // In demo mode, pass project data from localStorage since server can't access it
+    if (isDemoMode()) {
+      const store = demoStore.getStore();
+      const project = store.projects.find((p) => p.id === projectId);
+      const workflowConfig = project ? store.workflowConfigs.find((w) => w.teamId === project.teamId) : null;
+      const existingComponentNames = store.components.filter((c) => c.projectId === projectId).map((c) => c.name);
+
+      executeGenerate({
+        projectId,
+        generateSprints: generateCycles,
+        demoProjectData: project
+          ? {
+              name: project.name,
+              description: project.description || '',
+              existingComponentNames,
+              workflowConfig: workflowConfig
+                ? {
+                    cycleEnabled: workflowConfig.cycleEnabled,
+                    cycleDurationWeeks: workflowConfig.cycleDurationWeeks,
+                    workflowTemplate: workflowConfig.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM' | null,
+                    cycleName: workflowConfig.cycleName,
+                    backlogName: workflowConfig.backlogName,
+                  }
+                : null,
+            }
+          : undefined,
+      });
+    } else {
+      executeGenerate({ projectId, generateSprints: generateCycles });
+    }
   };
 
   const handleApply = () => {
