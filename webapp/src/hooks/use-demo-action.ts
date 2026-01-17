@@ -301,13 +301,18 @@ interface ApplyAIComponentsInput {
     componentNames: string[];
     capacity?: number;
   }>;
+  epics?: Array<{
+    name: string;
+    description: string;
+    componentNames: string[];
+  }>;
 }
 
 /**
  * Apply AI-generated components in demo mode - creates them in demo store
  */
 function applyAIComponentsInDemo(input: ApplyAIComponentsInput) {
-  const { projectId, components, enhancedDescription, sprints } = input;
+  const { projectId, components, enhancedDescription, sprints, epics } = input;
 
   // Get the project first to get teamId
   const project = demoStore.getProject(projectId);
@@ -326,6 +331,7 @@ function applyAIComponentsInDemo(input: ApplyAIComponentsInput) {
   let created = 0;
   let dependencyCount = 0;
   let sprintCount = 0;
+  let epicCount = 0;
 
   // First pass: Create components without parents (EPICs)
   for (const comp of components.filter((c) => !c.parentName)) {
@@ -405,10 +411,36 @@ function applyAIComponentsInDemo(input: ApplyAIComponentsInput) {
     }
   }
 
+  // Create epic groupings if provided (optional backlog organization)
+  if (epics && epics.length > 0) {
+    for (const epic of epics) {
+      // Create the epic as a top-level component
+      const createdEpic = demoStore.createComponent({
+        name: epic.name,
+        description: epic.description,
+        type: 'EPIC',
+        priority: 5,
+        estimatedHours: 0,
+        projectId,
+      });
+
+      // Update child components to have this epic as their parent
+      for (const compName of epic.componentNames) {
+        const componentId = nameToId.get(compName);
+        if (componentId) {
+          demoStore.updateComponent(componentId, { parentId: createdEpic.id });
+        }
+      }
+
+      epicCount++;
+    }
+  }
+
   return {
     created,
     dependencies: dependencyCount,
     sprints: sprintCount,
+    epics: epicCount,
   };
 }
 
