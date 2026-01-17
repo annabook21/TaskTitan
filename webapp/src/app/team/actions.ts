@@ -120,7 +120,12 @@ export const updateTeam = authActionClient.schema(updateTeamSchema).action(async
 
 export const inviteMember = authActionClient.schema(inviteMemberSchema).action(async ({ parsedInput, ctx }) => {
   const { teamId, email, role } = parsedInput;
-  const { userId } = ctx;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'inviteMember', _input: { teamId, email, role } };
+  }
 
   // Verify inviter is admin or owner
   const membership = await prisma.membership.findUnique({

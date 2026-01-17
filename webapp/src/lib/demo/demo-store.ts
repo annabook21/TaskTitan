@@ -250,6 +250,39 @@ class DemoStore {
     return store.memberships.find((m) => m.userId === userId && m.teamId === teamId) || null;
   }
 
+  createMembership(input: {
+    teamId: string;
+    name: string;
+    role: 'ADMIN' | 'MEMBER' | 'VIEWER';
+  }): DemoMembership {
+    const store = this.getStore();
+
+    // In demo mode, create a new user with the given name
+    const timestamp = now();
+    const user = {
+      id: generateId('user'),
+      email: `${input.name.toLowerCase().replace(/\s+/g, '.')}@demo.local`,
+      name: input.name,
+      avatarUrl: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    store.users.push(user);
+
+    const membership: DemoMembership = {
+      id: generateId('membership'),
+      userId: user.id,
+      teamId: input.teamId,
+      role: input.role,
+      joinedAt: now(),
+    };
+
+    store.memberships.push(membership);
+    this.saveStore(store);
+
+    return membership;
+  }
+
   updateMembershipRole(
     userId: string,
     teamId: string,

@@ -32,6 +32,14 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
       return { team: demoStore.updateTeam(input.teamId as string, input) };
     case 'deleteTeam':
       return { success: demoStore.deleteTeam(input.teamId as string) };
+    case 'inviteMember':
+      return {
+        membership: demoStore.createMembership({
+          teamId: input.teamId as string,
+          name: (input.name as string) || (input.email as string).split('@')[0],
+          role: input.role as 'ADMIN' | 'MEMBER' | 'VIEWER',
+        }),
+      };
 
     // Project actions
     case 'createProject':

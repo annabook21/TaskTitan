@@ -21,6 +21,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import DeleteTeamButton from './DeleteTeamButton';
+import DemoInviteMemberForm from './DemoInviteMemberForm';
 
 const roleIcons = {
   OWNER: Crown,
@@ -66,6 +67,8 @@ export default function DemoTeamDetailPage() {
   const [team, setTeam] = useState<TeamData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const store = demoStore.getStore();
@@ -118,7 +121,7 @@ export default function DemoTeamDetailPage() {
         : null,
     });
     setLoading(false);
-  }, [teamId]);
+  }, [teamId, refreshKey]);
 
   const user = {
     id: DEMO_USER.id,
@@ -281,6 +284,14 @@ export default function DemoTeamDetailPage() {
                   <Users className="w-5 h-5 text-violet-400" />
                   Members
                 </h2>
+                {isOwnerOrAdmin && (
+                  <button
+                    onClick={() => setShowInviteModal(true)}
+                    className="text-sm text-cyan-400 hover:text-cyan-300 transition-colors"
+                  >
+                    + Add Member
+                  </button>
+                )}
               </div>
 
               <div className="component-card">
@@ -318,6 +329,15 @@ export default function DemoTeamDetailPage() {
           </div>
         </div>
       </main>
+
+      {/* Add Member Modal */}
+      {showInviteModal && (
+        <DemoInviteMemberForm
+          teamId={team.id}
+          onClose={() => setShowInviteModal(false)}
+          onSuccess={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
     </div>
   );
 }
