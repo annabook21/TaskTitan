@@ -3,13 +3,25 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
-import type { DemoComponent } from '@/lib/demo/types';
+import type { DemoComponent, DemoSprint, DemoDependency } from '@/lib/demo/types';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import { ArrowLeft, Layers, Clock, ChevronRight } from 'lucide-react';
+import {
+  ArrowLeft,
+  Layers,
+  Clock,
+  ChevronRight,
+  GitBranch,
+  Zap,
+  Plus,
+  PlayCircle,
+  PauseCircle,
+} from 'lucide-react';
 import SmartComponentCreator from './components/SmartComponentCreator';
 import AIGeneratePanel from './components/AIGeneratePanel';
 import DeleteProjectButton from './DeleteProjectButton';
+import SprintTimeline from './components/SprintTimeline';
+import DependencyGraph from './components/DependencyGraph';
 import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 
 const statusColors: Record<string, string> = {
@@ -35,6 +47,8 @@ interface ProjectData {
   teamName: string;
   teamId: string;
   components: DemoComponent[];
+  sprints: DemoSprint[];
+  dependencies: DemoDependency[];
   updatedAt: string;
   cycleEnabled: boolean;
   cycleName: string;
@@ -64,6 +78,15 @@ export default function DemoProjectDetailPage() {
     const components = store.components.filter((c) => c.projectId === projectId);
     const workflowConfig = store.workflowConfigs.find((w) => w.teamId === projectData.teamId);
 
+    // Load sprints for this team
+    const sprints = store.sprints.filter((s) => s.teamId === projectData.teamId);
+
+    // Load dependencies for components in this project
+    const componentIds = new Set(components.map((c) => c.id));
+    const dependencies = store.dependencies.filter(
+      (d) => componentIds.has(d.dependentComponentId) || componentIds.has(d.requiredComponentId)
+    );
+
     setProject({
       id: projectData.id,
       name: projectData.name,
@@ -71,6 +94,8 @@ export default function DemoProjectDetailPage() {
       teamName: team?.name || 'Unknown Team',
       teamId: projectData.teamId,
       components,
+      sprints,
+      dependencies,
       updatedAt: projectData.updatedAt,
       cycleEnabled: workflowConfig?.cycleEnabled ?? true,
       cycleName: workflowConfig?.cycleName || 'Sprint',
@@ -205,26 +230,192 @@ export default function DemoProjectDetailPage() {
             ))}
           </div>
 
-          {/* Components List */}
-          <div className="mb-8">
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <Layers className="w-5 h-5 text-cyan-400" />
-              Components
-            </h2>
+          {/* Sprint Timeline - only show if cycles are enabled and sprints exist */}
+          {project.cycleEnabled && project.sprints.length > 0 && (
+            <SprintTimeline
+              sprints={project.sprints.map((s) => ({
+                id: s.id,
+                name: s.name,
+                goal: s.goal,
+                startDate: s.startDate ? new Date(s.startDate) : new Date(),
+                endDate: s.endDate ? new Date(s.endDate) : new Date(),
+                status: s.status,
+                capacity: s.capacity,
+              }))}
+              components={project.components.map((c) => ({
+                id: c.id,
+                status: c.status,
+                sprintId: c.sprintId,
+                estimatedHours: c.estimatedHours,
+              }))}
+              teamId={project.teamId}
+              cycleName={project.cycleName}
+            />
+          )}
 
-            {project.components.length === 0 ? (
-              <div className="component-card text-center py-12">
-                <Layers className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-300 mb-2">No components yet</h3>
-                <p className="text-slate-500 mb-6">Start by adding your first component or use AI to generate them</p>
+          {/* Main Content Grid */}
+          <div className="grid lg:grid-cols-4 gap-8">
+            {/* Main content area */}
+            <div className="lg:col-span-3 space-y-8">
+              {/* Dependency Graph */}
+              {project.components.length > 1 && project.dependencies.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <GitBranch className="w-5 h-5 text-cyan-400" />
+                    Dependency Graph
+                  </h2>
+                  <DependencyGraph
+                    components={project.components.map((c) => {
+                      // Build dependency relationships for this component
+                      const dependsOn = project.dependencies
+                        .filter((d) => d.dependentComponentId === c.id)
+                        .map((d) => {
+                          const reqComp = project.components.find((comp) => comp.id === d.requiredComponentId);
+                          return {
+                            requiredComponent: {
+                              id: d.requiredComponentId,
+                              name: reqComp?.name || 'Unknown',
+                            },
+                          };
+                        });
+
+                      const dependedOnBy = project.dependencies
+                        .filter((d) => d.requiredComponentId === c.id)
+                        .map((d) => {
+                          const depComp = project.components.find((comp) => comp.id === d.dependentComponentId);
+                          return {
+                            dependentComponent: {
+                              id: d.dependentComponentId,
+                              name: depComp?.name || 'Unknown',
+                            },
+                          };
+                        });
+
+                      return {
+                        id: c.id,
+                        name: c.name,
+                        status: c.status,
+                        dependsOn,
+                        dependedOnBy,
+                      };
+                    })}
+                  />
+                </div>
+              )}
+
+              {/* Components List */}
+              <div>
+                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-cyan-400" />
+                  Components
+                </h2>
+
+                {project.components.length === 0 ? (
+                  <div className="component-card text-center py-12">
+                    <Layers className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-slate-300 mb-2">No components yet</h3>
+                    <p className="text-slate-500 mb-6">
+                      Start by adding your first component or use AI to generate them
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {topLevelComponents.map((component) => (
+                      <ComponentItem key={component.id} component={component} getChildren={getChildren} depth={0} />
+                    ))}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="space-y-3">
-                {topLevelComponents.map((component) => (
-                  <ComponentItem key={component.id} component={component} getChildren={getChildren} depth={0} />
-                ))}
+            </div>
+
+            {/* Sidebar */}
+            <div className="space-y-6">
+              {/* Sprints sidebar - only show when cycles are enabled */}
+              {project.cycleEnabled && (
+                <div className="component-card">
+                  <h3 className="font-medium mb-4 flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-400" />
+                    {project.cycleName}s
+                  </h3>
+                  {project.sprints.length === 0 ? (
+                    <div className="text-center py-4">
+                      <p className="text-sm text-slate-500 mb-3">No {project.cycleName.toLowerCase()}s yet</p>
+                      <p className="text-xs text-slate-600">
+                        Use AI Generate to create {project.cycleName.toLowerCase()}s with work items
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {project.sprints.map((sprint) => {
+                        const sprintComponents = project.components.filter((c) => c.sprintId === sprint.id);
+                        const completed = sprintComponents.filter((c) => c.status === 'COMPLETED').length;
+                        const total = sprintComponents.length;
+                        const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+                        return (
+                          <div
+                            key={sprint.id}
+                            className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-slate-200 flex items-center gap-2">
+                                {sprint.status === 'ACTIVE' ? (
+                                  <PlayCircle className="w-4 h-4 text-green-400" />
+                                ) : (
+                                  <PauseCircle className="w-4 h-4 text-slate-400" />
+                                )}
+                                {sprint.name}
+                              </span>
+                              {sprint.status === 'ACTIVE' && (
+                                <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded">
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <span>{total} items</span>
+                              <span>•</span>
+                              <span>{progress}% done</span>
+                            </div>
+                            <div className="h-1.5 bg-slate-700 rounded-full mt-2 overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-amber-500 to-green-500"
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Project info */}
+              <div className="component-card">
+                <h3 className="font-medium mb-4 text-slate-300">Project Info</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Team</span>
+                    <span className="text-slate-300">{project.teamName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Workflow</span>
+                    <span className="text-slate-300">{project.cycleEnabled ? 'Scrum' : 'Kanban'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Components</span>
+                    <span className="text-slate-300">{project.components.length}</span>
+                  </div>
+                  {project.dependencies.length > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Dependencies</span>
+                      <span className="text-slate-300">{project.dependencies.length}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </main>
