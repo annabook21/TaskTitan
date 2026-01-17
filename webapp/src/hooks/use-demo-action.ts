@@ -289,6 +289,7 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
           teamId: input.teamId as string,
           name: (input.name as string) || (input.email as string).split('@')[0],
           role: input.role as 'ADMIN' | 'MEMBER' | 'VIEWER',
+          title: input.title as string | undefined,
         }),
       };
 

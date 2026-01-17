@@ -25,6 +25,10 @@ export interface DemoMembership {
   teamId: string;
   role: Role;
   joinedAt: string;
+  // Capacity planning fields (industry standard formula)
+  title: string | null;   // e.g., "Frontend Developer", "QA Engineer"
+  hoursPerDay: number;    // Default: 6 hours (accounts for meetings)
+  availability: number;   // Percentage 0-100
 }
 
 export interface DemoProject {

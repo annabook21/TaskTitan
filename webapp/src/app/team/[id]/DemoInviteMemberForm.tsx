@@ -12,6 +12,7 @@ interface Props {
 
 export default function DemoInviteMemberForm({ teamId, onClose, onSuccess }: Props) {
   const [name, setName] = useState('');
+  const [title, setTitle] = useState('');
   const [role, setRole] = useState<'ADMIN' | 'MEMBER' | 'VIEWER'>('MEMBER');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,7 @@ export default function DemoInviteMemberForm({ teamId, onClose, onSuccess }: Pro
         teamId,
         name: name.trim(),
         role,
+        title: title.trim() || undefined,
       });
       onSuccess();
       onClose();
@@ -72,6 +74,21 @@ export default function DemoInviteMemberForm({ teamId, onClose, onSuccess }: Pro
               required
             />
             <p className="text-xs text-slate-500 mt-2">Enter the team member&apos;s name</p>
+          </div>
+
+          <div>
+            <label htmlFor="title" className="block text-sm font-medium text-slate-300 mb-2">
+              Title <span className="text-slate-500 font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Frontend Developer"
+              className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all text-slate-100 placeholder-slate-500"
+            />
+            <p className="text-xs text-slate-500 mt-2">Used for sprint capacity planning</p>
           </div>
 
           <div>

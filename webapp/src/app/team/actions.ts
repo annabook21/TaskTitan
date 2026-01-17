@@ -22,6 +22,7 @@ const inviteMemberSchema = z.object({
   teamId: z.string().min(1),
   email: z.string().email(),
   role: z.enum(['ADMIN', 'MEMBER', 'VIEWER']).default('MEMBER'),
+  title: z.string().max(100).optional(),
 });
 
 const updateMemberRoleSchema = z.object({
@@ -119,12 +120,12 @@ export const updateTeam = authActionClient.schema(updateTeamSchema).action(async
 });
 
 export const inviteMember = authActionClient.schema(inviteMemberSchema).action(async ({ parsedInput, ctx }) => {
-  const { teamId, email, role } = parsedInput;
+  const { teamId, email, role, title } = parsedInput;
   const { userId, isDemo } = ctx;
 
   // Demo mode - return marker for client-side handling
   if (isDemo) {
-    return { _demo: true, _action: 'inviteMember', _input: { teamId, email, role } };
+    return { _demo: true, _action: 'inviteMember', _input: { teamId, email, role, title } };
   }
 
   // Verify inviter is admin or owner
@@ -159,6 +160,7 @@ export const inviteMember = authActionClient.schema(inviteMemberSchema).action(a
       userId: user.id,
       teamId,
       role,
+      title: title || null,
     },
   });
 

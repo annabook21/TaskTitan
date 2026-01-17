@@ -15,7 +15,7 @@ import { MODEL_ID } from '../config';
 import { extractJsonFromResponse } from '../utils/response-parsing';
 import { buildSystemPrompt, buildComponentGenerationPrompt } from '../prompts/component-generation';
 import { logger } from '@/lib/logger';
-import type { AIGenerationResult } from '../types';
+import type { AIGenerationResult, TeamCapacityInfo } from '../types';
 import type { TeamWorkflowConfig } from '@prisma/client';
 
 /**
@@ -26,6 +26,7 @@ import type { TeamWorkflowConfig } from '@prisma/client';
  * @param existingComponents - Optional array of existing component names to avoid duplicates
  * @param generateEpics - For Scrum: whether to create optional Epic groupings (default: false)
  * @param workflowConfig - Optional team workflow configuration for workflow-aware generation
+ * @param teamCapacity - Optional team capacity info for realistic sprint sizing
  */
 export async function generateComponents(
   projectName: string,
@@ -33,6 +34,7 @@ export async function generateComponents(
   existingComponents: string[] = [],
   generateEpics: boolean = false,
   workflowConfig?: TeamWorkflowConfig | null,
+  teamCapacity?: TeamCapacityInfo,
 ): Promise<AIGenerationResult> {
   const client = getBedrockClient();
 
@@ -44,6 +46,7 @@ export async function generateComponents(
     existingComponents,
     generateEpics,
     workflowConfig,
+    teamCapacity,
   );
 
   try {

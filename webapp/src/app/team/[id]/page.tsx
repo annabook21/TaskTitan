@@ -214,7 +214,9 @@ export default async function TeamDetailPage({ params }: Props) {
 
               <div className="component-card">
                 <div className="space-y-4">
-                  {team.Membership.map(({ User: member, role }) => {
+                  {team.Membership.map((membership) => {
+                    const member = membership.User;
+                    const role = membership.role;
                     const RoleIcon = roleIcons[role];
                     return (
                       <div key={member.id} className="flex items-center gap-3">
@@ -233,6 +235,9 @@ export default async function TeamDetailPage({ params }: Props) {
                               {role.toLowerCase()}
                             </span>
                           </div>
+                          {membership.title && (
+                            <div className="text-xs text-slate-400 mt-0.5">{membership.title}</div>
+                          )}
                           <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
                             <Mail className="w-3 h-3" />
                             <span className="truncate">{member.email}</span>
