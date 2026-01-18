@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAction } from 'next-safe-action/hooks';
-import { generateAIComponents, applyAIComponents } from '@/app/projects/actions';
+import { generateAIComponents, applyAIComponents, refineBulkAIPlan } from '@/app/projects/actions';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 import { isDemoMode, demoStore } from '@/lib/demo';
 import {
@@ -18,6 +18,10 @@ import {
   Zap,
   AlertTriangle,
   TrendingUp,
+  MessageSquare,
+  ArrowLeft,
+  RotateCcw,
+  History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -61,6 +65,7 @@ export default function AIGeneratePanel({
   cycleName = 'Sprint',
 }: Props) {
   const [isOpen, setIsOpen] = useState(autoOpen);
+  const [step, setStep] = useState<'generate' | 'preview' | 'chat' | 'confirm'>('generate');
   const [generatedComponents, setGeneratedComponents] = useState<GeneratedComponent[]>([]);
   const [generatedSprints, setGeneratedSprints] = useState<GeneratedSprint[]>([]);
   const [generatedEpics, setGeneratedEpics] = useState<GeneratedEpic[]>([]);
@@ -70,6 +75,25 @@ export default function AIGeneratePanel({
   // For Scrum: epics are optional backlog organization (sprints are always generated)
   const [generateEpics, setGenerateEpics] = useState(false);
   const [hasAttemptedAutoGeneration, setHasAttemptedAutoGeneration] = useState(false);
+  
+  // Chat refinement state
+  const [chatInput, setChatInput] = useState('');
+  const [chatSuggestions, setChatSuggestions] = useState<string[]>([]);
+  const [refinementExplanation, setRefinementExplanation] = useState('');
+  const [changedItems, setChangedItems] = useState<Array<{ type: string; name: string; change: string }>>([]);
+  
+  // History/undo state
+  const [history, setHistory] = useState<Array<{
+    components: GeneratedComponent[];
+    sprints: GeneratedSprint[];
+    epics: GeneratedEpic[];
+    summary: string;
+  }>>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  
+  // Progress state
+  const [generationProgress, setGenerationProgress] = useState<string>('');
+  
   const { handleResult } = useDemoActionHandler();
 
   // Terminology
@@ -83,6 +107,35 @@ export default function AIGeneratePanel({
       isMountedRef.current = false;
     };
   }, []);
+
+  // Helper to generate chat suggestions based on current plan
+  const generateChatSuggestions = (components: GeneratedComponent[], sprints: GeneratedSprint[]) => {
+    const suggestions: string[] = [];
+    
+    if (sprints.length > 1) {
+      suggestions.push('Move items between sprints');
+    }
+    
+    if (sprints.length > 0) {
+      const firstSprintHours = components
+        .filter((c) => sprints[0].componentNames.includes(c.name))
+        .reduce((sum, c) => sum + c.estimatedHours, 0);
+      if (sprints[0].capacity && firstSprintHours > sprints[0].capacity * 0.85) {
+        suggestions.push('Reduce Sprint 1 scope');
+      }
+    }
+    
+    const largeComponents = components.filter((c) => c.estimatedHours > 20);
+    if (largeComponents.length > 0) {
+      suggestions.push(`Break down ${largeComponents[0].name} into smaller tasks`);
+    }
+    
+    if (suggestions.length < 3) {
+      suggestions.push('Adjust component priorities');
+    }
+    
+    return suggestions.slice(0, 3);
+  };
 
   // Helper to detect cross-sprint dependencies
   const getCrossSprintDependencies = (sprint: GeneratedSprint, sprintIndex: number) => {
@@ -131,6 +184,17 @@ export default function AIGeneratePanel({
 
       if ('components' in data && data.components) {
         const result = data as unknown as GenerateResult;
+        
+        // Save to history
+        const newHistoryEntry = {
+          components: result.components,
+          sprints: result.sprints || [],
+          epics: result.epics || [],
+          summary: result.summary,
+        };
+        setHistory([newHistoryEntry]);
+        setHistoryIndex(0);
+        
         setGeneratedComponents(result.components);
         setGeneratedSprints(result.sprints || []);
         setGeneratedEpics(result.epics || []);
@@ -138,11 +202,51 @@ export default function AIGeneratePanel({
         setEnhancedDescription(result.enhancedDescription || '');
         // Select all by default
         setSelectedComponents(new Set(result.components.map((c) => c.name)));
+        setStep('preview');
+        setGenerationProgress('');
+        
+        // Generate initial chat suggestions
+        const suggestions = generateChatSuggestions(result.components, result.sprints || []);
+        setChatSuggestions(suggestions);
       }
     },
     onError: ({ error }) => {
       if (!isMountedRef.current) return;
+      setGenerationProgress('');
       toast.error(error.serverError || 'Failed to generate components');
+    },
+  });
+
+  const { execute: executeRefine, isExecuting: isRefining } = useAction(refineBulkAIPlan, {
+    onSuccess: ({ data }) => {
+      if (!isMountedRef.current || !data) return;
+
+      if ('components' in data) {
+        // Save current state to history before updating
+        const newHistoryEntry = {
+          components: data.components,
+          sprints: data.sprints || generatedSprints,
+          epics: data.epics || generatedEpics,
+          summary,
+        };
+        const newHistory = [...history.slice(0, historyIndex + 1), newHistoryEntry];
+        setHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
+        
+        setGeneratedComponents(data.components);
+        if (data.sprints) setGeneratedSprints(data.sprints);
+        if (data.epics) setGeneratedEpics(data.epics);
+        setRefinementExplanation(data.explanation || '');
+        setChangedItems(data.changedItems || []);
+        setChatSuggestions(data.suggestedFollowUps || []);
+        setSelectedComponents(new Set(data.components.map((c) => c.name)));
+        setChatInput('');
+        setStep('preview');
+      }
+    },
+    onError: ({ error }) => {
+      if (!isMountedRef.current) return;
+      toast.error(error.serverError || 'Failed to refine plan');
     },
   });
 
@@ -189,6 +293,13 @@ export default function AIGeneratePanel({
     setGeneratedComponents([]);
     setGeneratedSprints([]);
     setGeneratedEpics([]);
+    setStep('generate');
+    setGenerationProgress('Analyzing project description...');
+    
+    // Simulate progress steps
+    setTimeout(() => setGenerationProgress('Identifying key features...'), 5000);
+    setTimeout(() => setGenerationProgress('Creating work breakdown...'), 15000);
+    setTimeout(() => setGenerationProgress('Organizing into sprints...'), 25000);
 
     // In demo mode, pass project data from localStorage since server can't access it
     if (isDemoMode()) {
@@ -248,12 +359,17 @@ export default function AIGeneratePanel({
     }
   };
 
-  const handleApply = () => {
+  const handleShowConfirmation = () => {
     const toApply = generatedComponents.filter((c) => selectedComponents.has(c.name));
     if (toApply.length === 0) {
       toast.error('Please select at least one work item');
       return;
     }
+    setStep('confirm');
+  };
+
+  const handleApply = () => {
+    const toApply = generatedComponents.filter((c) => selectedComponents.has(c.name));
     executeApply({
       projectId,
       components: toApply,
@@ -261,6 +377,75 @@ export default function AIGeneratePanel({
       sprints: generatedSprints.length > 0 ? generatedSprints : undefined,
       epics: generatedEpics.length > 0 ? generatedEpics : undefined,
     });
+  };
+
+  const handleRefinePlan = (request?: string) => {
+    const refinementText = request || chatInput.trim();
+    if (!refinementText) {
+      toast.error('Please enter a refinement request');
+      return;
+    }
+
+    const workflowType = cycleEnabled ? 'SCRUM' : 'KANBAN';
+    
+    if (isDemoMode()) {
+      const store = demoStore.getStore();
+      const project = store.projects.find((p) => p.id === projectId);
+      
+      executeRefine({
+        projectId,
+        currentPlan: {
+          components: generatedComponents,
+          sprints: generatedSprints.length > 0 ? generatedSprints : undefined,
+          epics: generatedEpics.length > 0 ? generatedEpics : undefined,
+        },
+        refinementRequest: refinementText,
+        demoProjectData: project ? {
+          name: project.name,
+          description: project.description || '',
+          workflowType,
+          cycleName,
+        } : undefined,
+      });
+    } else {
+      executeRefine({
+        projectId,
+        currentPlan: {
+          components: generatedComponents,
+          sprints: generatedSprints.length > 0 ? generatedSprints : undefined,
+          epics: generatedEpics.length > 0 ? generatedEpics : undefined,
+        },
+        refinementRequest: refinementText,
+      });
+    }
+  };
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const prevIndex = historyIndex - 1;
+      const prevState = history[prevIndex];
+      setHistoryIndex(prevIndex);
+      setGeneratedComponents(prevState.components);
+      setGeneratedSprints(prevState.sprints);
+      setGeneratedEpics(prevState.epics);
+      setSummary(prevState.summary);
+      setSelectedComponents(new Set(prevState.components.map((c) => c.name)));
+      toast.success('Reverted to previous version');
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const nextIndex = historyIndex + 1;
+      const nextState = history[nextIndex];
+      setHistoryIndex(nextIndex);
+      setGeneratedComponents(nextState.components);
+      setGeneratedSprints(nextState.sprints);
+      setGeneratedEpics(nextState.epics);
+      setSummary(nextState.summary);
+      setSelectedComponents(new Set(nextState.components.map((c) => c.name)));
+      toast.success('Restored next version');
+    }
   };
 
   const toggleComponent = (name: string) => {
@@ -305,38 +490,90 @@ export default function AIGeneratePanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-      <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden bg-slate-900 border border-slate-800 rounded-xl shadow-2xl animate-fade-in flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-sm">
+      <div className="w-full max-w-full sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden bg-slate-900 border border-slate-800 rounded-xl shadow-2xl animate-fade-in flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-800 flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-cyan-400" />
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-800 flex-shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+            {step === 'chat' && (
+              <button
+                onClick={() => setStep('preview')}
+                className="p-1 text-slate-400 hover:text-slate-200 rounded flex-shrink-0"
+                title="Back to preview"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
             </div>
-            <div>
-              <h2 className="text-lg font-semibold">
-                {cycleEnabled ? `AI ${cycleName} Planner` : 'AI Work Item Generator'}
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-semibold truncate">
+                {step === 'generate' && (cycleEnabled ? `AI ${cycleName} Planner` : 'AI Work Item Generator')}
+                {step === 'preview' && 'Review Generated Plan'}
+                {step === 'chat' && 'Refine Plan'}
+                {step === 'confirm' && 'Confirm Changes'}
               </h2>
-              <p className="text-sm text-slate-400">
-                {cycleEnabled
-                  ? `Generate ${cycleNameLower}s with work items from your project description`
-                  : 'Generate work items from your project description'}
+              <p className="text-xs sm:text-sm text-slate-400 truncate">
+                {step === 'generate' && (cycleEnabled ? `Generate ${cycleNameLower}s with work items` : 'Generate work items from description')}
+                {step === 'preview' && 'Select items and customize before applying'}
+                {step === 'chat' && 'Use AI to adjust the plan'}
+                {step === 'confirm' && 'Review before creating items'}
               </p>
             </div>
           </div>
-          <button onClick={() => setIsOpen(false)} className="p-1 text-slate-400 hover:text-slate-200 rounded">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+            {(step === 'preview' || step === 'chat') && generatedComponents.length > 0 && (
+              <>
+                <button
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                  className="p-2 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800 transition-colors"
+                  title="Regenerate from scratch"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+                {history.length > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={handleUndo}
+                      disabled={historyIndex <= 0}
+                      className="p-2 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800 transition-colors disabled:opacity-30"
+                      title="Undo"
+                    >
+                      <History className="w-4 h-4 rotate-180" />
+                    </button>
+                    <button
+                      onClick={handleRedo}
+                      disabled={historyIndex >= history.length - 1}
+                      className="p-2 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800 transition-colors disabled:opacity-30"
+                      title="Redo"
+                    >
+                      <History className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            <button onClick={() => setIsOpen(false)} className="p-1 text-slate-400 hover:text-slate-200 rounded">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-auto p-4">
-          {generatedComponents.length === 0 ? (
-            <div className="text-center py-12">
+        <div className="flex-1 overflow-auto p-3 sm:p-4">
+          {step === 'generate' && generatedComponents.length === 0 ? (
+            <div className="text-center py-8 sm:py-12">
               {isGenerating ? (
                 <div className="space-y-4">
                   <Loader2 className="w-12 h-12 animate-spin text-cyan-400 mx-auto" />
-                  <p className="text-slate-300">Analyzing your project and generating components...</p>
+                  <p className="text-slate-300">{generationProgress || 'Analyzing your project and generating components...'}</p>
+                  <div className="max-w-xs mx-auto">
+                    <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-cyan-500 to-violet-500 animate-pulse" style={{ width: '60%' }} />
+                    </div>
+                  </div>
                   <p className="text-sm text-slate-500">This may take 30-90 seconds</p>
                 </div>
               ) : (
@@ -384,13 +621,33 @@ export default function AIGeneratePanel({
                 </div>
               )}
             </div>
-          ) : (
-            <div className="space-y-6">
+          ) : step === 'preview' ? (
+            <div className="space-y-4 sm:space-y-6">
+              {/* Refinement Explanation (if just refined) */}
+              {refinementExplanation && (
+                <div className="p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-violet-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <h4 className="font-medium text-violet-300 mb-1 text-sm">AI Applied Changes</h4>
+                      <p className="text-xs sm:text-sm text-violet-200">{refinementExplanation}</p>
+                      {changedItems.length > 0 && (
+                        <ul className="mt-2 space-y-1 text-xs text-violet-300/80">
+                          {changedItems.map((item, idx) => (
+                            <li key={idx}>• {item.name}: {item.change}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               {/* Summary */}
               {summary && (
-                <div className="p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
-                  <h4 className="font-medium text-cyan-300 mb-2">Architecture Summary</h4>
-                  <p className="text-sm text-slate-300">{summary}</p>
+                <div className="p-3 sm:p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
+                  <h4 className="font-medium text-cyan-300 mb-2 text-sm">Architecture Summary</h4>
+                  <p className="text-xs sm:text-sm text-slate-300">{summary}</p>
                 </div>
               )}
 
@@ -606,29 +863,179 @@ export default function AIGeneratePanel({
                 )}
               </div>
             </div>
-          )}
+          ) : step === 'chat' ? (
+            <div className="space-y-4">
+              {/* Current Plan Summary */}
+              <div className="p-3 bg-slate-800/50 rounded-lg text-sm">
+                <p className="text-slate-300">
+                  Current plan: <span className="font-medium text-cyan-400">{selectedComponents.size} components</span>
+                  {generatedSprints.length > 0 && (
+                    <span> across <span className="font-medium text-amber-400">{generatedSprints.length} {cycleNameLower}s</span></span>
+                  )}
+                </p>
+              </div>
+
+              {/* Suggested Prompts */}
+              {chatSuggestions.length > 0 && (
+                <div>
+                  <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">
+                    Quick Actions
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {chatSuggestions.map((suggestion, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleRefinePlan(suggestion)}
+                        disabled={isRefining}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-full text-xs sm:text-sm transition-colors"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom Refinement Input */}
+              <div>
+                <label className="text-sm font-medium text-slate-300 mb-2 block">
+                  Describe your changes
+                </label>
+                <textarea
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="e.g., 'Move authentication stories to Sprint 1' or 'Reduce Sprint 2 scope by 30%' or 'Split User Profile into 3 tasks'"
+                  className="input min-h-[100px] resize-none text-sm"
+                  rows={4}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.metaKey) {
+                      handleRefinePlan();
+                    }
+                  }}
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Press Cmd+Enter to apply changes
+                </p>
+              </div>
+
+              {/* Info Box */}
+              <div className="p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg text-xs text-slate-400">
+                <p className="mb-2 text-slate-300 font-medium">Examples:</p>
+                <ul className="space-y-1">
+                  <li>• Move [component name] to Sprint 2</li>
+                  <li>• Break down [component name] into tasks</li>
+                  <li>• Reduce total scope by 20%</li>
+                  <li>• Increase priority of security items</li>
+                  <li>• Balance sprint capacity evenly</li>
+                </ul>
+              </div>
+            </div>
+          ) : step === 'confirm' ? (
+            <div className="space-y-4 py-4">
+              <div className="text-center">
+                <div className="w-16 h-16 rounded-full bg-amber-500/20 flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle className="w-8 h-8 text-amber-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-200 mb-2">Confirm Plan</h3>
+                <p className="text-sm text-slate-400 max-w-md mx-auto">
+                  This will create the following items in your project. This action cannot be undone.
+                </p>
+              </div>
+
+              {/* Summary of what will be created */}
+              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-400">Work Items</span>
+                  <span className="font-medium text-cyan-400">{selectedComponents.size} components</span>
+                </div>
+                {generatedSprints.length > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-400">{cycleNamePlural}</span>
+                    <span className="font-medium text-amber-400">{generatedSprints.length} {cycleNameLower}s</span>
+                  </div>
+                )}
+                {generatedEpics.length > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-400">Epic Groupings</span>
+                    <span className="font-medium text-violet-400">{generatedEpics.length} epics</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-sm pt-2 border-t border-slate-700">
+                  <span className="text-slate-400">Total Estimated Hours</span>
+                  <span className="font-medium text-slate-200">
+                    {generatedComponents
+                      .filter((c) => selectedComponents.has(c.name))
+                      .reduce((acc, c) => acc + c.estimatedHours, 0)}h
+                  </span>
+                </div>
+              </div>
+
+              {enhancedDescription && (
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 text-xs">
+                  <p className="text-slate-400 mb-1">Project description will also be updated with AI enhancements.</p>
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
 
         {/* Footer */}
-        {generatedComponents.length > 0 && (
-          <div className="flex items-center justify-between p-4 border-t border-slate-800 flex-shrink-0">
-            <button onClick={handleGenerate} disabled={isGenerating} className="btn-ghost">
-              {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Regenerate
+        {step === 'preview' && generatedComponents.length > 0 && (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 p-3 sm:p-4 border-t border-slate-800 flex-shrink-0">
+            <button onClick={() => setIsOpen(false)} className="btn-secondary order-2 sm:order-1">
+              Cancel
             </button>
-            <div className="flex items-center gap-3">
-              <button onClick={() => setIsOpen(false)} className="btn-secondary">
-                Cancel
+            <div className="flex items-center gap-2 sm:gap-3 order-1 sm:order-2">
+              <button 
+                onClick={() => setStep('chat')} 
+                className="btn-secondary flex-1 sm:flex-initial"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span className="hidden sm:inline">Refine</span>
               </button>
               <button
-                onClick={handleApply}
-                disabled={isApplying || selectedComponents.size === 0}
-                className="btn-primary"
+                onClick={handleShowConfirmation}
+                disabled={selectedComponents.size === 0}
+                className="btn-primary flex-1 sm:flex-initial"
               >
-                {isApplying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                Apply {selectedComponents.size} Work Items
+                <Check className="w-4 h-4" />
+                Apply {selectedComponents.size} Items
               </button>
             </div>
+          </div>
+        )}
+
+        {step === 'chat' && (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 p-3 sm:p-4 border-t border-slate-800 flex-shrink-0">
+            <button onClick={() => setStep('preview')} className="btn-secondary">
+              <ArrowLeft className="w-4 h-4" />
+              Back to Preview
+            </button>
+            <button
+              onClick={() => handleRefinePlan()}
+              disabled={isRefining || !chatInput.trim()}
+              className="btn-primary"
+            >
+              {isRefining ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Apply Changes
+            </button>
+          </div>
+        )}
+
+        {step === 'confirm' && (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 p-3 sm:p-4 border-t border-slate-800 flex-shrink-0">
+            <button onClick={() => setStep('preview')} className="btn-secondary order-2 sm:order-1">
+              <ArrowLeft className="w-4 h-4" />
+              Back
+            </button>
+            <button
+              onClick={handleApply}
+              disabled={isApplying}
+              className="btn-primary order-1 sm:order-2"
+            >
+              {isApplying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Confirm & Create
+            </button>
           </div>
         )}
       </div>

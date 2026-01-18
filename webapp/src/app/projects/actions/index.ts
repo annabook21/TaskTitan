@@ -19,7 +19,7 @@ export { addDependency, removeDependency } from './dependencies';
 export { assignComponent, unassignComponent } from './assignments';
 
 // AI component generation
-export { generateAIComponents, applyAIComponents, checkAIStatus } from './ai-generation';
+export { generateAIComponents, applyAIComponents, checkAIStatus, refineBulkAIPlan } from './ai-generation';
 
 // Smart component creation (natural language + refinement)
 export { generateSmartComponent, refineSmartComponent, createFromPreview } from './smart-component';

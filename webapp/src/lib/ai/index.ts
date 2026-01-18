@@ -53,3 +53,5 @@ export { suggestComponentBreakdown } from './generators/breakdown-generator';
 export { createComponentFromNaturalLanguage } from './generators/natural-language-generator';
 export { applyComponentTemplate, COMPONENT_TEMPLATES } from './generators/template-generator';
 export { refineComponentWithChat, generateInitialSuggestions } from './generators/chat-refinement-generator';
+export { refineBulkPlan, generateBulkRefinementSuggestions } from './generators/bulk-plan-refinement';
+export type { BulkPlanRefinementInput, BulkPlanRefinementResult } from './generators/bulk-plan-refinement';

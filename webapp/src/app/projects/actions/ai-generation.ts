@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
-import { generateComponents, isAIConfigured, type TeamCapacityInfo } from '@/lib/ai';
+import { generateComponents, isAIConfigured, type TeamCapacityInfo, refineBulkPlan } from '@/lib/ai';
 
 // Schemas
 const generateComponentsSchema = z.object({
@@ -483,3 +483,121 @@ export const applyAIComponents = authActionClient
 export const checkAIStatus = authActionClient.schema(z.object({})).action(async () => {
   return { configured: isAIConfigured() };
 });
+
+// Schema for bulk plan refinement
+const refineBulkPlanSchema = z.object({
+  projectId: z.string().min(1),
+  currentPlan: z.object({
+    components: z.array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        type: z.enum(['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG']),
+        estimatedHours: z.number(),
+        priority: z.number(),
+        suggestedDependencies: z.array(z.string()),
+        parentName: z.string().optional(),
+      }),
+    ),
+    sprints: z
+      .array(
+        z.object({
+          name: z.string(),
+          goal: z.string(),
+          durationWeeks: z.number(),
+          componentNames: z.array(z.string()),
+          capacity: z.number().optional(),
+        }),
+      )
+      .optional(),
+    epics: z
+      .array(
+        z.object({
+          name: z.string(),
+          description: z.string(),
+          componentNames: z.array(z.string()),
+        }),
+      )
+      .optional(),
+  }),
+  refinementRequest: z.string().min(1, 'Please enter a refinement request').max(500),
+  // Demo mode data
+  demoProjectData: z
+    .object({
+      name: z.string(),
+      description: z.string(),
+      workflowType: z.enum(['SCRUM', 'KANBAN', 'CUSTOM']),
+      cycleName: z.string().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * Refine a bulk AI-generated plan using conversational chat
+ * Uses real Bedrock AI for both demo and production modes
+ */
+export const refineBulkAIPlan = authActionClient
+  .schema(refineBulkPlanSchema)
+  .action(async ({ parsedInput, ctx }) => {
+    const { projectId, currentPlan, refinementRequest, demoProjectData } = parsedInput;
+    const { userId, isDemo } = ctx;
+
+    // Check if AI is configured (required for both demo and production)
+    if (!isAIConfigured()) {
+      throw new MyCustomError('AI features require Amazon Bedrock access.');
+    }
+
+    let projectName: string;
+    let projectDescription: string;
+    let workflowType: 'SCRUM' | 'KANBAN' | 'CUSTOM';
+    let cycleName: string | undefined;
+
+    if (isDemo) {
+      if (!demoProjectData) {
+        throw new MyCustomError('Demo project data not provided');
+      }
+      projectName = demoProjectData.name;
+      projectDescription = demoProjectData.description;
+      workflowType = demoProjectData.workflowType;
+      cycleName = demoProjectData.cycleName;
+    } else {
+      // Production mode - get project from database
+      const project = await prisma.project.findFirst({
+        where: {
+          id: projectId,
+          Team: { Membership: { some: { userId } } },
+        },
+        include: {
+          Team: {
+            include: {
+              WorkflowConfig: true,
+            },
+          },
+        },
+      });
+
+      if (!project) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+
+      projectName = project.name;
+      projectDescription = project.description || '';
+      const config = project.Team.WorkflowConfig;
+      workflowType = config?.workflowTemplate || 'CUSTOM';
+      cycleName = config?.cycleName || undefined;
+    }
+
+    // Refine the plan using Bedrock AI
+    const result = await refineBulkPlan({
+      currentPlan,
+      refinementRequest,
+      projectContext: {
+        projectName,
+        projectDescription,
+        workflowType,
+        cycleName,
+      },
+    });
+
+    return result;
+  });
