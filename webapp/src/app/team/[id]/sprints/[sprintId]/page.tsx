@@ -175,7 +175,7 @@ export default async function SprintDetailPage({ params }: Props) {
 
             {canManage && (
               <div className="flex items-center gap-3">
-                <SprintRefineButton sprintId={sprint.id} sprintName={sprint.name} />
+                <SprintRefineButton sprintId={sprint.id} sprintName={sprint.name} teamId={teamId} />
                 <SprintControls sprint={sprint} teamId={teamId} />
               </div>
             )}

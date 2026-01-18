@@ -5,7 +5,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { refineExistingComponent } from '@/app/projects/actions';
 import { X, Sparkles, Loader2, MessageSquare, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
-import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
+import { useDemoActionHandler, isDemoResult, isDemoMode, demoStore } from '@/hooks/use-demo-action';
 
 interface Props {
   component: {
@@ -30,10 +30,21 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
     'Change to higher priority',
   ]);
   const { handleResult } = useDemoActionHandler();
+  const inDemoMode = isDemoMode();
 
   const { execute, isExecuting } = useAction(refineExistingComponent, {
     onSuccess: ({ data }) => {
       if (isDemoResult(data)) {
+        // Apply the refined component to demo store
+        const refinedData = data as { component?: { id: string; name: string; description: string; estimatedHours: number; priority: number } };
+        if (refinedData.component) {
+          demoStore.updateComponent(refinedData.component.id, {
+            name: refinedData.component.name,
+            description: refinedData.component.description,
+            estimatedHours: refinedData.component.estimatedHours,
+            priority: refinedData.component.priority,
+          });
+        }
         handleResult(data);
       }
       toast.success('Component updated with AI suggestions');
@@ -52,10 +63,34 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
       return;
     }
 
+    // Build demo data if in demo mode
+    let demoComponentData;
+    if (inDemoMode) {
+      const project = demoStore.getProject(projectId);
+      const allComponents = demoStore.getComponentsByProject(projectId);
+      
+      if (project) {
+        demoComponentData = {
+          name: component.name,
+          description: component.description || '',
+          type: component.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG',
+          estimatedHours: component.estimatedHours || 8,
+          priority: Math.floor(component.priority / 10), // Convert to 1-10 scale for AI
+          projectName: project.name,
+          projectDescription: project.description || '',
+          existingComponents: allComponents.map((c) => ({
+            name: c.name,
+            type: c.type,
+          })),
+        };
+      }
+    }
+
     execute({
       componentId: component.id,
       projectId,
       refinementRequest: refinementText,
+      demoComponentData,
     });
   };
 

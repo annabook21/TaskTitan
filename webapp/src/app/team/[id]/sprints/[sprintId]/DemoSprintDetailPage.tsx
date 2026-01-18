@@ -20,6 +20,7 @@ import {
   XCircle,
   ChevronRight,
 } from 'lucide-react';
+import SprintRefineButton from './SprintRefineButton';
 
 const statusConfig = {
   PLANNING: {
@@ -204,6 +205,11 @@ export default function DemoSprintDetailPage() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Refine with AI button */}
+            <div className="flex items-center gap-3">
+              <SprintRefineButton sprintId={sprintId} sprintName={sprint.name} teamId={teamId} />
             </div>
           </div>
 

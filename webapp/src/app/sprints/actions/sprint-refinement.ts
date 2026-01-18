@@ -10,84 +10,165 @@ import { refineBulkPlan } from '@/lib/ai/generators/bulk-plan-refinement';
 const refineSprintSchema = z.object({
   sprintId: z.string().min(1),
   refinementRequest: z.string().min(1).max(500),
+  // Demo mode data - passed from client since server can't access localStorage
+  demoSprintData: z
+    .object({
+      name: z.string(),
+      goal: z.string(),
+      durationWeeks: z.number(),
+      capacity: z.number().optional(),
+      components: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          description: z.string(),
+          type: z.enum(['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG']),
+          estimatedHours: z.number(),
+          priority: z.number(),
+        })
+      ),
+      projectName: z.string(),
+      projectDescription: z.string(),
+      workflowType: z.enum(['SCRUM', 'KANBAN', 'CUSTOM']),
+      cycleName: z.string().optional(),
+      teamId: z.string(),
+    })
+    .optional(),
 });
 
 /**
  * Refine an existing sprint using AI
  * Can adjust sprint goal, move components, change capacity, etc.
+ * Uses real Bedrock AI for both demo and production modes
  */
 export const refineExistingSprint = authActionClient
   .schema(refineSprintSchema)
   .action(async ({ parsedInput, ctx }) => {
-    const { sprintId, refinementRequest } = parsedInput;
+    const { sprintId, refinementRequest, demoSprintData } = parsedInput;
     const { userId, isDemo } = ctx;
 
-    if (isDemo) {
-      throw new MyCustomError('Feature not available in demo mode');
-    }
-
+    // Check if AI is configured (required for both demo and production)
     if (!isAIConfigured()) {
       throw new MyCustomError('AI features require Amazon Bedrock access.');
     }
 
-    // Get sprint with components
-    const sprint = await prisma.sprint.findFirst({
-      where: {
-        id: sprintId,
-        Team: { Membership: { some: { userId } } },
-      },
-      include: {
-        Component: {
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            type: true,
-            estimatedHours: true,
-            priority: true,
-          },
-        },
-        Team: {
-          include: {
-            Project: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            WorkflowConfig: true,
-          },
-        },
-      },
-    });
+    let components: {
+      name: string;
+      description: string;
+      type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
+      estimatedHours: number;
+      priority: number;
+      suggestedDependencies: string[];
+    }[];
+    let currentSprint: {
+      name: string;
+      goal: string;
+      durationWeeks: number;
+      componentNames: string[];
+      capacity?: number;
+    };
+    let projectName: string;
+    let projectDescription: string;
+    let workflowType: 'SCRUM' | 'KANBAN' | 'CUSTOM';
+    let cycleName: string;
+    let teamId: string;
+    let componentIdMap: Map<string, string>;
 
-    if (!sprint) {
-      throw new MyCustomError('Sprint not found or access denied');
+    if (isDemo) {
+      // Demo mode - use sprint data passed from client
+      if (!demoSprintData) {
+        throw new MyCustomError('Demo sprint data not provided');
+      }
+
+      components = demoSprintData.components.map((c) => ({
+        name: c.name,
+        description: c.description,
+        type: c.type,
+        estimatedHours: c.estimatedHours,
+        priority: c.priority,
+        suggestedDependencies: [],
+      }));
+
+      currentSprint = {
+        name: demoSprintData.name,
+        goal: demoSprintData.goal,
+        durationWeeks: demoSprintData.durationWeeks,
+        componentNames: components.map((c) => c.name),
+        capacity: demoSprintData.capacity,
+      };
+
+      projectName = demoSprintData.projectName;
+      projectDescription = demoSprintData.projectDescription;
+      workflowType = demoSprintData.workflowType;
+      cycleName = demoSprintData.cycleName || 'Sprint';
+      teamId = demoSprintData.teamId;
+      componentIdMap = new Map(demoSprintData.components.map((c) => [c.name, c.id]));
+    } else {
+      // Production mode - get sprint from database
+      const sprint = await prisma.sprint.findFirst({
+        where: {
+          id: sprintId,
+          Team: { Membership: { some: { userId } } },
+        },
+        include: {
+          Component: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              type: true,
+              estimatedHours: true,
+              priority: true,
+            },
+          },
+          Team: {
+            include: {
+              Project: {
+                select: {
+                  id: true,
+                  name: true,
+                  description: true,
+                },
+              },
+              WorkflowConfig: true,
+            },
+          },
+        },
+      });
+
+      if (!sprint) {
+        throw new MyCustomError('Sprint not found or access denied');
+      }
+
+      components = sprint.Component.map((c) => ({
+        name: c.name,
+        description: c.description || '',
+        type: c.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG',
+        estimatedHours: c.estimatedHours || 8,
+        priority: Math.floor(c.priority / 10),
+        suggestedDependencies: [],
+      }));
+
+      currentSprint = {
+        name: sprint.name,
+        goal: sprint.goal || '',
+        durationWeeks: Math.floor((new Date(sprint.endDate).getTime() - new Date(sprint.startDate).getTime()) / (1000 * 60 * 60 * 24 * 7)),
+        componentNames: components.map((c) => c.name),
+        capacity: sprint.capacity || undefined,
+      };
+
+      const workflowConfig = sprint.Team.WorkflowConfig;
+      const projectContext = sprint.Team.Project[0] || { name: 'Unknown', description: '' };
+
+      projectName = projectContext.name;
+      projectDescription = projectContext.description || '';
+      workflowType = workflowConfig?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM' || 'SCRUM';
+      cycleName = workflowConfig?.cycleName || 'Sprint';
+      teamId = sprint.teamId;
+      componentIdMap = new Map(sprint.Component.map((c) => [c.name, c.id]));
     }
 
-    // Build current plan
-    const components = sprint.Component.map((c) => ({
-      name: c.name,
-      description: c.description || '',
-      type: c.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG',
-      estimatedHours: c.estimatedHours || 8,
-      priority: Math.floor(c.priority / 10),
-      suggestedDependencies: [],
-    }));
-
-    const currentSprint = {
-      name: sprint.name,
-      goal: sprint.goal || '',
-      durationWeeks: Math.floor((new Date(sprint.endDate).getTime() - new Date(sprint.startDate).getTime()) / (1000 * 60 * 60 * 24 * 7)),
-      componentNames: components.map((c) => c.name),
-      capacity: sprint.capacity || undefined,
-    };
-
-    const workflowConfig = sprint.Team.WorkflowConfig;
-    const projectContext = sprint.Team.Project[0] || { name: 'Unknown', description: '' };
-
-    // Call AI to refine
+    // Call AI to refine (works for both demo and production)
     const result = await refineBulkPlan({
       currentPlan: {
         components,
@@ -95,14 +176,37 @@ export const refineExistingSprint = authActionClient
       },
       refinementRequest,
       projectContext: {
-        projectName: projectContext.name,
-        projectDescription: projectContext.description || '',
-        workflowType: workflowConfig?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM' || 'SCRUM',
-        cycleName: workflowConfig?.cycleName || 'Sprint',
+        projectName,
+        projectDescription,
+        workflowType,
+        cycleName,
       },
     });
 
-    // Apply changes
+    // Demo mode - return result for client-side handling
+    if (isDemo) {
+      // Build component updates with IDs for client-side application
+      const componentUpdates = result.components.map((c) => ({
+        id: componentIdMap.get(c.name) || '',
+        name: c.name,
+        description: c.description,
+        estimatedHours: c.estimatedHours,
+        priority: Math.round(c.priority * 10),
+      }));
+
+      return {
+        _demo: true,
+        _action: 'refineExistingSprint',
+        _input: { sprintId, teamId },
+        sprint: result.sprints?.[0],
+        componentUpdates,
+        explanation: result.explanation,
+        changedItems: result.changedItems,
+        suggestedFollowUps: result.suggestedFollowUps,
+      };
+    }
+
+    // Production mode - apply changes to database
     if (result.sprints && result.sprints[0]) {
       const updatedSprint = result.sprints[0];
       
@@ -117,9 +221,8 @@ export const refineExistingSprint = authActionClient
     }
 
     // Update components if changed
-    const nameToId = new Map(sprint.Component.map((c) => [c.name, c.id]));
     for (const updatedComp of result.components) {
-      const componentId = nameToId.get(updatedComp.name);
+      const componentId = componentIdMap.get(updatedComp.name);
       if (componentId) {
         await prisma.component.update({
           where: { id: componentId },
@@ -132,8 +235,8 @@ export const refineExistingSprint = authActionClient
       }
     }
 
-    revalidatePath(`/team/${sprint.teamId}/sprints/${sprintId}`);
-    revalidatePath(`/team/${sprint.teamId}/sprints`);
+    revalidatePath(`/team/${teamId}/sprints/${sprintId}`);
+    revalidatePath(`/team/${teamId}/sprints`);
 
     return {
       sprint: result.sprints?.[0],

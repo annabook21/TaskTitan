@@ -916,3 +916,6 @@ export function useDemoActionHandler() {
 
 // Re-export useAction for convenience
 export { useAction, useOptimisticAction };
+
+// Re-export demoStore and isDemoMode for components that need direct access
+export { demoStore, isDemoMode };
