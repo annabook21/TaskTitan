@@ -1,6 +1,7 @@
 import './globals.css';
 import { Toaster } from 'sonner';
 import type { Metadata } from 'next';
+import ClientErrorHandler from './ClientErrorHandler';
 
 export const metadata: Metadata = {
   title: 'TaskTitan - Component-Based Project Planning',
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="bg-slate-950 text-slate-100 antialiased">
         {children}
+        <ClientErrorHandler />
         <Toaster
           position="top-right"
           theme="dark"
