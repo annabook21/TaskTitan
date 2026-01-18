@@ -20,6 +20,7 @@ import {
 import SprintControls from './SprintControls';
 import SprintComponents from './SprintComponents';
 import AISprintPlanner from './AISprintPlanner';
+import SprintRefineButton from './SprintRefineButton';
 import DemoSprintDetailPage from './DemoSprintDetailPage';
 
 interface Props {

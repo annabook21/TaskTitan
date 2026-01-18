@@ -12,6 +12,9 @@ export { createProject, updateProject, deleteProject } from './project-crud';
 // Component CRUD operations
 export { createComponent, updateComponent } from './component-crud';
 
+// Component refinement
+export { refineExistingComponent } from './component-refinement';
+
 // Dependency management
 export { addDependency, removeDependency } from './dependencies';
 

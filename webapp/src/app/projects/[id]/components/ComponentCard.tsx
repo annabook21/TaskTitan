@@ -25,6 +25,7 @@ import type { ComponentStatus, ComponentType, User, SprintStatus } from '@prisma
 import AssignmentPanel from './AssignmentPanel';
 import PreviewModal from './PreviewModal';
 import ComponentContextPanel from './ComponentContextPanel';
+import ComponentRefineModal from './ComponentRefineModal';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Sprint {
@@ -121,6 +122,7 @@ export default function ComponentCard({ component, teamMembers, availableSprints
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isSprintOpen, setIsSprintOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showRefine, setShowRefine] = useState(false);
   const { handleResult } = useDemoActionHandler();
 
   // Calculate aging
@@ -222,8 +224,8 @@ export default function ComponentCard({ component, teamMembers, availableSprints
           </a>
         )}
 
-        {/* Wireframe Preview */}
-        <div className="mb-2">
+        {/* Actions */}
+        <div className="mb-2 flex items-center gap-3">
           {latestPreview ? (
             <button
               onClick={() => setShowPreview(true)}
@@ -246,6 +248,13 @@ export default function ComponentCard({ component, teamMembers, availableSprints
               {isGeneratingPreview ? 'Generating...' : 'Generate Wireframe'}
             </button>
           )}
+          <button
+            onClick={() => setShowRefine(true)}
+            className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1.5 transition-colors"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            Refine with AI
+          </button>
         </div>
 
         {/* Status Dropdown */}
@@ -411,6 +420,26 @@ export default function ComponentCard({ component, teamMembers, availableSprints
           </div>
         </div>
       </div>
+
+      {/* Refine Modal */}
+      {showRefine && (
+        <ComponentRefineModal
+          component={{
+            id: component.id,
+            name: component.name,
+            description: component.description,
+            type: component.type,
+            estimatedHours: component.estimatedHours,
+            priority: component.priority,
+          }}
+          projectId={component.id}
+          onClose={() => setShowRefine(false)}
+          onSuccess={() => {
+            setShowRefine(false);
+            // Component will be updated via revalidatePath
+          }}
+        />
+      )}
     </>
   );
 }

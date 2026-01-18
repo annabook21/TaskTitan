@@ -18,3 +18,4 @@ export {
 
 // Sprint planning (AI-powered)
 export { aiPlanSprintAction, applySprintPlan, aiSuggestSprint } from './sprint-planning';
+export { refineExistingSprint } from './sprint-refinement';
