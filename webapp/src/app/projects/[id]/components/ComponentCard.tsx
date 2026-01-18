@@ -433,7 +433,7 @@ export default function ComponentCard({ component, teamMembers, availableSprints
             estimatedHours: component.estimatedHours,
             priority: component.priority,
           }}
-          projectId={component.id}
+          projectId={component.projectId}
           onClose={() => setShowRefine(false)}
           onSuccess={() => {
             setShowRefine(false);
