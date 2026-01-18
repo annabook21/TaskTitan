@@ -337,7 +337,7 @@ export default function AIGeneratePanel({
                 <div className="space-y-4">
                   <Loader2 className="w-12 h-12 animate-spin text-cyan-400 mx-auto" />
                   <p className="text-slate-300">Analyzing your project and generating components...</p>
-                  <p className="text-sm text-slate-500">This may take 10-20 seconds</p>
+                  <p className="text-sm text-slate-500">This may take 30-90 seconds</p>
                 </div>
               ) : (
                 <div className="space-y-6">
