@@ -173,7 +173,12 @@ export default async function SprintDetailPage({ params }: Props) {
               </div>
             </div>
 
-            {canManage && <SprintControls sprint={sprint} teamId={teamId} />}
+            {canManage && (
+              <div className="flex items-center gap-3">
+                <SprintRefineButton sprintId={sprint.id} sprintName={sprint.name} />
+                <SprintControls sprint={sprint} teamId={teamId} />
+              </div>
+            )}
           </div>
 
           {/* Metrics Cards */}

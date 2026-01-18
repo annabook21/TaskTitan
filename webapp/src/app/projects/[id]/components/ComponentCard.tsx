@@ -19,6 +19,7 @@ import {
   Loader2,
   Timer,
   AlertTriangle,
+  MessageSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ComponentStatus, ComponentType, User, SprintStatus } from '@prisma/client';
