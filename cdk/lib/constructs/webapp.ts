@@ -31,6 +31,8 @@ import {
 import { LoadBalancerV2Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { Port } from 'aws-cdk-lib/aws-ec2';
 import { ApplicationListener, ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
+import { Secret as EcsSecret } from 'aws-cdk-lib/aws-ecs';
 
 export interface WebappProps {
   database: Database;
@@ -98,6 +100,22 @@ export class Webapp extends Construct {
     const dbEnv = database.getEcsEnvironment('main');
     const dbSecrets = database.getEcsSecrets();
 
+    // Create or reference secret for Next.js Server Actions encryption key
+    // This MUST be consistent across deployments to prevent "Failed to find Server Action" errors
+    // Reference: https://nextjs.org/docs/app/api-reference/configuration/environment-variables#next_server_actions_encryption_key
+    // Using fixed name so secret persists across stack updates
+    const secretName = `/${Stack.of(this).stackName}/next-server-actions-encryption-key`;
+    const serverActionsKeySecret = new Secret(this, 'ServerActionsEncryptionKey', {
+      secretName,
+      description: 'Encryption key for Next.js Server Actions - must be consistent across deployments',
+      generateSecretString: {
+        secretStringTemplate: '{}',
+        generateStringKey: 'encryptionKey',
+        passwordLength: 32,
+        excludeCharacters: '"@/\\',
+      },
+    });
+
     // Compute the domain name for AMPLIFY_APP_ORIGIN
     // For custom domain: use the domain name directly
     // For CloudFront default: we'll set it after distribution is created
@@ -131,7 +149,13 @@ export class Webapp extends Construct {
         image: ContainerImage.fromDockerImageAsset(image),
         containerPort: 3000,
         enableLogging: true,
-        secrets: dbSecrets,
+        secrets: {
+          ...dbSecrets,
+          NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: EcsSecret.fromSecretsManager(
+            serverActionsKeySecret,
+            'encryptionKey',
+          ),
+        },
         environment: {
           // Database configuration (non-sensitive values only)
           DATABASE_HOST: dbEnv.DATABASE_HOST,
