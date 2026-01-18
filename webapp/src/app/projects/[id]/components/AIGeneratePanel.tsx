@@ -108,6 +108,21 @@ export default function AIGeneratePanel({
     };
   }, []);
 
+  const handleActionError = (error: { serverError?: string }) => {
+    const message = error.serverError || 'An unexpected error occurred';
+    // Next.js Server Actions can 403 on stale client bundles after deploys.
+    if (message.includes('Invalid Server Actions request') || message.includes('Failed to find Server Action')) {
+      toast.error('App updated. Refreshing to load latest version...');
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+      }, 1200);
+      return;
+    }
+    toast.error(message);
+  };
+
   // Helper to generate chat suggestions based on current plan
   const generateChatSuggestions = (components: GeneratedComponent[], sprints: GeneratedSprint[]) => {
     const suggestions: string[] = [];
@@ -213,7 +228,7 @@ export default function AIGeneratePanel({
     onError: ({ error }) => {
       if (!isMountedRef.current) return;
       setGenerationProgress('');
-      toast.error(error.serverError || 'Failed to generate components');
+      handleActionError(error);
     },
   });
 
@@ -246,7 +261,7 @@ export default function AIGeneratePanel({
     },
     onError: ({ error }) => {
       if (!isMountedRef.current) return;
-      toast.error(error.serverError || 'Failed to refine plan');
+      handleActionError(error);
     },
   });
 
@@ -285,7 +300,7 @@ export default function AIGeneratePanel({
     },
     onError: ({ error }) => {
       if (!isMountedRef.current) return;
-      toast.error(error.serverError || 'Failed to apply components');
+      handleActionError(error);
     },
   });
 

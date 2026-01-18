@@ -91,6 +91,14 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings }
           <label className="block text-sm font-medium text-slate-300 mb-2">Webhook Secret</label>
           <div className="flex gap-2">
             <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+            />
+            <input
               type="password"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
