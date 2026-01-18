@@ -9,7 +9,14 @@ if (process.env.ALLOWED_ORIGIN_HOST) {
 
 const allowedOrigins = Array.from(
   new Set(
-    allowedHosts.flatMap((host) => [host, `http://${host}`, `https://${host}`]),
+    allowedHosts.flatMap((host) => {
+      // Wildcards (e.g., *.example.com) should not have protocol prefixes
+      // See: https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions
+      if (host.startsWith('*')) {
+        return [host];
+      }
+      return [host, `http://${host}`, `https://${host}`];
+    }),
   ),
 );
 
