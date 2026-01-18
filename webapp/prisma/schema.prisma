@@ -54,6 +54,7 @@ model Component {
   status                                                ComponentStatus          @default(PLANNING)
   priority                                              Int                      @default(0)
   estimatedHours                                        Float?
+  actualHours                                           Float? // Actual time spent (for retrospective learning)
   dueDate                                               DateTime?
   owner                                                 String? // Imported owner name (may not match a User)
   tags                                                  String[]                 @default([])
@@ -189,6 +190,33 @@ model User {
   Membership       Membership[]
   Project          Project[]
   ComponentPreview ComponentPreview[]
+  Notification     Notification[]
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  componentId String? // Link to component if relevant
+  projectId   String? // Link to project if relevant
+  read        Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  User        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_STATUS_CHANGED
+  TASK_COMMENT
+  TASK_DUE_SOON
+  TASK_OVERDUE
+  SPRINT_STARTED
+  SPRINT_ENDING
 }
 
 enum ActivityType {

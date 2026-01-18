@@ -75,7 +75,22 @@ export const assignComponent = authActionClient
       },
     });
 
+    // Create notification for assignee (unless self-assigning)
+    if (assigneeId !== userId) {
+      await prisma.notification.create({
+        data: {
+          userId: assigneeId,
+          type: 'TASK_ASSIGNED',
+          title: `You were assigned: ${component.name}`,
+          message: `You have been assigned to work on "${component.name}" in ${component.Project.name}`,
+          componentId,
+          projectId: component.projectId,
+        },
+      });
+    }
+
     revalidatePath(`/projects/${component.projectId}`);
+    revalidatePath(`/my-tasks`);
 
     return { assignment };
   });

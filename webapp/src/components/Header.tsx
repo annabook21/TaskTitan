@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Hexagon, Menu, X, User, LogOut, ChevronDown, Upload } from 'lucide-react';
+import { Hexagon, Menu, X, User, LogOut, ChevronDown, Upload, ListTodo } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import DemoBadge from './DemoBadge';
 
 const navLinks = [
   { href: '/', label: 'Dashboard' },
+  { href: '/my-tasks', label: 'My Tasks' },
   { href: '/projects', label: 'Projects' },
   { href: '/team', label: 'Team' },
   { href: '/import', label: 'Import' },
@@ -96,6 +97,15 @@ export default function Header({ user }: HeaderProps) {
                       <p className="text-sm font-medium text-white truncate">{displayName}</p>
                       <p className="text-xs text-slate-400 truncate">{user.email}</p>
                     </div>
+
+                    <Link
+                      href="/my-tasks"
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-800 transition-colors"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <ListTodo className="w-4 h-4" />
+                      My Tasks
+                    </Link>
 
                     <Link
                       href="/profile"

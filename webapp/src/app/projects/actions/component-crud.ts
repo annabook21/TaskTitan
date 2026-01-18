@@ -22,6 +22,7 @@ const updateComponentSchema = z.object({
   status: z.enum(['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED']).optional(),
   priority: z.number().int().min(0).max(100).optional(),
   estimatedHours: z.number().min(0).max(1000).optional(),
+  actualHours: z.number().min(0).max(1000).optional(),
   dueDate: z.string().optional(),
 });
 
@@ -92,7 +93,7 @@ export const createComponent = authActionClient.schema(createComponentSchema).ac
  * Updates an existing component's details
  */
 export const updateComponent = authActionClient.schema(updateComponentSchema).action(async ({ parsedInput, ctx }) => {
-  const { id, name, description, status, priority, estimatedHours, dueDate } = parsedInput;
+  const { id, name, description, status, priority, estimatedHours, actualHours, dueDate } = parsedInput;
   const { userId, isDemo } = ctx;
 
   // Demo mode - return marker for client-side handling
@@ -100,7 +101,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
     return {
       _demo: true,
       _action: 'updateComponent',
-      _input: { componentId: id, name, description, status, priority, estimatedHours, dueDate },
+      _input: { componentId: id, name, description, status, priority, estimatedHours, actualHours, dueDate },
     };
   }
 
@@ -110,7 +111,14 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
       id,
       Project: { Team: { Membership: { some: { userId } } } },
     },
-    include: { Project: true },
+    include: { 
+      Project: true,
+      Assignment: {
+        select: {
+          userId: true,
+        },
+      },
+    },
   });
 
   if (!component) {
@@ -130,6 +138,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
         ...(status && { status }),
         ...(priority !== undefined && { priority }),
         ...(estimatedHours !== undefined && { estimatedHours }),
+        ...(actualHours !== undefined && { actualHours }),
         ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
       },
     });
@@ -173,6 +182,21 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
           },
         },
       });
+
+      // Create notifications for assignees (except the user making the change)
+      const assigneeIds = component.Assignment.map((a) => a.userId).filter((uid) => uid !== userId);
+      if (assigneeIds.length > 0) {
+        await tx.notification.createMany({
+          data: assigneeIds.map((assigneeId) => ({
+            userId: assigneeId,
+            type: 'TASK_STATUS_CHANGED',
+            title: `Status changed: ${updatedComponent.name}`,
+            message: `Changed from ${oldStatus} to ${status}`,
+            componentId: id,
+            projectId: component.projectId,
+          })),
+        });
+      }
     }
 
     return updatedComponent;

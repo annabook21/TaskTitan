@@ -55,3 +55,5 @@ export { applyComponentTemplate, COMPONENT_TEMPLATES } from './generators/templa
 export { refineComponentWithChat, generateInitialSuggestions } from './generators/chat-refinement-generator';
 export { refineBulkPlan, generateBulkRefinementSuggestions } from './generators/bulk-plan-refinement';
 export type { BulkPlanRefinementInput, BulkPlanRefinementResult } from './generators/bulk-plan-refinement';
+export { generateRetrospective } from './generators/retrospective-generator';
+export type { RetrospectiveInput, RetrospectiveResult } from './generators/retrospective-generator';
