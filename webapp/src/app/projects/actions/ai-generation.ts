@@ -97,6 +97,11 @@ export const generateAIComponents = authActionClient
     const { projectId, generateEpics = false, demoProjectData } = parsedInput;
     const { userId, isDemo } = ctx;
 
+    // Check if AI is configured (required for both demo and production)
+    if (!isAIConfigured()) {
+      throw new MyCustomError('AI features require Amazon Bedrock access in your AWS account.');
+    }
+
     let projectName: string;
     let projectDescription: string;
     let existingNames: string[] = [];
@@ -145,15 +150,6 @@ export const generateAIComponents = authActionClient
       if (demoProjectData.teamCapacity) {
         teamCapacity = demoProjectData.teamCapacity;
       }
-
-      return generateDemoComponents({
-        projectName,
-        projectDescription,
-        existingNames,
-        generateEpics,
-        workflowConfig,
-        teamCapacity,
-      });
     } else {
       // Production mode - get project from database
       const project = await prisma.project.findFirst({
@@ -219,11 +215,6 @@ export const generateAIComponents = authActionClient
       }
     }
 
-    // Check if AI is configured (required for production)
-    if (!isAIConfigured()) {
-      throw new MyCustomError('AI features require Amazon Bedrock access in your AWS account.');
-    }
-
     // Generate components using real Bedrock AI
     // For Scrum: sprints are always generated, epics are optional
     // For Kanban: flat work items only
@@ -244,168 +235,6 @@ export const generateAIComponents = authActionClient
       epics: result.epics,
     };
   });
-
-type DemoGenerationInput = {
-  projectName: string;
-  projectDescription: string;
-  existingNames: string[];
-  generateEpics: boolean;
-  workflowConfig: Parameters<typeof generateComponents>[4];
-  teamCapacity?: TeamCapacityInfo;
-};
-
-function generateDemoComponents({
-  projectName,
-  projectDescription,
-  existingNames,
-  generateEpics,
-  workflowConfig,
-  teamCapacity,
-}: DemoGenerationInput) {
-  const description = projectDescription.trim();
-  const existingLookup = new Set(existingNames.map((name) => name.toLowerCase()));
-  const isKanban = !workflowConfig?.cycleEnabled;
-
-  const keywordTemplates = [
-    {
-      keywords: ['auth', 'login', 'signup', 'password'],
-      name: 'Authentication flow',
-      description: 'Enable secure sign-in, registration, and account recovery.',
-    },
-    {
-      keywords: ['billing', 'payment', 'checkout', 'invoice', 'subscription'],
-      name: 'Billing & subscriptions',
-      description: 'Support billing flows, invoices, and subscription management.',
-    },
-    {
-      keywords: ['notification', 'email', 'sms', 'alert'],
-      name: 'Notification delivery',
-      description: 'Send timely updates across email, in-app, and messaging channels.',
-    },
-    {
-      keywords: ['analytics', 'report', 'insight', 'dashboard'],
-      name: 'Analytics dashboard',
-      description: 'Surface key metrics and project health in a unified view.',
-    },
-    {
-      keywords: ['integration', 'webhook', 'api'],
-      name: 'External integrations',
-      description: 'Connect with third-party systems via APIs and webhooks.',
-    },
-  ];
-
-  const defaultTemplates = [
-    {
-      name: 'Project setup & roles',
-      description: 'Define project roles, permissions, and onboarding steps.',
-    },
-    {
-      name: 'Core workflow management',
-      description: 'Create the primary workflow for planning and delivery.',
-    },
-    {
-      name: 'Task lifecycle updates',
-      description: 'Track status changes, blockers, and completion signals.',
-    },
-    {
-      name: 'Search & filtering',
-      description: 'Help the team find work items quickly with filters.',
-    },
-    {
-      name: 'Collaboration & comments',
-      description: 'Enable team discussions and feedback loops on work items.',
-    },
-    {
-      name: 'Release readiness checklist',
-      description: 'Keep shipping criteria visible and actionable.',
-    },
-  ];
-
-  const candidates: Array<{ name: string; description: string }> = [];
-  const lowered = description.toLowerCase();
-  for (const template of keywordTemplates) {
-    if (template.keywords.some((keyword) => lowered.includes(keyword))) {
-      candidates.push({ name: template.name, description: template.description });
-    }
-  }
-  candidates.push(...defaultTemplates);
-
-  const components = candidates
-    .filter((template) => !existingLookup.has(template.name.toLowerCase()))
-    .slice(0, 8)
-    .map((template, index) => {
-      const type = isKanban ? (index === 0 ? 'FEATURE' : 'TASK') : 'STORY';
-      const baseHours = isKanban ? 10 : 8;
-      return {
-        name: template.name,
-        description: template.description,
-        type,
-        estimatedHours: baseHours + (index % 3) * 2,
-        priority: Math.max(1, 5 - index),
-        suggestedDependencies: [],
-        parentName: undefined,
-      };
-    });
-
-  for (let i = 1; i < components.length; i++) {
-    components[i].suggestedDependencies = [components[i - 1].name];
-  }
-
-  const sprints = !isKanban
-    ? (() => {
-        const durationWeeks = Math.max(1, workflowConfig?.cycleDurationWeeks ?? 2);
-        const sprintCapacity = teamCapacity ? Math.round(teamCapacity.totalCapacityHours * 0.8) : undefined;
-        const midpoint = Math.ceil(components.length / 2);
-        const sprintOneComponents = components.slice(0, midpoint).map((c) => c.name);
-        const sprintTwoComponents = components.slice(midpoint).map((c) => c.name);
-        return [
-          {
-            name: 'Sprint 1',
-            goal: `Kickstart ${projectName} with core foundations.`,
-            durationWeeks,
-            componentNames: sprintOneComponents,
-            capacity: sprintCapacity,
-          },
-          {
-            name: 'Sprint 2',
-            goal: `Deliver key workflows and polish ${projectName}.`,
-            durationWeeks,
-            componentNames: sprintTwoComponents,
-            capacity: sprintCapacity,
-          },
-        ].filter((sprint) => sprint.componentNames.length > 0);
-      })()
-    : undefined;
-
-  const epics =
-    !isKanban && generateEpics
-      ? [
-          {
-            name: 'Foundation & core flows',
-            description: 'Foundational work items that unlock delivery.',
-            componentNames: components.slice(0, Math.ceil(components.length / 2)).map((c) => c.name),
-          },
-          {
-            name: 'Experience & quality',
-            description: 'Enhancements that improve usability and reliability.',
-            componentNames: components.slice(Math.ceil(components.length / 2)).map((c) => c.name),
-          },
-        ].filter((epic) => epic.componentNames.length > 0)
-      : undefined;
-
-  const summary = `AI-generated ${components.length} work items for ${projectName}.`;
-  const enhancedDescription = description
-    ? `${description}\n\nAI suggestion: Focus on a clear core flow, then expand with collaboration and reporting.`
-    : `Plan the core workflow and collaboration experience for ${projectName}.`;
-
-  return {
-    components,
-    summary,
-    enhancedDescription,
-    sprints,
-    epics,
-  };
-}
 
 /**
  * Applies AI-generated components to the project (creates them in database)

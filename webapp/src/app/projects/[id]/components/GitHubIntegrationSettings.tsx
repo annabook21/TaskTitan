@@ -95,7 +95,6 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings }
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
               placeholder="Enter a secret token"
-              autoComplete="current-password"
               className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
             />
             <button
