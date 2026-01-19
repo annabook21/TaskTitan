@@ -302,9 +302,9 @@ export default function DemoDashboard() {
                     </div>
                     <div>
                       <div className="font-medium text-slate-200 group-hover:text-emerald-400 transition-colors">
-                        Import from Jira
+                        Import Data
                       </div>
-                      <div className="text-xs text-slate-500">CSV, JSON, or Jira exports</div>
+                      <div className="text-xs text-slate-500">Jira, Trello, Asana, CSV</div>
                     </div>
                   </Link>
                 </div>
