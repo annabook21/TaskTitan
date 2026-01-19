@@ -157,10 +157,19 @@ JSON>>>`;
     : '';
 
   // Build team capacity constraint if available
+  // Industry standard: 6 productive hours/day, 70-80% utilization target
+  // totalCapacityHours is raw capacity, we apply focus factor for realistic planning
+  const focusFactor = 0.7; // 70% - accounts for meetings, code review, interruptions
+  const effectiveCapacity = teamCapacity ? Math.floor(teamCapacity.totalCapacityHours * focusFactor) : null;
+
   const capacityConstraint = teamCapacity
     ? `
-Team Capacity: ${teamCapacity.totalCapacityHours.toFixed(0)} hours per ${cycleName.toLowerCase()} (${teamCapacity.memberCount} member${teamCapacity.memberCount !== 1 ? 's' : ''})
-CONSTRAINT: Each ${cycleName.toLowerCase()} must not exceed 80% of capacity (${Math.floor(teamCapacity.totalCapacityHours * 0.8)} hours max)
+Team Capacity Info:
+- Raw capacity: ${teamCapacity.totalCapacityHours.toFixed(0)} hours per ${cycleName.toLowerCase()} (${teamCapacity.memberCount} member${teamCapacity.memberCount !== 1 ? 's' : ''})
+- Effective capacity (after 30% overhead for meetings, code review, etc.): ${effectiveCapacity} hours
+- Target utilization: 70-80% of effective capacity (${Math.floor(effectiveCapacity! * 0.7)}-${Math.floor(effectiveCapacity! * 0.8)} hours of planned work)
+
+CONSTRAINT: Plan ${Math.floor(effectiveCapacity! * 0.7)}-${Math.floor(effectiveCapacity! * 0.8)} hours of work per ${cycleName.toLowerCase()}. Set each sprint's "capacity" field to ${effectiveCapacity} (the effective team capacity).
 `
     : '';
 
@@ -183,13 +192,15 @@ Return your response between <<<JSON and JSON>>> markers. Between these markers,
   * Group logically by dependencies and priority
   * Each ${cycleName.toLowerCase()} should be 1-2 weeks
   * Respect dependencies - items cannot be in a ${cycleName.toLowerCase()} before their dependencies${teamCapacity ? `
-  * IMPORTANT: Total work per ${cycleName.toLowerCase()} must not exceed ${Math.floor(teamCapacity.totalCapacityHours * 0.8)} hours (80% of team capacity)` : `
-  * Apply 80% capacity buffer: if items total 50 hours, set capacity to 62 (50/0.8)`}
+  * "capacity" = team's effective capacity (${effectiveCapacity} hours) - this is FIXED for all sprints
+  * Plan work totaling 70-80% of capacity (${Math.floor(effectiveCapacity! * 0.7)}-${Math.floor(effectiveCapacity! * 0.8)} hours)` : `
+  * "capacity" = team's available hours (estimate based on scope, e.g., 80 hours for a typical small team)
+  * Plan work totaling 70-80% of capacity to leave buffer for unexpected work`}
   * componentNames should reference exact names from the components array
 - "summary": brief architecture summary (2-3 sentences)
 - "enhancedDescription": improved project description (3-4 sentences)${epicInstructions}
 
-Example format:
+Example format (note: capacity=80 is the team's available hours, work planned is 9h and 8h = 11% and 10% utilization - in practice aim for 70-80%):
 <<<JSON
 {
   "components": [
@@ -198,8 +209,8 @@ Example format:
     { "name": "Implement User Registration", "description": "Registration form with email verification flow. Allows new users to create accounts.", "type": "STORY", "estimatedHours": 8, "priority": 9, "suggestedDependencies": ["Configure Database Schema"], "acceptanceCriteria": ["User can register with email/password", "Verification email sent on registration", "Duplicate emails are rejected"] }
   ],
   "sprints": [
-    { "name": "Foundation", "goal": "Our focus is establishing core infrastructure. We believe it delivers development velocity to the team. This will be confirmed when database and auth are operational.", "durationWeeks": 2, "componentNames": ["Configure Database Schema", "Enable User Login"], "capacity": 12 },
-    { "name": "User Onboarding", "goal": "Our focus is enabling user self-service registration. We believe it delivers user acquisition capability. This will be confirmed when users can register and verify their accounts.", "durationWeeks": 2, "componentNames": ["Implement User Registration"], "capacity": 10 }
+    { "name": "Foundation", "goal": "Our focus is establishing core infrastructure. We believe it delivers development velocity to the team. This will be confirmed when database and auth are operational.", "durationWeeks": 2, "componentNames": ["Configure Database Schema", "Enable User Login"], "capacity": 80 },
+    { "name": "User Onboarding", "goal": "Our focus is enabling user self-service registration. We believe it delivers user acquisition capability. This will be confirmed when users can register and verify their accounts.", "durationWeeks": 2, "componentNames": ["Implement User Registration"], "capacity": 80 }
   ],
   "summary": "...",
   "enhancedDescription": "..."${epicExample}
