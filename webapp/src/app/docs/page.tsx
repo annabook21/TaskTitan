@@ -15,6 +15,12 @@ import {
   AlertTriangle,
   Search,
   ChevronRight,
+  Github,
+  BarChart3,
+  MessageSquare,
+  Settings,
+  Eye,
+  Activity,
 } from 'lucide-react';
 
 export default async function DocsPage() {
@@ -78,6 +84,12 @@ export default async function DocsPage() {
                   Importing Data
                 </a>
               </li>
+              <li>
+                <a href="#advanced-features" className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2">
+                  <ChevronRight className="w-4 h-4" />
+                  Advanced Features
+                </a>
+              </li>
             </ul>
           </nav>
 
@@ -118,6 +130,10 @@ export default async function DocsPage() {
                     <li>
                       <span className="text-slate-300 font-medium">Member</span> — Can create and edit
                       projects/components
+                    </li>
+                    <li>
+                      <span className="text-slate-500 font-medium">Viewer</span> — Read-only access to projects and
+                      components
                     </li>
                   </ul>
                 </div>
@@ -448,8 +464,8 @@ export default async function DocsPage() {
                 <div className="component-card">
                   <h4 className="font-semibold mb-2 text-sm">Component Templates</h4>
                   <p className="text-slate-400 text-xs">
-                    Start from pre-built templates for common patterns: Login, CRUD Operations, Search, Dashboard, File
-                    Upload, and more.
+                    Start from 10 pre-built templates: Authentication, CRUD Operations, REST API, Forms, Dashboard,
+                    Search, File Upload, Notifications, Payments, and Admin Panel.
                   </p>
                 </div>
               </div>
@@ -483,15 +499,11 @@ export default async function DocsPage() {
                     <h4 className="text-sm font-medium text-slate-300">JSON Files</h4>
                     <p className="text-xs text-slate-500">Structured data exports</p>
                   </div>
-                  <div className="p-3 bg-slate-900/50 rounded-lg">
-                    <h4 className="text-sm font-medium text-slate-300">Jira Exports</h4>
-                    <p className="text-xs text-slate-500">CSV exports from Jira Cloud/Server</p>
-                  </div>
-                  <div className="p-3 bg-slate-900/50 rounded-lg">
-                    <h4 className="text-sm font-medium text-slate-300">Trello / Asana</h4>
-                    <p className="text-xs text-slate-500">Board and task exports</p>
-                  </div>
                 </div>
+                <p className="text-xs text-slate-500 mt-3">
+                  Works with exports from Jira, Trello, Asana, and other tools — the AI intelligently maps columns to
+                  TaskTitan fields.
+                </p>
               </div>
 
               {/* AI-Powered Import */}
@@ -504,8 +516,8 @@ export default async function DocsPage() {
                   <li className="flex items-start gap-2">
                     <Search className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
                     <span>
-                      <span className="text-slate-300">Auto-detection:</span> Recognizes Jira, Trello, and Asana export
-                      formats
+                      <span className="text-slate-300">Auto-detection:</span> Intelligently recognizes common column
+                      names from various tools
                     </span>
                   </li>
                   <li className="flex items-start gap-2">
@@ -573,6 +585,218 @@ export default async function DocsPage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Advanced Features Section */}
+          <section id="advanced-features" className="mb-16">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
+                <Settings className="w-5 h-5 text-violet-400" />
+              </div>
+              <h2 className="text-2xl font-bold">Advanced Features</h2>
+            </div>
+
+            <p className="text-slate-300 mb-6">
+              TaskTitan includes powerful features for teams that need more control over their workflow.
+            </p>
+
+            <div className="space-y-6">
+              {/* GitHub Integration */}
+              <div className="component-card">
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <Github className="w-5 h-5 text-slate-400" />
+                  GitHub Integration
+                </h3>
+                <p className="text-slate-400 text-sm mb-4">
+                  Connect your GitHub repositories for automatic component status updates based on pull request events.
+                </p>
+                <ul className="space-y-2 text-sm text-slate-400">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    Link pull requests to components directly from the component card
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    Automatic status transitions when PRs are opened, merged, or closed
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    Configure which status to set when a PR is merged (e.g., Review or Completed)
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    Copy branch names in a consistent format for easy checkout
+                  </li>
+                </ul>
+              </div>
+
+              {/* Team Metrics */}
+              <div className="component-card">
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-cyan-400" />
+                  Team Metrics & Analytics
+                </h3>
+                <p className="text-slate-400 text-sm mb-4">
+                  Track team performance with detailed analytics on your team&apos;s metrics page.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300">Cycle Time</h4>
+                    <p className="text-xs text-slate-500">
+                      Average, median, p85, and p95 times from start to completion
+                    </p>
+                  </div>
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300">Throughput</h4>
+                    <p className="text-xs text-slate-500">Components completed per time period</p>
+                  </div>
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300">Status Distribution</h4>
+                    <p className="text-xs text-slate-500">Visual breakdown of work across statuses</p>
+                  </div>
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300">Status History</h4>
+                    <p className="text-xs text-slate-500">Track how long items spend in each status</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Capacity Planning */}
+              <div className="component-card">
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-violet-400" />
+                  Team Capacity Planning
+                </h3>
+                <p className="text-slate-400 text-sm mb-4">
+                  Set team member availability for realistic sprint planning.
+                </p>
+                <ul className="space-y-2 text-sm text-slate-400">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="text-slate-300">Hours per day:</span> Account for meetings and non-coding time
+                      (default: 6 hours)
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="text-slate-300">Availability:</span> Set percentage for part-time or shared
+                      resources
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="text-slate-300">Sprint capacity:</span> Automatically calculated based on team
+                      availability
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Decision Journal */}
+              <div className="component-card">
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-amber-400" />
+                  Decision Journal
+                </h3>
+                <p className="text-slate-400 text-sm mb-4">
+                  Document the context and rationale behind technical decisions for each component.
+                </p>
+                <ul className="space-y-2 text-sm text-slate-400">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    Record decisions, rationale, and alternatives considered
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    Add links to relevant documentation or discussions
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    AI-generated summaries for future readers to quickly understand context
+                  </li>
+                </ul>
+              </div>
+
+              {/* More AI Features */}
+              <div className="component-card">
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-emerald-400" />
+                  Additional AI Features
+                </h3>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                      <Eye className="w-4 h-4 text-violet-400" />
+                      Wireframe Generation
+                    </h4>
+                    <p className="text-xs text-slate-500">AI generates UI wireframe previews for components</p>
+                  </div>
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-cyan-400" />
+                      Sprint Retrospectives
+                    </h4>
+                    <p className="text-xs text-slate-500">AI analyzes sprint performance and suggests improvements</p>
+                  </div>
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                      <GitBranch className="w-4 h-4 text-amber-400" />
+                      Bulk Refinement
+                    </h4>
+                    <p className="text-xs text-slate-500">Refine multiple components at once with AI suggestions</p>
+                  </div>
+                  <div className="p-3 bg-slate-900/50 rounded-lg">
+                    <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-emerald-400" />
+                      Context Summaries
+                    </h4>
+                    <p className="text-xs text-slate-500">AI summarizes decision context for future readers</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Workflow Configuration */}
+              <div className="component-card">
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-slate-400" />
+                  Workflow Configuration
+                </h3>
+                <p className="text-slate-400 text-sm mb-4">
+                  Fine-tune your team&apos;s workflow with advanced settings.
+                </p>
+                <ul className="space-y-2 text-sm text-slate-400">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="text-slate-300">WIP Limits:</span> Set work-in-progress limits per status column
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="text-slate-300">Custom terminology:</span> Rename &quot;Sprint&quot; to
+                      &quot;Cycle&quot; or &quot;Iteration&quot;
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="text-slate-300">Enforce estimates:</span> Require hour estimates before starting
+                      work
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="text-slate-300">Auto-archive:</span> Automatically archive completed items
+                    </span>
+                  </li>
+                </ul>
               </div>
             </div>
           </section>
