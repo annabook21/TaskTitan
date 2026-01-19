@@ -71,9 +71,11 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - sign-in (sign-in page)
+     * - privacy (privacy policy page)
+     * - docs (documentation page)
      *
      * This protects ALL other routes including API routes like /api/clear-all-data
      */
-    '/((?!api/auth|api/health|_next/static|_next/image|favicon.ico|sign-in).*)',
+    '/((?!api/auth|api/health|_next/static|_next/image|favicon.ico|sign-in|privacy|docs).*)',
   ],
 };
