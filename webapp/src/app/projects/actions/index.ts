@@ -28,4 +28,7 @@ export { generateAIComponents, applyAIComponents, checkAIStatus, refineBulkAIPla
 export { generateSmartComponent, refineSmartComponent, createFromPreview } from './smart-component';
 
 // GitHub integration settings
-export { updateProjectGitHubSettings } from './github-settings';
+export { updateProjectGitHubSettings, updateGitHubTransitionConfig } from './github-settings';
+
+// GitHub PR linking
+export { linkComponentToPR } from './component-github';

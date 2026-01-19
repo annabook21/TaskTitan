@@ -79,7 +79,12 @@ interface ComponentData {
   dueDate: Date | null;
   sprintId: string | null;
   sprint: SprintData | null;
+  // GitHub PR Integration
   githubPrUrl: string | null;
+  githubPrStatus?: string | null;
+  githubPrNumber?: number | null;
+  githubPrTitle?: string | null;
+  // Relations
   assignments: { user: TeamMember }[];
   dependsOn: { requiredComponent: { id: string; name: string; status: ComponentData['status'] } }[];
   dependedOnBy: { dependentComponent: { id: string; name: string; status: ComponentData['status'] } }[];
@@ -276,6 +281,9 @@ export default function DemoProjectDetailPage() {
           sprintId: component.sprintId,
           sprint: component.sprintId ? sprintById.get(component.sprintId) || null : null,
           githubPrUrl: component.githubPrUrl,
+          githubPrStatus: component.githubPrStatus,
+          githubPrNumber: component.githubPrNumber,
+          githubPrTitle: component.githubPrTitle,
           assignments,
           dependsOn,
           dependedOnBy,

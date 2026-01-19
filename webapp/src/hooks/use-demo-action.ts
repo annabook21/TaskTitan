@@ -306,6 +306,12 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
           githubPrTargetStatus: input.githubPrTargetStatus as 'REVIEW' | 'COMPLETED' | null,
         }),
       };
+    case 'updateGitHubTransitionConfig':
+      // In demo mode, we just store this as project metadata (simplified)
+      // The actual transition configs aren't enforced in demo mode
+      return {
+        configs: (input.transitions as Array<{ event: string; targetStatus: string; enabled: boolean }>),
+      };
     case 'deleteProject':
       return { success: demoStore.deleteProject(input.projectId as string) };
 
@@ -314,6 +320,21 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
       return { component: demoStore.createComponent(input as Parameters<typeof demoStore.createComponent>[0]) };
     case 'updateComponent':
       return { component: demoStore.updateComponent(input.componentId as string, input) };
+    case 'linkComponentToPR': {
+      const prUrl = input.prUrl as string | null;
+      const prNumber = input.prNumber as number | null;
+      const prTitle = input.prTitle as string | undefined;
+      const prStatus = input.prStatus as string | undefined;
+      return {
+        component: demoStore.updateComponent(input.componentId as string, {
+          githubPrUrl: prUrl,
+          githubPrNumber: prNumber,
+          githubPrTitle: prTitle || null,
+          githubPrStatus: prUrl ? (prStatus || 'open') : null,
+          githubPrUpdatedAt: prUrl ? new Date().toISOString() : null,
+        }),
+      };
+    }
     case 'deleteComponent':
       return { success: demoStore.deleteComponent(input.componentId as string) };
     case 'updateComponentContext':

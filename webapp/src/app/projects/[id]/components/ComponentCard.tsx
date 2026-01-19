@@ -6,11 +6,11 @@ import { updateComponent } from '@/app/projects/actions';
 import { assignComponentToSprint } from '@/app/sprints/actions';
 import { generatePreviewAction } from './preview-actions';
 import {
-  MoreVertical,
   GitBranch,
   Clock,
   User as UserIcon,
   ChevronDown,
+  ChevronUp,
   Check,
   Zap,
   Github,
@@ -20,6 +20,8 @@ import {
   Timer,
   AlertTriangle,
   MessageSquare,
+  Calendar,
+  ArrowRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ComponentStatus, ComponentType, User, SprintStatus } from '@prisma/client';
@@ -27,6 +29,9 @@ import AssignmentPanel from './AssignmentPanel';
 import PreviewModal from './PreviewModal';
 import ComponentContextPanel from './ComponentContextPanel';
 import ComponentRefineModal from './ComponentRefineModal';
+import CopyBranchButton from './CopyBranchButton';
+import PRLinkInput from './PRLinkInput';
+import PRStatusBadge from './PRStatusBadge';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Sprint {
@@ -48,7 +53,12 @@ interface ComponentWithRelations {
   dueDate: Date | null;
   sprintId: string | null;
   sprint: Sprint | null;
+  // GitHub PR Integration
   githubPrUrl: string | null;
+  githubPrStatus?: string | null; // "open", "draft", "merged", "closed"
+  githubPrNumber?: number | null;
+  githubPrTitle?: string | null;
+  // Relations
   assignments: { user: User }[];
   dependsOn: { requiredComponent: { id: string; name: string } }[];
   dependedOnBy: { dependentComponent: { id: string; name: string } }[];
@@ -60,6 +70,7 @@ interface ComponentWithRelations {
   contextAiSummary: string | null;
   statusEnteredAt?: Date; // For aging calculation
   cycleTimeDays?: number | null; // Cycle time for completed items
+  projectId: string; // For AI refinement
 }
 
 interface Props {
@@ -67,6 +78,7 @@ interface Props {
   teamMembers: User[];
   availableSprints: Sprint[];
   showAging?: boolean; // Show aging indicator (for Kanban teams)
+  currentUserName?: string; // For branch name generation
 }
 
 const statusOptions: { value: ComponentStatus; label: string; color: string }[] = [
@@ -119,7 +131,16 @@ function getAgingColor(days: number, status: ComponentStatus): { bg: string; tex
   return { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' };
 }
 
-export default function ComponentCard({ component, teamMembers, availableSprints, showAging = false }: Props) {
+const typeConfig = {
+  EPIC: { label: 'Epic', color: 'purple', bg: 'bg-purple-500/20', border: 'border-purple-500/30', text: 'text-purple-400' },
+  FEATURE: { label: 'Feature', color: 'blue', bg: 'bg-blue-500/20', border: 'border-blue-500/30', text: 'text-blue-400' },
+  STORY: { label: 'Story', color: 'green', bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-400' },
+  TASK: { label: 'Task', color: 'slate', bg: 'bg-slate-500/20', border: 'border-slate-500/30', text: 'text-slate-400' },
+  BUG: { label: 'Bug', color: 'red', bg: 'bg-red-500/20', border: 'border-red-500/30', text: 'text-red-400' },
+} as const;
+
+export default function ComponentCard({ component, teamMembers, availableSprints, showAging = false, currentUserName }: Props) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isSprintOpen, setIsSprintOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -190,6 +211,8 @@ export default function ComponentCard({ component, teamMembers, availableSprints
 
   const latestPreview = component.Preview?.[0];
 
+  const typeStyle = typeConfig[component.type];
+
   return (
     <>
       {showPreview && latestPreview && (
@@ -203,26 +226,157 @@ export default function ComponentCard({ component, teamMembers, availableSprints
       <div className="component-card group">
         {/* Header */}
         <div className="flex items-start justify-between mb-2">
-          <h4 className="font-medium text-slate-100 group-hover:text-cyan-400 transition-colors">{component.name}</h4>
-          <button className="p-1 text-slate-500 hover:text-slate-300 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-            <MoreVertical className="w-4 h-4" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`text-xs px-1.5 py-0.5 rounded ${typeStyle.bg} ${typeStyle.border} ${typeStyle.text} border`}>
+                {typeStyle.label}
+              </span>
+              {component.priority > 0 && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  P{component.priority}
+                </span>
+              )}
+            </div>
+            <h4 className="font-medium text-slate-100 group-hover:text-cyan-400 transition-colors">{component.name}</h4>
+          </div>
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="p-1 text-slate-500 hover:text-slate-300 rounded transition-colors ml-2"
+            title={isExpanded ? 'Collapse' : 'Expand'}
+          >
+            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
         </div>
 
-        {/* Description */}
-        {component.description && <p className="text-sm text-slate-400 line-clamp-2 mb-3">{component.description}</p>}
+        {/* Description - truncated when collapsed, full when expanded */}
+        {component.description && (
+          <p className={`text-sm text-slate-400 mb-3 ${isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}>
+            {component.description}
+          </p>
+        )}
 
-        {/* GitHub PR Link */}
-        {component.githubPrUrl && (
-          <a
-            href={component.githubPrUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 mb-2 transition-colors"
-          >
-            <Github className="w-3 h-3" />
-            View Pull Request
-          </a>
+        {/* Expanded Content */}
+        {isExpanded && (
+          <div className="space-y-3 mb-3 pb-3 border-b border-slate-700">
+            {/* Due Date */}
+            {component.dueDate && (
+              <div className="flex items-center gap-2 text-sm">
+                <Calendar className="w-4 h-4 text-slate-500" />
+                <span className="text-slate-400">Due:</span>
+                <span className={`${new Date(component.dueDate) < new Date() && component.status !== 'COMPLETED' ? 'text-red-400' : 'text-slate-300'}`}>
+                  {new Date(component.dueDate).toLocaleDateString()}
+                </span>
+              </div>
+            )}
+
+            {/* Estimated Hours */}
+            {component.estimatedHours && (
+              <div className="flex items-center gap-2 text-sm">
+                <Clock className="w-4 h-4 text-slate-500" />
+                <span className="text-slate-400">Estimate:</span>
+                <span className="text-slate-300">{component.estimatedHours} hours</span>
+              </div>
+            )}
+
+            {/* Dependencies - Full list */}
+            {component.dependsOn.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-sm text-slate-400">
+                  <GitBranch className="w-4 h-4 text-slate-500" />
+                  <span>Depends on ({component.dependsOn.length}):</span>
+                </div>
+                <div className="pl-6 space-y-1">
+                  {component.dependsOn.map((d) => (
+                    <div key={d.requiredComponent.id} className="flex items-center gap-2 text-sm">
+                      <ArrowRight className="w-3 h-3 text-cyan-400" />
+                      <span className="text-slate-300">{d.requiredComponent.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Depended on by */}
+            {component.dependedOnBy.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-sm text-slate-400">
+                  <GitBranch className="w-4 h-4 text-slate-500 rotate-180" />
+                  <span>Blocks ({component.dependedOnBy.length}):</span>
+                </div>
+                <div className="pl-6 space-y-1">
+                  {component.dependedOnBy.map((d) => (
+                    <div key={d.dependentComponent.id} className="flex items-center gap-2 text-sm">
+                      <ArrowRight className="w-3 h-3 text-amber-400" />
+                      <span className="text-slate-300">{d.dependentComponent.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Assignees - Full list */}
+            {component.assignments.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-sm text-slate-400">
+                  <UserIcon className="w-4 h-4 text-slate-500" />
+                  <span>Assigned to ({component.assignments.length}):</span>
+                </div>
+                <div className="pl-6 space-y-1">
+                  {component.assignments.map(({ user }) => (
+                    <div key={user.id} className="flex items-center gap-2 text-sm">
+                      <div className="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-xs font-medium">
+                        {user.name?.[0] || user.email[0].toUpperCase()}
+                      </div>
+                      <span className="text-slate-300">{user.name || user.email}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* GitHub Integration - Expanded View */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <Github className="w-4 h-4 text-slate-500" />
+                <span>GitHub</span>
+              </div>
+              <div className="pl-6 space-y-2">
+                {/* PR Status Badge or Link Input */}
+                {component.githubPrUrl ? (
+                  <PRStatusBadge
+                    prUrl={component.githubPrUrl}
+                    prNumber={component.githubPrNumber}
+                    prTitle={component.githubPrTitle}
+                    prStatus={component.githubPrStatus as 'open' | 'draft' | 'merged' | 'closed' | null}
+                  />
+                ) : (
+                  <PRLinkInput
+                    componentId={component.id}
+                    currentPrUrl={component.githubPrUrl}
+                  />
+                )}
+                {/* Copy Branch Button */}
+                <CopyBranchButton
+                  componentId={component.id}
+                  componentName={component.name}
+                  userName={currentUserName}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* GitHub PR - Collapsed view */}
+        {!isExpanded && component.githubPrUrl && (
+          <div className="mb-2">
+            <PRStatusBadge
+              prUrl={component.githubPrUrl}
+              prNumber={component.githubPrNumber}
+              prTitle={component.githubPrTitle}
+              prStatus={component.githubPrStatus as 'open' | 'draft' | 'merged' | 'closed' | null}
+              compact
+            />
+          </div>
         )}
 
         {/* Actions */}
@@ -338,8 +492,8 @@ export default function ComponentCard({ component, teamMembers, availableSprints
           </div>
         )}
 
-        {/* Dependencies */}
-        {component.dependsOn.length > 0 && (
+        {/* Dependencies - Collapsed view (only show if not expanded) */}
+        {!isExpanded && component.dependsOn.length > 0 && (
           <div className="text-xs text-slate-500 mb-2 flex items-center gap-1">
             <GitBranch className="w-3.5 h-3.5" />
             Depends on: {component.dependsOn.map((d) => d.requiredComponent.name).join(', ')}
@@ -375,7 +529,7 @@ export default function ComponentCard({ component, teamMembers, availableSprints
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-          {/* Assignees */}
+          {/* Assignees - Collapsed view */}
           <div className="flex items-center gap-2">
             <div className="flex items-center -space-x-2">
               {component.assignments.length === 0 ? (
@@ -415,8 +569,11 @@ export default function ComponentCard({ component, teamMembers, availableSprints
                 {component.estimatedHours}h
               </span>
             )}
-            {component.priority > 0 && (
-              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">P{component.priority}</span>
+            {component.dueDate && (
+              <span className={`flex items-center gap-1 ${new Date(component.dueDate) < new Date() && component.status !== 'COMPLETED' ? 'text-red-400' : ''}`}>
+                <Calendar className="w-3 h-3" />
+                {new Date(component.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </span>
             )}
           </div>
         </div>

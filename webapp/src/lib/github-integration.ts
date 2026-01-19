@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
 import { runJob } from '@/lib/jobs';
-import type { ComponentStatus, Component, Assignment } from '@prisma/client';
+import type { ComponentStatus, Component, Assignment, GitHubEvent } from '@prisma/client';
 
 /**
  * Extract component IDs from PR title and body
@@ -47,15 +47,40 @@ export async function findComponentsForPR(
   });
 }
 
+interface TransitionConfig {
+  event: GitHubEvent;
+  targetStatus: ComponentStatus;
+  enabled: boolean;
+}
+
 interface PullRequestPayload {
   action: string;
+  number: number;
   pull_request: {
     html_url: string;
+    number: number;
     title: string;
     body: string | null;
+    state: string;
+    draft: boolean;
     merged: boolean;
     merged_by: { login: string } | null;
     merged_at: string | null;
+    user: { login: string };
+  };
+}
+
+interface PullRequestReviewPayload {
+  action: string;
+  review: {
+    state: string; // "approved", "changes_requested", "commented"
+    user: { login: string };
+  };
+  pull_request: {
+    html_url: string;
+    number: number;
+    title: string;
+    body: string | null;
   };
 }
 
@@ -63,36 +88,76 @@ interface ProjectWithSettings {
   id: string;
   ownerId: string;
   githubPrTargetStatus: ComponentStatus | null;
+  transitionConfigs: TransitionConfig[];
+}
+
+/**
+ * Get the target status for a GitHub event from project configuration
+ */
+function getTargetStatusForEvent(
+  event: GitHubEvent,
+  transitionConfigs: TransitionConfig[],
+  fallbackStatus?: ComponentStatus | null
+): ComponentStatus | null {
+  const config = transitionConfigs.find(c => c.event === event && c.enabled);
+  if (config) {
+    return config.targetStatus;
+  }
+  
+  // Fallback for legacy PR_MERGED behavior
+  if (event === 'PR_MERGED' && fallbackStatus) {
+    return fallbackStatus;
+  }
+  
+  return null;
+}
+
+/**
+ * Map GitHub pull_request action to our GitHubEvent type
+ */
+function mapPRActionToEvent(action: string, pr: PullRequestPayload['pull_request']): GitHubEvent | null {
+  switch (action) {
+    case 'opened':
+      return pr.draft ? null : 'PR_OPENED';
+    case 'ready_for_review':
+      return 'PR_READY_FOR_REVIEW';
+    case 'closed':
+      return pr.merged ? 'PR_MERGED' : 'PR_CLOSED';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Map PR state to our status string
+ */
+function mapPRStateToStatus(pr: PullRequestPayload['pull_request']): 'open' | 'draft' | 'merged' | 'closed' {
+  if (pr.merged) return 'merged';
+  if (pr.draft) return 'draft';
+  if (pr.state === 'closed') return 'closed';
+  return 'open';
 }
 
 /**
  * Handle pull_request webhook event from GitHub
  */
 export async function handlePullRequestEvent(payload: PullRequestPayload, project: ProjectWithSettings): Promise<void> {
-  // Only process closed PRs that were merged
-  if (payload.action !== 'closed' || !payload.pull_request.merged) {
-    logger.info('Ignoring non-merged PR event', {
-      extra: {
-        action: payload.action,
-        merged: payload.pull_request.merged,
-        prUrl: payload.pull_request.html_url,
-      },
-    });
-    return;
-  }
-
   const pr = payload.pull_request;
-  const searchText = `${pr.title}\n${pr.body || ''}`;
-  const componentIds = extractComponentIds(searchText);
-
-  logger.info('Processing merged PR', {
+  const event = mapPRActionToEvent(payload.action, pr);
+  
+  logger.info('Processing pull_request event', {
     extra: {
+      action: payload.action,
+      event,
       prUrl: pr.html_url,
-      prTitle: pr.title,
-      componentIds,
+      prNumber: pr.number,
       projectId: project.id,
     },
   });
+
+  // Extract component IDs from PR title and body
+  const searchText = `${pr.title}\n${pr.body || ''}`;
+  const componentIds = extractComponentIds(searchText);
 
   // Find matching components
   const components = await findComponentsForPR(project.id, componentIds, pr.html_url);
@@ -104,19 +169,46 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
     return;
   }
 
-  // Determine target status (default to REVIEW if not configured)
-  const targetStatus = project.githubPrTargetStatus || 'REVIEW';
+  // Update PR metadata on all linked components
+  const prStatus = mapPRStateToStatus(pr);
+  await Promise.all(
+    components.map(component =>
+      prisma.component.update({
+        where: { id: component.id },
+        data: {
+          githubPrUrl: pr.html_url,
+          githubPrNumber: pr.number,
+          githubPrTitle: pr.title,
+          githubPrStatus: prStatus,
+          githubPrUpdatedAt: new Date(),
+        },
+      })
+    )
+  );
 
-  // Update each component
-  for (const component of components) {
-    await updateComponentFromPR(component, pr, targetStatus, project.ownerId);
+  // If we have a mappable event, check for status transition
+  if (event) {
+    const targetStatus = getTargetStatusForEvent(event, project.transitionConfigs, project.githubPrTargetStatus);
+    
+    if (targetStatus) {
+      for (const component of components) {
+        await updateComponentStatus(component, targetStatus, project.ownerId, {
+          event,
+          prUrl: pr.html_url,
+          prTitle: pr.title,
+          prNumber: pr.number,
+          triggeredBy: pr.user.login,
+          mergedBy: pr.merged_by?.login,
+          mergedAt: pr.merged_at,
+        });
+      }
+    }
   }
 
-  logger.info('GitHub webhook processed successfully', {
+  logger.info('GitHub pull_request event processed', {
     extra: {
-      event: 'pull_request',
-      action: 'closed',
-      merged: true,
+      action: payload.action,
+      event,
       componentsUpdated: components.length,
       prUrl: pr.html_url,
     },
@@ -124,42 +216,119 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
 }
 
 /**
- * Update component status from merged PR
- * Creates activity log and sends notifications
+ * Handle pull_request_review webhook event from GitHub
  */
-async function updateComponentFromPR(
+export async function handlePullRequestReviewEvent(
+  payload: PullRequestReviewPayload,
+  project: Omit<ProjectWithSettings, 'githubPrTargetStatus'>
+): Promise<void> {
+  // Only process approved reviews
+  if (payload.action !== 'submitted' || payload.review.state !== 'approved') {
+    logger.info('Ignoring non-approval review event', {
+      extra: {
+        action: payload.action,
+        reviewState: payload.review.state,
+      },
+    });
+    return;
+  }
+
+  const pr = payload.pull_request;
+  const searchText = `${pr.title}\n${pr.body || ''}`;
+  const componentIds = extractComponentIds(searchText);
+
+  // Find matching components
+  const components = await findComponentsForPR(project.id, componentIds, pr.html_url);
+
+  if (components.length === 0) {
+    logger.info('No components found for PR review', {
+      extra: { prUrl: pr.html_url, componentIds },
+    });
+    return;
+  }
+
+  // Check for status transition on approval
+  const targetStatus = getTargetStatusForEvent('PR_APPROVED', project.transitionConfigs, null);
+  
+  if (targetStatus) {
+    for (const component of components) {
+      await updateComponentStatus(component, targetStatus, project.ownerId, {
+        event: 'PR_APPROVED',
+        prUrl: pr.html_url,
+        prTitle: pr.title,
+        prNumber: pr.number,
+        approvedBy: payload.review.user.login,
+      });
+    }
+  }
+
+  logger.info('GitHub pull_request_review event processed', {
+    extra: {
+      reviewState: payload.review.state,
+      componentsUpdated: components.length,
+      prUrl: pr.html_url,
+    },
+  });
+}
+
+/**
+ * Update component status and create activity/notifications
+ */
+async function updateComponentStatus(
   component: Component & { Assignment: Assignment[] },
-  pr: PullRequestPayload['pull_request'],
   targetStatus: ComponentStatus,
   projectOwnerId: string,
+  metadata: {
+    event: GitHubEvent;
+    prUrl: string;
+    prTitle: string;
+    prNumber: number;
+    triggeredBy?: string;
+    mergedBy?: string | null;
+    mergedAt?: string | null;
+    approvedBy?: string;
+  }
 ): Promise<void> {
   const oldStatus = component.status;
 
-  // Update component
-  const updated = await prisma.component.update({
+  // Skip if already at target status
+  if (oldStatus === targetStatus) {
+    logger.info('Component already at target status', {
+      extra: {
+        componentId: component.id,
+        status: targetStatus,
+      },
+    });
+    return;
+  }
+
+  // Update component status
+  await prisma.component.update({
     where: { id: component.id },
     data: {
       status: targetStatus,
-      githubPrUrl: pr.html_url, // Store PR URL if not already set
     },
   });
 
-  // Create activity log with PR metadata
+  // Map event to activity type
+  const activityType = metadata.event === 'PR_MERGED' 
+    ? 'GITHUB_PR_MERGED' 
+    : metadata.event === 'PR_CLOSED'
+    ? 'GITHUB_PR_CLOSED'
+    : 'GITHUB_PR_OPENED';
+
+  // Create activity log
   await prisma.activity.create({
     data: {
-      type: 'COMPONENT_STATUS_CHANGED',
+      type: activityType,
       projectId: component.projectId,
-      userId: projectOwnerId, // Use project owner since webhook doesn't have user context
+      userId: projectOwnerId,
       metadata: {
         componentName: component.name,
         componentId: component.id,
         oldStatus,
         newStatus: targetStatus,
-        triggeredBy: 'github_pr_merge',
-        prUrl: pr.html_url,
-        prTitle: pr.title,
-        mergedBy: pr.merged_by?.login,
-        mergedAt: pr.merged_at,
+        ...metadata,
       },
     },
   });
@@ -175,22 +344,24 @@ async function updateComponentFromPR(
           userId,
           componentId: component.id,
           metadata: {
-            triggeredBy: 'github_pr_merge',
-            prUrl: pr.html_url,
-            prTitle: pr.title,
+            triggeredBy: 'github',
+            event: metadata.event,
+            prUrl: metadata.prUrl,
+            prTitle: metadata.prTitle,
           },
         }),
       ),
     );
   }
 
-  logger.info('Component updated from GitHub PR', {
+  logger.info('Component status updated from GitHub event', {
     extra: {
       componentId: component.id,
       componentName: component.name,
+      event: metadata.event,
       oldStatus,
       newStatus: targetStatus,
-      prUrl: pr.html_url,
+      prUrl: metadata.prUrl,
       assignedUsersNotified: assignedUserIds.length,
     },
   });

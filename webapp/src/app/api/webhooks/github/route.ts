@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
-import { handlePullRequestEvent } from '@/lib/github-integration';
+import { handlePullRequestEvent, handlePullRequestReviewEvent } from '@/lib/github-integration';
 
 /**
  * Verify GitHub webhook signature using HMAC SHA-256
@@ -25,7 +25,7 @@ function verifyGitHubSignature(payload: string, signature: string | null, secret
 }
 
 /**
- * GitHub webhook endpoint - receives pull_request events
+ * GitHub webhook endpoint - receives pull_request and pull_request_review events
  */
 export async function POST(req: NextRequest) {
   try {
@@ -66,6 +66,9 @@ export async function POST(req: NextRequest) {
         ownerId: true,
         githubWebhookSecret: true,
         githubPrTargetStatus: true,
+        GitHubTransitionConfig: {
+          where: { enabled: true },
+        },
       },
     });
 
@@ -88,15 +91,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
 
-    // 5. Handle pull_request event
+    // 5. Handle events based on type
     if (event === 'pull_request') {
       await handlePullRequestEvent(webhookPayload, {
         id: project.id,
         ownerId: project.ownerId,
         githubPrTargetStatus: project.githubPrTargetStatus,
+        transitionConfigs: project.GitHubTransitionConfig,
+      });
+    } else if (event === 'pull_request_review') {
+      await handlePullRequestReviewEvent(webhookPayload, {
+        id: project.id,
+        ownerId: project.ownerId,
+        transitionConfigs: project.GitHubTransitionConfig,
       });
     } else {
-      logger.info('Ignoring non-pull_request event', {
+      logger.info('Ignoring unsupported event', {
         extra: { event, deliveryId },
       });
     }

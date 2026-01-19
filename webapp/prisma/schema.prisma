@@ -59,7 +59,12 @@ model Component {
   owner                                                 String? // Imported owner name (may not match a User)
   tags                                                  String[]                 @default([])
   externalId                                            String? // For import tracking (e.g., Jira key)
+  // GitHub PR Integration
   githubPrUrl                                           String? // GitHub PR URL
+  githubPrStatus                                        String? // "open", "draft", "merged", "closed"
+  githubPrNumber                                        Int?    // PR number (e.g., 123)
+  githubPrTitle                                         String? // PR title
+  githubPrUpdatedAt                                     DateTime? // When PR was last updated
   // Component Context (Decision Journal)
   contextDecision                                       String?                  @db.Text // What was decided
   contextRationale                                      String?                  @db.Text // Why this approach
@@ -125,25 +130,41 @@ model Membership {
 }
 
 model Project {
-  id                   String           @id @default(cuid())
-  name                 String
-  description          String?
-  teamId               String
-  ownerId              String
+  id                       String                   @id @default(cuid())
+  name                     String
+  description              String?
+  teamId                   String
+  ownerId                  String
   // GitHub Integration
-  githubRepoUrl        String?
-  githubWebhookSecret  String?
-  githubPrTargetStatus ComponentStatus? @default(REVIEW)
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  Activity             Activity[]
-  Component            Component[]
-  User                 User             @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  Team                 Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  githubRepoUrl            String?
+  githubWebhookSecret      String?
+  githubPrTargetStatus     ComponentStatus?         @default(REVIEW) // Legacy field, kept for backwards compatibility
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+  Activity                 Activity[]
+  Component                Component[]
+  GitHubTransitionConfig   GitHubTransitionConfig[]
+  User                     User                     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  Team                     Team                     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([ownerId])
   @@index([teamId])
   @@index([githubRepoUrl])
+}
+
+// Configurable GitHub event to component status transitions
+model GitHubTransitionConfig {
+  id           String          @id @default(cuid())
+  projectId    String
+  event        GitHubEvent
+  targetStatus ComponentStatus
+  enabled      Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  Project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, event])
+  @@index([projectId])
 }
 
 model Sprint {
@@ -234,6 +255,11 @@ enum ActivityType {
   SPRINT_COMPLETED
   COMPONENT_ADDED_TO_SPRINT
   COMPONENT_REMOVED_FROM_SPRINT
+  // GitHub Integration Events
+  GITHUB_PR_OPENED
+  GITHUB_PR_MERGED
+  GITHUB_PR_CLOSED
+  GITHUB_PR_LINKED
 }
 
 enum ComponentStatus {
@@ -264,6 +290,14 @@ enum SprintStatus {
   ACTIVE // Currently running
   COMPLETED // Successfully finished
   CANCELLED // Cancelled before completion
+}
+
+enum GitHubEvent {
+  PR_OPENED
+  PR_READY_FOR_REVIEW
+  PR_APPROVED
+  PR_MERGED
+  PR_CLOSED
 }
 
 // Workflow configuration for teams (Pathway B: Workflow Freedom)

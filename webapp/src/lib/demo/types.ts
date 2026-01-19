@@ -60,7 +60,13 @@ export interface DemoComponent {
   owner: string | null;
   tags: string[];
   externalId: string | null;
+  // GitHub PR Integration
   githubPrUrl: string | null;
+  githubPrStatus: string | null; // "open", "draft", "merged", "closed"
+  githubPrNumber: number | null;
+  githubPrTitle: string | null;
+  githubPrUpdatedAt: string | null;
+  // Context
   contextDecision: string | null;
   contextRationale: string | null;
   contextAlternatives: string | null;
