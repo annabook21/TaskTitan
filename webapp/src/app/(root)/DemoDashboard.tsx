@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import { FolderKanban, Users, GitBranch, Plus, ArrowRight, Sparkles, Layers, Clock } from 'lucide-react';
+import { FolderKanban, Users, Upload, Plus, ArrowRight, Sparkles, Layers, Clock } from 'lucide-react';
 
 interface DashboardData {
   teams: Array<{
@@ -296,15 +296,17 @@ export default function DemoDashboard() {
                       <div className="text-xs text-slate-500">Collaborate with others</div>
                     </div>
                   </Link>
-                  <div className="component-card flex items-center gap-3 opacity-60 cursor-not-allowed">
+                  <Link href="/import" className="component-card flex items-center gap-3 group">
                     <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                      <GitBranch className="w-5 h-5 text-emerald-400" />
+                      <Upload className="w-5 h-5 text-emerald-400" />
                     </div>
                     <div>
-                      <div className="font-medium text-slate-200">Import from GitHub</div>
-                      <div className="text-xs text-slate-500">Coming soon</div>
+                      <div className="font-medium text-slate-200 group-hover:text-emerald-400 transition-colors">
+                        Import from Jira
+                      </div>
+                      <div className="text-xs text-slate-500">CSV, JSON, or Jira exports</div>
                     </div>
-                  </div>
+                  </Link>
                 </div>
               </div>
             </div>

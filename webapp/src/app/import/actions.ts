@@ -91,7 +91,8 @@ function generateSimpleMappings(headers: string[], sampleRows: Record<string, st
     priority: [/^(priority|severity|importance)$/i, /priority|severity/i],
     owner: [/^(owner|assignee|assigned|assigned.?to|user)$/i, /assignee|owner|assigned/i],
     estimatedHours: [/^(estimate|hours|effort|story.?points|points)$/i, /estimate|hours|effort/i],
-    parentName: [/^(parent|epic|parent.?name|epic.?name)$/i, /parent|epic/i],
+    dueDate: [/^(due.?date|due|deadline|target.?date|end.?date)$/i, /due|deadline/i],
+    parentName: [/^(parent|epic|parent.?name|epic.?name|epic.?link)$/i, /parent|epic/i],
     externalId: [/^(id|key|external.?id|jira.?key|issue.?key)$/i, /^key$/i],
     sprint: [/^(sprint|iteration|milestone)$/i, /sprint|iteration/i],
     tags: [/^(tags|labels|components)$/i, /tags|labels/i],
@@ -382,6 +383,14 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     return 0;
   };
 
+  // Helper to parse date
+  const parseDate = (value?: string): Date | null => {
+    if (!value) return null;
+    const parsed = Date.parse(value);
+    if (isNaN(parsed)) return null;
+    return new Date(parsed);
+  };
+
   // Parse all rows first
   const parsedRows: Array<{
     rowIndex: number;
@@ -394,6 +403,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     externalId: string | null;
     tags: string[];
     estimatedHours: number | null;
+    dueDate: Date | null;
     parentName: string | null;
   }> = [];
 
@@ -439,6 +449,8 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
       if (!isNaN(parsed)) estimatedHours = parsed;
     }
 
+    const dueDate = parseDate(getValue(row, 'dueDate'));
+
     parsedRows.push({
       rowIndex: i + 1,
       name,
@@ -450,6 +462,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
       externalId: externalId || null,
       tags,
       estimatedHours,
+      dueDate,
       parentName: parentName || null,
     });
   }
@@ -472,6 +485,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
           externalId: c.externalId,
           tags: c.tags,
           estimatedHours: c.estimatedHours,
+          dueDate: c.dueDate,
           projectId: targetProjectId,
           sprintId: autoAssignSprint || null,
         })),
@@ -551,6 +565,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
           externalId: c.externalId,
           tags: c.tags,
           estimatedHours: c.estimatedHours,
+          dueDate: c.dueDate,
           projectId: targetProjectId,
           sprintId: autoAssignSprint || null,
           parentId: createdItems.get(c.parentName!) || null,

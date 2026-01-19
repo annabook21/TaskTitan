@@ -54,6 +54,7 @@ const targetFieldOptions = [
   { value: 'status', label: 'Status' },
   { value: 'priority', label: 'Priority' },
   { value: 'estimatedHours', label: 'Estimated Hours' },
+  { value: 'dueDate', label: 'Due Date' },
   { value: 'sprint', label: 'Sprint' },
   { value: 'tags', label: 'Tags (comma-separated)' },
   { value: 'externalId', label: 'External ID (e.g., Jira key)' },
@@ -100,6 +101,11 @@ const fieldValidationRules: Record<string, { format: string; example: string; va
     format: 'Positive number',
     example: '8',
     validate: (v) => !v || (!isNaN(parseFloat(v)) && parseFloat(v) >= 0),
+  },
+  dueDate: {
+    format: 'Date (YYYY-MM-DD, MM/DD/YYYY, or DD/MM/YYYY)',
+    example: '2026-03-15',
+    validate: (v) => !v || !isNaN(Date.parse(v)),
   },
   sprint: {
     format: 'Sprint name',
