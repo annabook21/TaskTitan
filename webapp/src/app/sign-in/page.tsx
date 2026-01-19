@@ -122,14 +122,14 @@ export default function SignInPage() {
       {/* Right side - Sign in form */}
       <div className="w-full lg:w-1/2 flex flex-col justify-center relative">
         {/* Background for mobile */}
-        <div className="absolute inset-0 lg:hidden">
+        <div className="absolute inset-0 lg:hidden pointer-events-none">
           <div className="absolute inset-0 bg-gradient-to-br from-violet-950/50 via-slate-900 to-slate-950" />
           <div className="absolute inset-0 grid-pattern opacity-20" />
         </div>
 
         {/* Subtle gradient accents */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-violet-500/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl" />
+        <div className="absolute top-0 right-0 w-96 h-96 bg-violet-500/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 w-full max-w-md mx-auto px-6 sm:px-8 animate-slide-up">
           {/* Mobile logo */}
