@@ -8,7 +8,10 @@
     "format": "prettier --write './**/*.{ts,tsx,mjs,mts}' && npx prisma format",
     "format:check": "prettier --check './**/*.{ts,tsx,mjs,mts}' && npx prisma format --check",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@aws-amplify/adapter-nextjs": "^1.6.0",
@@ -45,11 +48,14 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.0.17",
     "eslint": "^9",
     "eslint-config-next": "15.3.0",
     "prettier": "^3.5.3",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vitest": "^4.0.17",
+    "vitest-mock-extended": "^3.1.0",
     "zod-prisma-types": "^3.2.4"
   }
 }
