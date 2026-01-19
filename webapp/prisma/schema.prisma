@@ -62,7 +62,7 @@ model Component {
   // GitHub PR Integration
   githubPrUrl                                           String? // GitHub PR URL
   githubPrStatus                                        String? // "open", "draft", "merged", "closed"
-  githubPrNumber                                        Int?    // PR number (e.g., 123)
+  githubPrNumber                                        Int? // PR number (e.g., 123)
   githubPrTitle                                         String? // PR title
   githubPrUpdatedAt                                     DateTime? // When PR was last updated
   // Component Context (Decision Journal)
@@ -119,7 +119,7 @@ model Membership {
   role         Role     @default(MEMBER)
   joinedAt     DateTime @default(now())
   // Capacity planning fields (industry standard formula)
-  title        String?              // e.g., "Frontend Developer", "QA Engineer"
+  title        String? // e.g., "Frontend Developer", "QA Engineer"
   hoursPerDay  Float?   @default(6) // Default: 6 hours (accounts for meetings)
   availability Float?   @default(100) // Percentage 0-100
   Team         Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -130,22 +130,22 @@ model Membership {
 }
 
 model Project {
-  id                       String                   @id @default(cuid())
-  name                     String
-  description              String?
-  teamId                   String
-  ownerId                  String
+  id                     String                   @id @default(cuid())
+  name                   String
+  description            String?
+  teamId                 String
+  ownerId                String
   // GitHub Integration
-  githubRepoUrl            String?
-  githubWebhookSecret      String?
-  githubPrTargetStatus     ComponentStatus?         @default(REVIEW) // Legacy field, kept for backwards compatibility
-  createdAt                DateTime                 @default(now())
-  updatedAt                DateTime                 @updatedAt
-  Activity                 Activity[]
-  Component                Component[]
-  GitHubTransitionConfig   GitHubTransitionConfig[]
-  User                     User                     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  Team                     Team                     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  githubRepoUrl          String?
+  githubWebhookSecret    String?
+  githubPrTargetStatus   ComponentStatus?         @default(REVIEW) // Legacy field, kept for backwards compatibility
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  Activity               Activity[]
+  Component              Component[]
+  GitHubTransitionConfig GitHubTransitionConfig[]
+  User                   User                     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  Team                   Team                     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([ownerId])
   @@index([teamId])

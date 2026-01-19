@@ -70,9 +70,7 @@ export default function InviteMemberForm({ teamId, onClose, onSuccess }: Props) 
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all text-slate-100 placeholder-slate-500"
               required
             />
-            {!demoMode && (
-              <p className="text-xs text-slate-500 mt-2">The user must have an existing account</p>
-            )}
+            {!demoMode && <p className="text-xs text-slate-500 mt-2">The user must have an existing account</p>}
           </div>
 
           <div>

@@ -16,11 +16,13 @@ const updateProjectGitHubSettingsSchema = z.object({
 // Schema for transition configuration
 const updateGitHubTransitionConfigSchema = z.object({
   projectId: z.string().cuid(),
-  transitions: z.array(z.object({
-    event: z.enum(['PR_OPENED', 'PR_READY_FOR_REVIEW', 'PR_APPROVED', 'PR_MERGED', 'PR_CLOSED']),
-    targetStatus: z.enum(['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED']),
-    enabled: z.boolean(),
-  })),
+  transitions: z.array(
+    z.object({
+      event: z.enum(['PR_OPENED', 'PR_READY_FOR_REVIEW', 'PR_APPROVED', 'PR_MERGED', 'PR_CLOSED']),
+      targetStatus: z.enum(['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED']),
+      enabled: z.boolean(),
+    }),
+  ),
 });
 
 /**
@@ -131,8 +133,8 @@ export const updateGitHubTransitionConfig = authActionClient
             targetStatus: transition.targetStatus,
             enabled: transition.enabled,
           },
-        })
-      )
+        }),
+      ),
     );
 
     revalidatePath(`/projects/${projectId}`);

@@ -16,9 +16,7 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 vi.mock('@/lib/safe-action', async () => {
-  const { MyCustomError } = await vi.importActual<typeof import('@/lib/safe-action')>(
-    '@/lib/safe-action'
-  );
+  const { MyCustomError } = await vi.importActual<typeof import('@/lib/safe-action')>('@/lib/safe-action');
   return {
     MyCustomError,
     authActionClient: {

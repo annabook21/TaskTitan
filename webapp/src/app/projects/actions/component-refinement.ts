@@ -24,7 +24,7 @@ const refineExistingComponentSchema = z.object({
         z.object({
           name: z.string(),
           type: z.string(),
-        })
+        }),
       ),
     })
     .optional(),

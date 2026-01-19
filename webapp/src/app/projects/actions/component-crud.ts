@@ -111,7 +111,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
       id,
       Project: { Team: { Membership: { some: { userId } } } },
     },
-    include: { 
+    include: {
       Project: true,
       Assignment: {
         select: {

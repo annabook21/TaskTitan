@@ -55,15 +55,15 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings, 
   const [secret, setSecret] = useState(currentSettings.githubWebhookSecret || '');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const { handleResult } = useDemoActionHandler();
-  
+
   // Merge provided configs with defaults
   const [transitions, setTransitions] = useState<TransitionConfig[]>(() => {
     if (!transitionConfigs || transitionConfigs.length === 0) {
       return defaultTransitions;
     }
     // Merge with defaults to ensure all events are present
-    return defaultTransitions.map(defaultConfig => {
-      const existing = transitionConfigs.find(c => c.event === defaultConfig.event);
+    return defaultTransitions.map((defaultConfig) => {
+      const existing = transitionConfigs.find((c) => c.event === defaultConfig.event);
       return existing || defaultConfig;
     });
   });
@@ -99,19 +99,19 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings, 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Save basic settings
     executeSettings({
       id: projectId,
       githubRepoUrl: repoUrl || null,
       githubWebhookSecret: secret || null,
-      githubPrTargetStatus: transitions.find(t => t.event === 'PR_MERGED')?.targetStatus || 'REVIEW',
+      githubPrTargetStatus: transitions.find((t) => t.event === 'PR_MERGED')?.targetStatus || 'REVIEW',
     });
-    
+
     // Save transition configs
     executeTransitions({
       projectId,
-      transitions: transitions.map(t => ({
+      transitions: transitions.map((t) => ({
         event: t.event,
         targetStatus: t.targetStatus,
         enabled: t.enabled,
@@ -131,9 +131,7 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings, 
   };
 
   const updateTransition = (event: GitHubEvent, updates: Partial<TransitionConfig>) => {
-    setTransitions(prev => prev.map(t => 
-      t.event === event ? { ...t, ...updates } : t
-    ));
+    setTransitions((prev) => prev.map((t) => (t.event === event ? { ...t, ...updates } : t)));
   };
 
   const isExecuting = isExecutingSettings || isExecutingTransitions;
@@ -232,13 +230,13 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings, 
               <ChevronDown className="w-4 h-4 text-slate-400" />
             )}
           </button>
-          
+
           {showAdvanced && (
             <div className="p-4 space-y-3 border-t border-slate-700">
               <p className="text-xs text-slate-500 mb-4">
                 Configure which component status to set when GitHub events occur on linked PRs.
               </p>
-              
+
               {transitions.map((transition) => (
                 <div
                   key={transition.event}
@@ -257,20 +255,22 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings, 
                       className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
                     />
                   </label>
-                  
+
                   {/* Event label */}
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-slate-200">{eventLabels[transition.event].label}</div>
                     <div className="text-xs text-slate-500 truncate">{eventLabels[transition.event].description}</div>
                   </div>
-                  
+
                   {/* Arrow */}
                   <span className="text-slate-500">→</span>
-                  
+
                   {/* Status dropdown */}
                   <select
                     value={transition.targetStatus}
-                    onChange={(e) => updateTransition(transition.event, { targetStatus: e.target.value as ComponentStatus })}
+                    onChange={(e) =>
+                      updateTransition(transition.event, { targetStatus: e.target.value as ComponentStatus })
+                    }
                     disabled={!transition.enabled}
                     className="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >

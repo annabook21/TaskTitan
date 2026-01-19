@@ -237,8 +237,8 @@ export default function DemoSprintsPage() {
               <Zap className="w-16 h-16 text-slate-600 mx-auto mb-4" />
               <h3 className="text-xl font-medium text-slate-300 mb-2">No {cycleNameLower}s yet</h3>
               <p className="text-slate-500 mb-6 max-w-md mx-auto">
-                {cycleNamePlural} help you organize work into focused time periods. Create your first{' '}
-                {cycleNameLower} to start planning.
+                {cycleNamePlural} help you organize work into focused time periods. Create your first {cycleNameLower}{' '}
+                to start planning.
               </p>
               {team.canManageSprints && (
                 <Link href={`/team/${teamId}/sprints/new`} className="btn-primary">
@@ -267,10 +267,7 @@ function SprintCard({ sprint, teamId, featured }: SprintCardProps) {
   const progress = sprint.componentCount > 0 ? Math.round((sprint.completedCount / sprint.componentCount) * 100) : 0;
   const endDate = sprint.endDate ? new Date(sprint.endDate) : new Date();
   const startDate = sprint.startDate ? new Date(sprint.startDate) : new Date();
-  const daysRemaining = Math.max(
-    0,
-    Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-  );
+  const daysRemaining = Math.max(0, Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
 
   return (
     <Link

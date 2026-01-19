@@ -132,14 +132,38 @@ function getAgingColor(days: number, status: ComponentStatus): { bg: string; tex
 }
 
 const typeConfig = {
-  EPIC: { label: 'Epic', color: 'purple', bg: 'bg-purple-500/20', border: 'border-purple-500/30', text: 'text-purple-400' },
-  FEATURE: { label: 'Feature', color: 'blue', bg: 'bg-blue-500/20', border: 'border-blue-500/30', text: 'text-blue-400' },
-  STORY: { label: 'Story', color: 'green', bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-400' },
+  EPIC: {
+    label: 'Epic',
+    color: 'purple',
+    bg: 'bg-purple-500/20',
+    border: 'border-purple-500/30',
+    text: 'text-purple-400',
+  },
+  FEATURE: {
+    label: 'Feature',
+    color: 'blue',
+    bg: 'bg-blue-500/20',
+    border: 'border-blue-500/30',
+    text: 'text-blue-400',
+  },
+  STORY: {
+    label: 'Story',
+    color: 'green',
+    bg: 'bg-green-500/20',
+    border: 'border-green-500/30',
+    text: 'text-green-400',
+  },
   TASK: { label: 'Task', color: 'slate', bg: 'bg-slate-500/20', border: 'border-slate-500/30', text: 'text-slate-400' },
   BUG: { label: 'Bug', color: 'red', bg: 'bg-red-500/20', border: 'border-red-500/30', text: 'text-red-400' },
 } as const;
 
-export default function ComponentCard({ component, teamMembers, availableSprints, showAging = false, currentUserName }: Props) {
+export default function ComponentCard({
+  component,
+  teamMembers,
+  availableSprints,
+  showAging = false,
+  currentUserName,
+}: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isSprintOpen, setIsSprintOpen] = useState(false);
@@ -228,7 +252,9 @@ export default function ComponentCard({ component, teamMembers, availableSprints
         <div className="flex items-start justify-between mb-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className={`text-xs px-1.5 py-0.5 rounded ${typeStyle.bg} ${typeStyle.border} ${typeStyle.text} border`}>
+              <span
+                className={`text-xs px-1.5 py-0.5 rounded ${typeStyle.bg} ${typeStyle.border} ${typeStyle.text} border`}
+              >
                 {typeStyle.label}
               </span>
               {component.priority > 0 && (
@@ -263,7 +289,9 @@ export default function ComponentCard({ component, teamMembers, availableSprints
               <div className="flex items-center gap-2 text-sm">
                 <Calendar className="w-4 h-4 text-slate-500" />
                 <span className="text-slate-400">Due:</span>
-                <span className={`${new Date(component.dueDate) < new Date() && component.status !== 'COMPLETED' ? 'text-red-400' : 'text-slate-300'}`}>
+                <span
+                  className={`${new Date(component.dueDate) < new Date() && component.status !== 'COMPLETED' ? 'text-red-400' : 'text-slate-300'}`}
+                >
                   {new Date(component.dueDate).toLocaleDateString()}
                 </span>
               </div>
@@ -350,10 +378,7 @@ export default function ComponentCard({ component, teamMembers, availableSprints
                     prStatus={component.githubPrStatus as 'open' | 'draft' | 'merged' | 'closed' | null}
                   />
                 ) : (
-                  <PRLinkInput
-                    componentId={component.id}
-                    currentPrUrl={component.githubPrUrl}
-                  />
+                  <PRLinkInput componentId={component.id} currentPrUrl={component.githubPrUrl} />
                 )}
                 {/* Copy Branch Button */}
                 <CopyBranchButton
@@ -570,7 +595,9 @@ export default function ComponentCard({ component, teamMembers, availableSprints
               </span>
             )}
             {component.dueDate && (
-              <span className={`flex items-center gap-1 ${new Date(component.dueDate) < new Date() && component.status !== 'COMPLETED' ? 'text-red-400' : ''}`}>
+              <span
+                className={`flex items-center gap-1 ${new Date(component.dueDate) < new Date() && component.status !== 'COMPLETED' ? 'text-red-400' : ''}`}
+              >
                 <Calendar className="w-3 h-3" />
                 {new Date(component.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
               </span>

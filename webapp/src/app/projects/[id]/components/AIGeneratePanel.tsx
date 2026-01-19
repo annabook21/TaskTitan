@@ -75,25 +75,27 @@ export default function AIGeneratePanel({
   // For Scrum: epics are optional backlog organization (sprints are always generated)
   const [generateEpics, setGenerateEpics] = useState(false);
   const [hasAttemptedAutoGeneration, setHasAttemptedAutoGeneration] = useState(false);
-  
+
   // Chat refinement state
   const [chatInput, setChatInput] = useState('');
   const [chatSuggestions, setChatSuggestions] = useState<string[]>([]);
   const [refinementExplanation, setRefinementExplanation] = useState('');
   const [changedItems, setChangedItems] = useState<Array<{ type: string; name: string; change: string }>>([]);
-  
+
   // History/undo state
-  const [history, setHistory] = useState<Array<{
-    components: GeneratedComponent[];
-    sprints: GeneratedSprint[];
-    epics: GeneratedEpic[];
-    summary: string;
-  }>>([]);
+  const [history, setHistory] = useState<
+    Array<{
+      components: GeneratedComponent[];
+      sprints: GeneratedSprint[];
+      epics: GeneratedEpic[];
+      summary: string;
+    }>
+  >([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  
+
   // Progress state
   const [generationProgress, setGenerationProgress] = useState<string>('');
-  
+
   const { handleResult } = useDemoActionHandler();
 
   // Terminology
@@ -126,11 +128,11 @@ export default function AIGeneratePanel({
   // Helper to generate chat suggestions based on current plan
   const generateChatSuggestions = (components: GeneratedComponent[], sprints: GeneratedSprint[]) => {
     const suggestions: string[] = [];
-    
+
     if (sprints.length > 1) {
       suggestions.push('Move items between sprints');
     }
-    
+
     if (sprints.length > 0) {
       const firstSprintHours = components
         .filter((c) => sprints[0].componentNames.includes(c.name))
@@ -139,16 +141,16 @@ export default function AIGeneratePanel({
         suggestions.push('Reduce Sprint 1 scope');
       }
     }
-    
+
     const largeComponents = components.filter((c) => c.estimatedHours > 20);
     if (largeComponents.length > 0) {
       suggestions.push(`Break down ${largeComponents[0].name} into smaller tasks`);
     }
-    
+
     if (suggestions.length < 3) {
       suggestions.push('Adjust component priorities');
     }
-    
+
     return suggestions.slice(0, 3);
   };
 
@@ -199,7 +201,7 @@ export default function AIGeneratePanel({
 
       if ('components' in data && data.components) {
         const result = data as unknown as GenerateResult;
-        
+
         // Save to history
         const newHistoryEntry = {
           components: result.components,
@@ -209,7 +211,7 @@ export default function AIGeneratePanel({
         };
         setHistory([newHistoryEntry]);
         setHistoryIndex(0);
-        
+
         setGeneratedComponents(result.components);
         setGeneratedSprints(result.sprints || []);
         setGeneratedEpics(result.epics || []);
@@ -219,7 +221,7 @@ export default function AIGeneratePanel({
         setSelectedComponents(new Set(result.components.map((c) => c.name)));
         setStep('preview');
         setGenerationProgress('');
-        
+
         // Generate initial chat suggestions
         const suggestions = generateChatSuggestions(result.components, result.sprints || []);
         setChatSuggestions(suggestions);
@@ -247,7 +249,7 @@ export default function AIGeneratePanel({
         const newHistory = [...history.slice(0, historyIndex + 1), newHistoryEntry];
         setHistory(newHistory);
         setHistoryIndex(newHistory.length - 1);
-        
+
         setGeneratedComponents(data.components);
         if (data.sprints) setGeneratedSprints(data.sprints);
         if (data.epics) setGeneratedEpics(data.epics);
@@ -310,7 +312,7 @@ export default function AIGeneratePanel({
     setGeneratedEpics([]);
     setStep('generate');
     setGenerationProgress('Analyzing project description...');
-    
+
     // Simulate progress steps
     setTimeout(() => setGenerationProgress('Identifying key features...'), 5000);
     setTimeout(() => setGenerationProgress('Creating work breakdown...'), 15000);
@@ -402,11 +404,11 @@ export default function AIGeneratePanel({
     }
 
     const workflowType = cycleEnabled ? 'SCRUM' : 'KANBAN';
-    
+
     if (isDemoMode()) {
       const store = demoStore.getStore();
       const project = store.projects.find((p) => p.id === projectId);
-      
+
       executeRefine({
         projectId,
         currentPlan: {
@@ -415,12 +417,14 @@ export default function AIGeneratePanel({
           epics: generatedEpics.length > 0 ? generatedEpics : undefined,
         },
         refinementRequest: refinementText,
-        demoProjectData: project ? {
-          name: project.name,
-          description: project.description || '',
-          workflowType,
-          cycleName,
-        } : undefined,
+        demoProjectData: project
+          ? {
+              name: project.name,
+              description: project.description || '',
+              workflowType,
+              cycleName,
+            }
+          : undefined,
       });
     } else {
       executeRefine({
@@ -530,7 +534,10 @@ export default function AIGeneratePanel({
                 {step === 'confirm' && 'Confirm Changes'}
               </h2>
               <p className="text-xs sm:text-sm text-slate-400 truncate">
-                {step === 'generate' && (cycleEnabled ? `Generate ${cycleNameLower}s with work items` : 'Generate work items from description')}
+                {step === 'generate' &&
+                  (cycleEnabled
+                    ? `Generate ${cycleNameLower}s with work items`
+                    : 'Generate work items from description')}
                 {step === 'preview' && 'Select items and customize before applying'}
                 {step === 'chat' && 'Use AI to adjust the plan'}
                 {step === 'confirm' && 'Review before creating items'}
@@ -583,10 +590,15 @@ export default function AIGeneratePanel({
               {isGenerating ? (
                 <div className="space-y-4">
                   <Loader2 className="w-12 h-12 animate-spin text-cyan-400 mx-auto" />
-                  <p className="text-slate-300">{generationProgress || 'Analyzing your project and generating components...'}</p>
+                  <p className="text-slate-300">
+                    {generationProgress || 'Analyzing your project and generating components...'}
+                  </p>
                   <div className="max-w-xs mx-auto">
                     <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-cyan-500 to-violet-500 animate-pulse" style={{ width: '60%' }} />
+                      <div
+                        className="h-full bg-gradient-to-r from-cyan-500 to-violet-500 animate-pulse"
+                        style={{ width: '60%' }}
+                      />
                     </div>
                   </div>
                   <p className="text-sm text-slate-500">This may take 30-90 seconds</p>
@@ -624,7 +636,9 @@ export default function AIGeneratePanel({
                           onChange={(e) => setGenerateEpics(e.target.checked)}
                           className="w-4 h-4 rounded border-cyan-500/50 bg-slate-800 text-cyan-500 focus:ring-2 focus:ring-cyan-500/50"
                         />
-                        <span className="text-sm text-slate-300">Also create Epic groupings for backlog organization</span>
+                        <span className="text-sm text-slate-300">
+                          Also create Epic groupings for backlog organization
+                        </span>
                       </label>
                     )}
 
@@ -649,7 +663,9 @@ export default function AIGeneratePanel({
                       {changedItems.length > 0 && (
                         <ul className="mt-2 space-y-1 text-xs text-violet-300/80">
                           {changedItems.map((item, idx) => (
-                            <li key={idx}>• {item.name}: {item.change}</li>
+                            <li key={idx}>
+                              • {item.name}: {item.change}
+                            </li>
                           ))}
                         </ul>
                       )}
@@ -657,7 +673,7 @@ export default function AIGeneratePanel({
                   </div>
                 </div>
               )}
-              
+
               {/* Summary */}
               {summary && (
                 <div className="p-3 sm:p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-lg">
@@ -885,7 +901,13 @@ export default function AIGeneratePanel({
                 <p className="text-slate-300">
                   Current plan: <span className="font-medium text-cyan-400">{selectedComponents.size} components</span>
                   {generatedSprints.length > 0 && (
-                    <span> across <span className="font-medium text-amber-400">{generatedSprints.length} {cycleNameLower}s</span></span>
+                    <span>
+                      {' '}
+                      across{' '}
+                      <span className="font-medium text-amber-400">
+                        {generatedSprints.length} {cycleNameLower}s
+                      </span>
+                    </span>
                   )}
                 </p>
               </div>
@@ -893,9 +915,7 @@ export default function AIGeneratePanel({
               {/* Suggested Prompts */}
               {chatSuggestions.length > 0 && (
                 <div>
-                  <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">
-                    Quick Actions
-                  </label>
+                  <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">Quick Actions</label>
                   <div className="flex flex-wrap gap-2">
                     {chatSuggestions.map((suggestion, i) => (
                       <button
@@ -913,9 +933,7 @@ export default function AIGeneratePanel({
 
               {/* Custom Refinement Input */}
               <div>
-                <label className="text-sm font-medium text-slate-300 mb-2 block">
-                  Describe your changes
-                </label>
+                <label className="text-sm font-medium text-slate-300 mb-2 block">Describe your changes</label>
                 <textarea
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
@@ -928,9 +946,7 @@ export default function AIGeneratePanel({
                     }
                   }}
                 />
-                <p className="text-xs text-slate-500 mt-1">
-                  Press Cmd+Enter to apply changes
-                </p>
+                <p className="text-xs text-slate-500 mt-1">Press Cmd+Enter to apply changes</p>
               </div>
 
               {/* Info Box */}
@@ -966,7 +982,9 @@ export default function AIGeneratePanel({
                 {generatedSprints.length > 0 && (
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-slate-400">{cycleNamePlural}</span>
-                    <span className="font-medium text-amber-400">{generatedSprints.length} {cycleNameLower}s</span>
+                    <span className="font-medium text-amber-400">
+                      {generatedSprints.length} {cycleNameLower}s
+                    </span>
                   </div>
                 )}
                 {generatedEpics.length > 0 && (
@@ -980,7 +998,8 @@ export default function AIGeneratePanel({
                   <span className="font-medium text-slate-200">
                     {generatedComponents
                       .filter((c) => selectedComponents.has(c.name))
-                      .reduce((acc, c) => acc + c.estimatedHours, 0)}h
+                      .reduce((acc, c) => acc + c.estimatedHours, 0)}
+                    h
                   </span>
                 </div>
               </div>
@@ -1001,10 +1020,7 @@ export default function AIGeneratePanel({
               Cancel
             </button>
             <div className="flex items-center gap-2 sm:gap-3 order-1 sm:order-2">
-              <button 
-                onClick={() => setStep('chat')} 
-                className="btn-secondary flex-1 sm:flex-initial"
-              >
+              <button onClick={() => setStep('chat')} className="btn-secondary flex-1 sm:flex-initial">
                 <MessageSquare className="w-4 h-4" />
                 <span className="hidden sm:inline">Refine</span>
               </button>
@@ -1043,11 +1059,7 @@ export default function AIGeneratePanel({
               <ArrowLeft className="w-4 h-4" />
               Back
             </button>
-            <button
-              onClick={handleApply}
-              disabled={isApplying}
-              className="btn-primary order-1 sm:order-2"
-            >
+            <button onClick={handleApply} disabled={isApplying} className="btn-primary order-1 sm:order-2">
               {isApplying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
               Confirm & Create
             </button>

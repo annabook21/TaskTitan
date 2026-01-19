@@ -172,7 +172,10 @@ export default function DemoTeamDetailPage() {
       <main className="flex-grow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Back link */}
-          <Link href="/team" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-6">
+          <Link
+            href="/team"
+            className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-6"
+          >
             <ArrowLeft className="w-4 h-4" />
             Back to Teams
           </Link>
@@ -317,9 +320,7 @@ export default function DemoTeamDetailPage() {
                               {member.role.toLowerCase()}
                             </span>
                           </div>
-                          {member.title && (
-                            <div className="text-xs text-slate-400 mt-0.5">{member.title}</div>
-                          )}
+                          {member.title && <div className="text-xs text-slate-400 mt-0.5">{member.title}</div>}
                           <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
                             <Mail className="w-3 h-3" />
                             <span className="truncate">{member.email}</span>

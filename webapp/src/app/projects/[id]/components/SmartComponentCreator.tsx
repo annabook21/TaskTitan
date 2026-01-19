@@ -231,7 +231,11 @@ export default function SmartComponentCreator({ projectId }: Props) {
     setEditingField(null);
   };
 
-  const isLoading = generateAction.isExecuting || refineAction.isExecuting || createFromPreviewAction.isExecuting || createManualAction.isExecuting;
+  const isLoading =
+    generateAction.isExecuting ||
+    refineAction.isExecuting ||
+    createFromPreviewAction.isExecuting ||
+    createManualAction.isExecuting;
 
   if (!isOpen) {
     return (
@@ -439,19 +443,14 @@ export default function SmartComponentCreator({ projectId }: Props) {
                   {editingField === 'description' ? (
                     <textarea
                       value={generatedComponent.description}
-                      onChange={(e) =>
-                        setGeneratedComponent({ ...generatedComponent, description: e.target.value })
-                      }
+                      onChange={(e) => setGeneratedComponent({ ...generatedComponent, description: e.target.value })}
                       onBlur={() => setEditingField(null)}
                       className="input mt-1 min-h-[80px] resize-none"
                       rows={3}
                       autoFocus
                     />
                   ) : (
-                    <div
-                      onClick={() => setEditingField('description')}
-                      className="mt-1 cursor-pointer group"
-                    >
+                    <div onClick={() => setEditingField('description')} className="mt-1 cursor-pointer group">
                       <p className="text-slate-300 text-sm">{generatedComponent.description}</p>
                       <span className="text-xs text-slate-500 opacity-0 group-hover:opacity-100 flex items-center gap-1 mt-1">
                         <Pencil className="w-3 h-3" /> Click to edit
@@ -502,12 +501,7 @@ export default function SmartComponentCreator({ projectId }: Props) {
                     <MessageSquare className="w-4 h-4" />
                     Refine
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleCreateFromPreview}
-                    className="btn-primary"
-                    disabled={isLoading}
-                  >
+                  <button type="button" onClick={handleCreateFromPreview} className="btn-primary" disabled={isLoading}>
                     {createFromPreviewAction.isExecuting ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
@@ -526,9 +520,7 @@ export default function SmartComponentCreator({ projectId }: Props) {
               {/* Quick suggestions */}
               {suggestedFollowUps.length > 0 && (
                 <div>
-                  <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">
-                    Suggestions
-                  </label>
+                  <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">Suggestions</label>
                   <div className="flex flex-wrap gap-2">
                     {suggestedFollowUps.map((suggestion, i) => (
                       <button
@@ -651,7 +643,11 @@ export default function SmartComponentCreator({ projectId }: Props) {
               </div>
 
               <div className="flex justify-between items-center pt-4 border-t border-slate-800">
-                <button type="button" onClick={() => setStep('input')} className="text-sm text-slate-400 hover:text-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setStep('input')}
+                  className="text-sm text-slate-400 hover:text-slate-200"
+                >
                   <ArrowLeft className="w-4 h-4 inline mr-1" />
                   Back to AI mode
                 </button>

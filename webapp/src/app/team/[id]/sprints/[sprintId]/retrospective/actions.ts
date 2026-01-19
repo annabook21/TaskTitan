@@ -80,7 +80,9 @@ export const generateSprintRetrospective = authActionClient
     }));
 
     if (completedComponents.length === 0) {
-      throw new MyCustomError('No completed components with time tracking found. Add actual hours to components first.');
+      throw new MyCustomError(
+        'No completed components with time tracking found. Add actual hours to components first.',
+      );
     }
 
     // Get upcoming components from backlog (for estimate adjustment suggestions)

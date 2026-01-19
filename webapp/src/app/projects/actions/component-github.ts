@@ -102,7 +102,7 @@ const updateComponentPRStatusSchema = z.object({
 export async function updateComponentPRStatus(
   componentId: string,
   prStatus: 'open' | 'draft' | 'merged' | 'closed',
-  prTitle?: string
+  prTitle?: string,
 ) {
   return prisma.component.update({
     where: { id: componentId },

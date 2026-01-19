@@ -5,21 +5,8 @@ import { useRouter } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import {
-  ArrowLeft,
-  ArrowRight,
-  Users,
-  Check,
-  RotateCcw,
-  Columns3,
-  Calendar,
-  Settings,
-} from 'lucide-react';
-import {
-  WORKFLOW_TEMPLATES,
-  getTemplateSettings,
-  type WorkflowTemplateKey,
-} from '@/lib/workflow-templates';
+import { ArrowLeft, ArrowRight, Users, Check, RotateCcw, Columns3, Calendar, Settings } from 'lucide-react';
+import { WORKFLOW_TEMPLATES, getTemplateSettings, type WorkflowTemplateKey } from '@/lib/workflow-templates';
 
 const TEMPLATE_ICONS: Record<WorkflowTemplateKey, React.ReactNode> = {
   SCRUM: <RotateCcw className="w-6 h-6" />,
@@ -202,12 +189,7 @@ export default function DemoNewTeamPage() {
                 <Link href="/team" className="btn-secondary">
                   Cancel
                 </Link>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={!canProceedToStep2}
-                  onClick={() => setStep(2)}
-                >
+                <button type="button" className="btn-primary" disabled={!canProceedToStep2} onClick={() => setStep(2)}>
                   Next
                   <ArrowRight className="w-4 h-4" />
                 </button>

@@ -461,7 +461,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
     const totalRows = rows.length;
     const estimatedMs = Math.max(2000, totalRows * 50);
     const intervalMs = 100;
-    const incrementPerTick = (95 / (estimatedMs / intervalMs));
+    const incrementPerTick = 95 / (estimatedMs / intervalMs);
 
     progressIntervalRef.current = setInterval(() => {
       setImportProgress((prev) => {
@@ -795,7 +795,9 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                               className="text-xs text-slate-500 hover:text-cyan-400 flex items-center gap-1"
                             >
                               <Info className="w-3.5 h-3.5" />
-                              <span className="truncate max-w-[120px]">{fieldValidationRules[m.targetField].format}</span>
+                              <span className="truncate max-w-[120px]">
+                                {fieldValidationRules[m.targetField].format}
+                              </span>
                             </button>
                             {showFieldInfo === m.sourceColumn && (
                               <div className="absolute z-10 top-full left-0 mt-1 p-3 bg-slate-800 border border-slate-700 rounded-lg shadow-lg w-64">
@@ -865,9 +867,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                 <Edit3 className="w-4 h-4 text-cyan-400" />
                 Preview & Edit ({rows.length} rows)
                 {validationErrors.size > 0 && (
-                  <span className="text-xs text-red-400 ml-2">
-                    ({validationErrors.size} with errors)
-                  </span>
+                  <span className="text-xs text-red-400 ml-2">({validationErrors.size} with errors)</span>
                 )}
               </h3>
               <span className="text-xs text-slate-500">Click any cell to edit • Red cells have errors</span>
@@ -966,9 +966,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
             </button>
             <div className="flex items-center gap-3">
               {validationErrors.size > 0 && (
-                <span className="text-sm text-amber-400">
-                  {validationErrors.size} error(s) to fix
-                </span>
+                <span className="text-sm text-amber-400">{validationErrors.size} error(s) to fix</span>
               )}
               <button
                 onClick={handleExecuteImport}
@@ -1002,9 +1000,7 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                 style={{ width: `${importProgress}%` }}
               />
             </div>
-            <p className="text-xs text-slate-500 mt-2">
-              Processing {rows.length} items...
-            </p>
+            <p className="text-xs text-slate-500 mt-2">Processing {rows.length} items...</p>
           </div>
         </div>
       )}
@@ -1030,16 +1026,16 @@ export default function ImportWizard({ teams, selectedTeam }: Props) {
                     <Undo2 className="w-4 h-4 text-amber-400" />
                     Made a mistake? You can undo this import
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Available for 5 minutes after import
-                  </p>
+                  <p className="text-xs text-slate-500 mt-1">Available for 5 minutes after import</p>
                 </div>
                 <button
                   onClick={async () => {
                     setIsUndoing(true);
                     // In a full implementation, this would call a server action to delete the imported components
                     // For now, show a toast about the limitation
-                    toast.info('Undo imports the file with corrections. Navigate to the project to delete individual items.');
+                    toast.info(
+                      'Undo imports the file with corrections. Navigate to the project to delete individual items.',
+                    );
                     setIsUndoing(false);
                     // Go back to step 3 with the same data for re-import with corrections
                     setStep(3);

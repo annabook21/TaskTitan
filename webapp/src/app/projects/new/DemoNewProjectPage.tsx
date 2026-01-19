@@ -82,9 +82,10 @@ export default function DemoNewProjectPage() {
       demoStore.saveStore(store);
 
       // Navigate to project, optionally triggering AI generation
-      const url = autoGenerateAI && description.trim()
-        ? `/projects/${newProject.id}?generateAI=true`
-        : `/projects/${newProject.id}`;
+      const url =
+        autoGenerateAI && description.trim()
+          ? `/projects/${newProject.id}?generateAI=true`
+          : `/projects/${newProject.id}`;
       router.push(url);
     } catch {
       setError('Failed to create project');
@@ -149,9 +150,7 @@ export default function DemoNewProjectPage() {
           {/* Form */}
           <form onSubmit={handleSubmit} className="component-card space-y-6">
             {error && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                {error}
-              </div>
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>
             )}
 
             <div>
@@ -208,7 +207,8 @@ export default function DemoNewProjectPage() {
                     Auto-generate components with AI
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
-                    AI will analyze your project description and suggest components with estimates, priorities, and dependencies.
+                    AI will analyze your project description and suggest components with estimates, priorities, and
+                    dependencies.
                     {!description.trim() && (
                       <span className="text-amber-400 block mt-1">
                         Add a detailed description above to enable this feature.

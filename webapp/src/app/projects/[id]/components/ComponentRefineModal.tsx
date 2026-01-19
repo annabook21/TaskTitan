@@ -36,7 +36,9 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
     onSuccess: ({ data }) => {
       if (isDemoResult(data)) {
         // Apply the refined component to demo store
-        const refinedData = data as { component?: { id: string; name: string; description: string; estimatedHours: number; priority: number } };
+        const refinedData = data as {
+          component?: { id: string; name: string; description: string; estimatedHours: number; priority: number };
+        };
         if (refinedData.component) {
           demoStore.updateComponent(refinedData.component.id, {
             name: refinedData.component.name,
@@ -68,7 +70,7 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
     if (inDemoMode) {
       const project = demoStore.getProject(projectId);
       const allComponents = demoStore.getComponentsByProject(projectId);
-      
+
       if (project) {
         demoComponentData = {
           name: component.name,
@@ -123,7 +125,9 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Estimate:</span>
-              <span className="text-slate-300">{component.estimatedHours ? `${component.estimatedHours}h` : 'None'}</span>
+              <span className="text-slate-300">
+                {component.estimatedHours ? `${component.estimatedHours}h` : 'None'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Priority:</span>
@@ -133,9 +137,7 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
 
           {/* Suggested Prompts */}
           <div>
-            <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">
-              Quick Actions
-            </label>
+            <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">Quick Actions</label>
             <div className="flex flex-wrap gap-2">
               {suggestions.map((suggestion, i) => (
                 <button
@@ -152,9 +154,7 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
 
           {/* Custom Input */}
           <div>
-            <label className="text-sm font-medium text-slate-300 mb-2 block">
-              Or describe your changes
-            </label>
+            <label className="text-sm font-medium text-slate-300 mb-2 block">Or describe your changes</label>
             <textarea
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
@@ -167,9 +167,7 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
                 }
               }}
             />
-            <p className="text-xs text-slate-500 mt-1">
-              Press Cmd+Enter to apply
-            </p>
+            <p className="text-xs text-slate-500 mt-1">Press Cmd+Enter to apply</p>
           </div>
         </div>
 
@@ -178,11 +176,7 @@ export default function ComponentRefineModal({ component, projectId, onClose, on
           <button onClick={onClose} className="btn-secondary">
             Cancel
           </button>
-          <button
-            onClick={() => handleRefine()}
-            disabled={isExecuting || !chatInput.trim()}
-            className="btn-primary"
-          >
+          <button onClick={() => handleRefine()} disabled={isExecuting || !chatInput.trim()} className="btn-primary">
             {isExecuting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             Apply Changes
           </button>

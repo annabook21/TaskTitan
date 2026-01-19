@@ -27,9 +27,7 @@ export default function DemoImportPage() {
         const team = store.teams.find((t) => t.id === m.teamId);
         if (!team) return null;
 
-        const projects = store.projects
-          .filter((p) => p.teamId === team.id)
-          .map((p) => ({ id: p.id, name: p.name }));
+        const projects = store.projects.filter((p) => p.teamId === team.id).map((p) => ({ id: p.id, name: p.name }));
 
         const sprints = store.sprints
           .filter((s) => s.teamId === team.id && (s.status === 'PLANNING' || s.status === 'ACTIVE'))

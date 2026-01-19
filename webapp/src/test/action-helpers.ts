@@ -4,11 +4,7 @@ import { vi } from 'vitest';
  * Sets up mocks for testing server actions
  * Returns a cleanup function to restore all mocks
  */
-export function setupActionTest(options: {
-  userId?: string;
-  isDemo?: boolean;
-  prismaMock: unknown;
-}) {
+export function setupActionTest(options: { userId?: string; isDemo?: boolean; prismaMock: unknown }) {
   const { userId = 'user-123', isDemo = false, prismaMock } = options;
 
   // Mock the prisma module
@@ -63,7 +59,7 @@ export function setupActionTest(options: {
  * Extracts the result from a safe-action response
  */
 export function extractActionResult<T>(
-  response: { data?: T; serverError?: string; validationErrors?: unknown } | undefined
+  response: { data?: T; serverError?: string; validationErrors?: unknown } | undefined,
 ): T {
   if (!response) {
     throw new Error('Action returned undefined');
@@ -85,7 +81,7 @@ export function extractActionResult<T>(
  */
 export function expectActionError(
   response: { data?: unknown; serverError?: string; validationErrors?: unknown } | undefined,
-  expectedMessage: string
+  expectedMessage: string,
 ): void {
   if (!response) {
     throw new Error('Action returned undefined, expected error');

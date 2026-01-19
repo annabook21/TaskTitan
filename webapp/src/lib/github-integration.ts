@@ -97,18 +97,18 @@ interface ProjectWithSettings {
 function getTargetStatusForEvent(
   event: GitHubEvent,
   transitionConfigs: TransitionConfig[],
-  fallbackStatus?: ComponentStatus | null
+  fallbackStatus?: ComponentStatus | null,
 ): ComponentStatus | null {
-  const config = transitionConfigs.find(c => c.event === event && c.enabled);
+  const config = transitionConfigs.find((c) => c.event === event && c.enabled);
   if (config) {
     return config.targetStatus;
   }
-  
+
   // Fallback for legacy PR_MERGED behavior
   if (event === 'PR_MERGED' && fallbackStatus) {
     return fallbackStatus;
   }
-  
+
   return null;
 }
 
@@ -144,7 +144,7 @@ function mapPRStateToStatus(pr: PullRequestPayload['pull_request']): 'open' | 'd
 export async function handlePullRequestEvent(payload: PullRequestPayload, project: ProjectWithSettings): Promise<void> {
   const pr = payload.pull_request;
   const event = mapPRActionToEvent(payload.action, pr);
-  
+
   logger.info('Processing pull_request event', {
     extra: {
       action: payload.action,
@@ -172,7 +172,7 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
   // Update PR metadata on all linked components
   const prStatus = mapPRStateToStatus(pr);
   await Promise.all(
-    components.map(component =>
+    components.map((component) =>
       prisma.component.update({
         where: { id: component.id },
         data: {
@@ -182,14 +182,14 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
           githubPrStatus: prStatus,
           githubPrUpdatedAt: new Date(),
         },
-      })
-    )
+      }),
+    ),
   );
 
   // If we have a mappable event, check for status transition
   if (event) {
     const targetStatus = getTargetStatusForEvent(event, project.transitionConfigs, project.githubPrTargetStatus);
-    
+
     if (targetStatus) {
       for (const component of components) {
         await updateComponentStatus(component, targetStatus, project.ownerId, {
@@ -220,7 +220,7 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
  */
 export async function handlePullRequestReviewEvent(
   payload: PullRequestReviewPayload,
-  project: Omit<ProjectWithSettings, 'githubPrTargetStatus'>
+  project: Omit<ProjectWithSettings, 'githubPrTargetStatus'>,
 ): Promise<void> {
   // Only process approved reviews
   if (payload.action !== 'submitted' || payload.review.state !== 'approved') {
@@ -249,7 +249,7 @@ export async function handlePullRequestReviewEvent(
 
   // Check for status transition on approval
   const targetStatus = getTargetStatusForEvent('PR_APPROVED', project.transitionConfigs, null);
-  
+
   if (targetStatus) {
     for (const component of components) {
       await updateComponentStatus(component, targetStatus, project.ownerId, {
@@ -287,7 +287,7 @@ async function updateComponentStatus(
     mergedBy?: string | null;
     mergedAt?: string | null;
     approvedBy?: string;
-  }
+  },
 ): Promise<void> {
   const oldStatus = component.status;
 
@@ -311,11 +311,12 @@ async function updateComponentStatus(
   });
 
   // Map event to activity type
-  const activityType = metadata.event === 'PR_MERGED' 
-    ? 'GITHUB_PR_MERGED' 
-    : metadata.event === 'PR_CLOSED'
-    ? 'GITHUB_PR_CLOSED'
-    : 'GITHUB_PR_OPENED';
+  const activityType =
+    metadata.event === 'PR_MERGED'
+      ? 'GITHUB_PR_MERGED'
+      : metadata.event === 'PR_CLOSED'
+        ? 'GITHUB_PR_CLOSED'
+        : 'GITHUB_PR_OPENED';
 
   // Create activity log
   await prisma.activity.create({

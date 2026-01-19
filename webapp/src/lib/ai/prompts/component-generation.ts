@@ -191,11 +191,15 @@ Return your response between <<<JSON and JSON>>> markers. Between these markers,
   * ${cycleName}s contain the actual work items (Stories/Tasks)
   * Group logically by dependencies and priority
   * Each ${cycleName.toLowerCase()} should be 1-2 weeks
-  * Respect dependencies - items cannot be in a ${cycleName.toLowerCase()} before their dependencies${teamCapacity ? `
+  * Respect dependencies - items cannot be in a ${cycleName.toLowerCase()} before their dependencies${
+    teamCapacity
+      ? `
   * "capacity" = team's effective capacity (${effectiveCapacity} hours) - this is FIXED for all sprints
-  * Plan work totaling 70-80% of capacity (${Math.floor(effectiveCapacity! * 0.7)}-${Math.floor(effectiveCapacity! * 0.8)} hours)` : `
+  * Plan work totaling 70-80% of capacity (${Math.floor(effectiveCapacity! * 0.7)}-${Math.floor(effectiveCapacity! * 0.8)} hours)`
+      : `
   * "capacity" = team's available hours (estimate based on scope, e.g., 80 hours for a typical small team)
-  * Plan work totaling 70-80% of capacity to leave buffer for unexpected work`}
+  * Plan work totaling 70-80% of capacity to leave buffer for unexpected work`
+  }
   * componentNames should reference exact names from the components array
 - "summary": brief architecture summary (2-3 sentences)
 - "enhancedDescription": improved project description (3-4 sentences)${epicInstructions}

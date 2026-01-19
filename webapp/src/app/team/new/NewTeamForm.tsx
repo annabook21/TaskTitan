@@ -128,12 +128,7 @@ export default function NewTeamForm() {
             <Link href="/team" className="btn-secondary">
               Cancel
             </Link>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={!canProceedToStep2}
-              onClick={() => setStep(2)}
-            >
+            <button type="button" className="btn-primary" disabled={!canProceedToStep2} onClick={() => setStep(2)}>
               Next
               <ArrowRight className="w-4 h-4" />
             </button>

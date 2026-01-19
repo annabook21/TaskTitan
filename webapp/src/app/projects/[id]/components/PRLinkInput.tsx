@@ -21,11 +21,11 @@ export function parseGitHubPrUrl(url: string): { owner: string; repo: string; pr
   try {
     const parsed = new URL(url);
     if (parsed.hostname !== 'github.com') return null;
-    
+
     // Expected format: /owner/repo/pull/123
     const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
     if (!match) return null;
-    
+
     return {
       owner: match[1],
       repo: match[2],
@@ -40,7 +40,7 @@ export default function PRLinkInput({ componentId, currentPrUrl, onLinked }: Pro
   const [isEditing, setIsEditing] = useState(false);
   const [url, setUrl] = useState('');
   const { handleResult } = useDemoActionHandler();
-  
+
   const { execute, isExecuting } = useAction(linkComponentToPR, {
     onSuccess: ({ data }) => {
       if (data && isDemoResult(data)) {
@@ -55,15 +55,15 @@ export default function PRLinkInput({ componentId, currentPrUrl, onLinked }: Pro
       toast.error(error.serverError || 'Failed to link PR');
     },
   });
-  
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!url.trim()) {
       setIsEditing(false);
       return;
     }
-    
+
     const parsed = parseGitHubPrUrl(url.trim());
     if (!parsed) {
       toast.error('Invalid GitHub PR URL', {
@@ -71,14 +71,14 @@ export default function PRLinkInput({ componentId, currentPrUrl, onLinked }: Pro
       });
       return;
     }
-    
+
     execute({
       componentId,
       prUrl: url.trim(),
       prNumber: parsed.prNumber,
     });
   };
-  
+
   const handleUnlink = () => {
     execute({
       componentId,
@@ -86,7 +86,7 @@ export default function PRLinkInput({ componentId, currentPrUrl, onLinked }: Pro
       prNumber: null,
     });
   };
-  
+
   // If already linked, show the link with option to unlink
   if (currentPrUrl && !isEditing) {
     const parsed = parseGitHubPrUrl(currentPrUrl);
@@ -112,7 +112,7 @@ export default function PRLinkInput({ componentId, currentPrUrl, onLinked }: Pro
       </div>
     );
   }
-  
+
   // Editing mode
   if (isEditing) {
     return (
@@ -131,11 +131,7 @@ export default function PRLinkInput({ componentId, currentPrUrl, onLinked }: Pro
           disabled={isExecuting}
           className="p-1 text-cyan-400 hover:text-cyan-300 disabled:opacity-50"
         >
-          {isExecuting ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Check className="w-3.5 h-3.5" />
-          )}
+          {isExecuting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
         </button>
         <button
           type="button"
@@ -151,7 +147,7 @@ export default function PRLinkInput({ componentId, currentPrUrl, onLinked }: Pro
       </form>
     );
   }
-  
+
   // Default: show link button
   return (
     <button

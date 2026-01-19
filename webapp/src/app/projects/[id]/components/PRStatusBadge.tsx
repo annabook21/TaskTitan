@@ -12,13 +12,16 @@ interface Props {
   compact?: boolean; // For collapsed view
 }
 
-const statusConfig: Record<NonNullable<PRStatus>, {
-  label: string;
-  icon: typeof GitPullRequest;
-  bgColor: string;
-  textColor: string;
-  borderColor: string;
-}> = {
+const statusConfig: Record<
+  NonNullable<PRStatus>,
+  {
+    label: string;
+    icon: typeof GitPullRequest;
+    bgColor: string;
+    textColor: string;
+    borderColor: string;
+  }
+> = {
   open: {
     label: 'Open',
     icon: GitPullRequest,
@@ -53,7 +56,7 @@ export default function PRStatusBadge({ prUrl, prNumber, prTitle, prStatus, comp
   const status = prStatus || 'open';
   const config = statusConfig[status];
   const Icon = config.icon;
-  
+
   if (compact) {
     // Compact view for collapsed card
     return (
@@ -70,7 +73,7 @@ export default function PRStatusBadge({ prUrl, prNumber, prTitle, prStatus, comp
       </a>
     );
   }
-  
+
   // Expanded view with more details
   return (
     <div className="space-y-1">

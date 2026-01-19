@@ -36,7 +36,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     if (slug === 'sign-in-callback') {
       response.headers.append(
         'Set-Cookie',
-        `${DEMO_COOKIE_NAME}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`
+        `${DEMO_COOKIE_NAME}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`,
       );
       logger.info('Demo cookie cleared on sign-in-callback');
     }

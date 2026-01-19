@@ -52,9 +52,10 @@ export default function DemoNewSprintPage() {
       });
 
     const lastSprint = teamSprints[0];
-    const suggestedStart = lastSprint && lastSprint.endDate
-      ? new Date(new Date(lastSprint.endDate).getTime() + 24 * 60 * 60 * 1000)
-      : new Date();
+    const suggestedStart =
+      lastSprint && lastSprint.endDate
+        ? new Date(new Date(lastSprint.endDate).getTime() + 24 * 60 * 60 * 1000)
+        : new Date();
 
     const suggestedEnd = new Date(suggestedStart.getTime() + 14 * 24 * 60 * 60 * 1000);
 
@@ -172,9 +173,7 @@ export default function DemoNewSprintPage() {
           {/* Form */}
           <form onSubmit={handleSubmit} className="component-card space-y-6">
             {error && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                {error}
-              </div>
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>
             )}
 
             <div>

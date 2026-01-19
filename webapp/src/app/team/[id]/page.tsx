@@ -235,9 +235,7 @@ export default async function TeamDetailPage({ params }: Props) {
                               {role.toLowerCase()}
                             </span>
                           </div>
-                          {membership.title && (
-                            <div className="text-xs text-slate-400 mt-0.5">{membership.title}</div>
-                          )}
+                          {membership.title && <div className="text-xs text-slate-400 mt-0.5">{membership.title}</div>}
                           <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
                             <Mail className="w-3 h-3" />
                             <span className="truncate">{member.email}</span>

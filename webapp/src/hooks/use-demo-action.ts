@@ -165,25 +165,29 @@ const wireframeTemplates: Array<{ keywords: string[]; template: DemoWireframeTem
 function buildWireframeHtml(componentName: string, description: string | null): string {
   const baseText = `${componentName} experience`;
   const lowered = `${componentName} ${description || ''}`.toLowerCase();
-  const selected =
-    wireframeTemplates.find((entry) => entry.keywords.some((word) => lowered.includes(word)))?.template || {
-      layout: 'feature',
-      headline: componentName,
-      subheadline: description || 'Deliver a focused experience with clear actions and status.',
-      cards: [
-        { title: 'Primary action', body: `Start the ${baseText}.`, tag: 'Action' },
-        { title: 'Recent activity', body: 'Track the latest changes and updates.' },
-        { title: 'Next steps', body: 'Review open items and confirm priorities.' },
-      ],
-      list: [
-        { title: 'Owner assigned', meta: 'Today' },
-        { title: 'Requirements captured', meta: 'This week' },
-      ],
-    };
+  const selected = wireframeTemplates.find((entry) => entry.keywords.some((word) => lowered.includes(word)))
+    ?.template || {
+    layout: 'feature',
+    headline: componentName,
+    subheadline: description || 'Deliver a focused experience with clear actions and status.',
+    cards: [
+      { title: 'Primary action', body: `Start the ${baseText}.`, tag: 'Action' },
+      { title: 'Recent activity', body: 'Track the latest changes and updates.' },
+      { title: 'Next steps', body: 'Review open items and confirm priorities.' },
+    ],
+    list: [
+      { title: 'Owner assigned', meta: 'Today' },
+      { title: 'Requirements captured', meta: 'This week' },
+    ],
+  };
 
   const statMarkup =
-    selected.stats?.map((stat) => `<div class="stat"><div class="stat-value">${stat.value}</div><div class="stat-label">${stat.label}</div></div>`).join('') ||
-    '';
+    selected.stats
+      ?.map(
+        (stat) =>
+          `<div class="stat"><div class="stat-value">${stat.value}</div><div class="stat-label">${stat.label}</div></div>`,
+      )
+      .join('') || '';
   const cardMarkup =
     selected.cards
       ?.map(
@@ -310,7 +314,7 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
       // In demo mode, we just store this as project metadata (simplified)
       // The actual transition configs aren't enforced in demo mode
       return {
-        configs: (input.transitions as Array<{ event: string; targetStatus: string; enabled: boolean }>),
+        configs: input.transitions as Array<{ event: string; targetStatus: string; enabled: boolean }>,
       };
     case 'deleteProject':
       return { success: demoStore.deleteProject(input.projectId as string) };
@@ -330,7 +334,7 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
           githubPrUrl: prUrl,
           githubPrNumber: prNumber,
           githubPrTitle: prTitle || null,
-          githubPrStatus: prUrl ? (prStatus || 'open') : null,
+          githubPrStatus: prUrl ? prStatus || 'open' : null,
           githubPrUpdatedAt: prUrl ? new Date().toISOString() : null,
         }),
       };
@@ -385,7 +389,11 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
     case 'updateSprint':
       return { sprint: demoStore.updateSprint(input.sprintId as string, input) };
     case 'updateSprintStatus':
-      return { sprint: demoStore.updateSprint(input.sprintId as string, { status: input.status as 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' }) };
+      return {
+        sprint: demoStore.updateSprint(input.sprintId as string, {
+          status: input.status as 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED',
+        }),
+      };
     case 'deleteSprint':
       return { success: demoStore.deleteSprint(input.sprintId as string) };
     case 'assignComponentToSprint':
@@ -505,7 +513,10 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
         name: `Sprint ${sprintNumber}`,
         goal:
           backlogComponents.length > 0
-            ? `Focus on ${backlogComponents.slice(0, 3).map((c) => c.name).join(', ')}`
+            ? `Focus on ${backlogComponents
+                .slice(0, 3)
+                .map((c) => c.name)
+                .join(', ')}`
             : 'No backlog items available yet.',
         recommendedCapacity: Math.max(40, Math.round(totalHours * 0.8)),
         reasoning: 'Based on backlog size and estimated hours in demo data.',

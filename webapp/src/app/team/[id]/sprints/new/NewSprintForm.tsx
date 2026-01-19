@@ -34,7 +34,11 @@ export default function NewSprintForm({ teamId, suggestedName, suggestedStartDat
 
   const { execute, isExecuting, result } = useAction(createSprint, {
     onSuccess: (data) => {
-      const resolved = data.data ? (isDemoResult(data.data) ? (handleResult(data.data) as typeof data.data) : data.data) : null;
+      const resolved = data.data
+        ? isDemoResult(data.data)
+          ? (handleResult(data.data) as typeof data.data)
+          : data.data
+        : null;
       if (resolved?.sprint) {
         router.push(`/team/${teamId}/sprints/${resolved.sprint.id}`);
       }

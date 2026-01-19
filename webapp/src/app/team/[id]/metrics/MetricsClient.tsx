@@ -261,7 +261,18 @@ export default function MetricsClient({ teamId, workflowConfig }: Props) {
         })),
       );
     }
-  }, [teamId, days, isKanban, demoMode, demoRefreshKey, fetchCycleTime, fetchThroughput, fetchStatus, fetchCfd, fetchAging]);
+  }, [
+    teamId,
+    days,
+    isKanban,
+    demoMode,
+    demoRefreshKey,
+    fetchCycleTime,
+    fetchThroughput,
+    fetchStatus,
+    fetchCfd,
+    fetchAging,
+  ]);
 
   useEffect(() => {
     if (!demoMode) return;

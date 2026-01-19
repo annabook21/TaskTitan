@@ -6,17 +6,7 @@ import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import type { Role, User } from '@prisma/client';
-import {
-  ArrowLeft,
-  Plus,
-  Layers,
-  GitBranch,
-  Users,
-  Clock,
-  PlayCircle,
-  PauseCircle,
-  Zap,
-} from 'lucide-react';
+import { ArrowLeft, Plus, Layers, GitBranch, Users, Clock, PlayCircle, PauseCircle, Zap } from 'lucide-react';
 import ComponentCard from './components/ComponentCard';
 import SmartComponentCreator from './components/SmartComponentCreator';
 import DependencyGraph from './components/DependencyGraph';
@@ -257,8 +247,7 @@ export default function DemoProjectDetailPage() {
           const inProgress = history.find((h) => h.status === 'IN_PROGRESS');
           const completed = history.find((h) => h.status === 'COMPLETED');
           if (inProgress && completed) {
-            const cycleTimeMs =
-              new Date(completed.enteredAt).getTime() - new Date(inProgress.enteredAt).getTime();
+            const cycleTimeMs = new Date(completed.enteredAt).getTime() - new Date(inProgress.enteredAt).getTime();
             cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10;
           } else {
             const createdAt = new Date(component.createdAt).getTime();
@@ -293,7 +282,9 @@ export default function DemoProjectDetailPage() {
           contextAlternatives: component.contextAlternatives,
           contextLinks: component.contextLinks,
           contextAiSummary: component.contextAiSummary,
-          statusEnteredAt: currentStatusEntry ? new Date(currentStatusEntry.enteredAt) : new Date(component.statusEnteredAt),
+          statusEnteredAt: currentStatusEntry
+            ? new Date(currentStatusEntry.enteredAt)
+            : new Date(component.statusEnteredAt),
           cycleTimeDays,
           createdAt: new Date(component.createdAt),
           updatedAt: new Date(component.updatedAt),
@@ -544,7 +535,9 @@ export default function DemoProjectDetailPage() {
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <h3 className={`text-sm font-medium flex items-center gap-2 text-${statusConfig[status].color}-400`}>
+                              <h3
+                                className={`text-sm font-medium flex items-center gap-2 text-${statusConfig[status].color}-400`}
+                              >
                                 <span className={`w-2 h-2 rounded-full bg-${statusConfig[status].color}-500`} />
                                 {statusConfig[status].label}
                                 <span className="text-slate-500 font-normal">({statusComponents.length})</span>

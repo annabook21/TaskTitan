@@ -35,16 +35,16 @@ export default function DemoMyTasksPage() {
 
   const loadTasks = () => {
     const store = demoStore.getStore();
-    
+
     // Get all assignments for current user
     const userAssignments = store.assignments.filter((a) => a.userId === DEMO_USER.id);
-    
+
     const loadedTasks: Task[] = userAssignments.map((assignment) => {
       const component = store.components.find((c) => c.id === assignment.componentId)!;
       const project = store.projects.find((p) => p.id === component.projectId)!;
       const team = store.teams.find((t) => t.id === project.teamId)!;
       const sprint = component.sprintId ? store.sprints.find((s) => s.id === component.sprintId) : null;
-      
+
       // Calculate status age
       const statusHistory = store.statusHistory
         .filter((h) => h.componentId === component.id)
@@ -70,10 +70,12 @@ export default function DemoMyTasksPage() {
           name: project.name,
           teamName: team.name,
         },
-        sprint: sprint ? {
-          id: sprint.id,
-          name: sprint.name,
-        } : null,
+        sprint: sprint
+          ? {
+              id: sprint.id,
+              name: sprint.name,
+            }
+          : null,
         assignedAt: new Date(assignment.createdAt),
       };
     });
@@ -186,7 +188,9 @@ export default function DemoMyTasksPage() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-2">
                                   <h3 className="font-medium text-slate-200 truncate">{task.name}</h3>
-                                  <span className={`px-1.5 py-0.5 text-xs rounded bg-${config.color}-500/20 text-${config.color}-400`}>
+                                  <span
+                                    className={`px-1.5 py-0.5 text-xs rounded bg-${config.color}-500/20 text-${config.color}-400`}
+                                  >
                                     {task.type}
                                   </span>
                                 </div>
@@ -206,11 +210,7 @@ export default function DemoMyTasksPage() {
                                       {isOverdue && ' (overdue)'}
                                     </span>
                                   )}
-                                  {task.sprint && (
-                                    <span className="flex items-center gap-1">
-                                      {task.sprint.name}
-                                    </span>
-                                  )}
+                                  {task.sprint && <span className="flex items-center gap-1">{task.sprint.name}</span>}
                                   {isAging && (
                                     <span className="flex items-center gap-1 text-amber-400">
                                       <AlertCircle className="w-3.5 h-3.5" />

@@ -18,27 +18,25 @@ interface Props {
 function generateBranchName(componentId: string, componentName: string, userName?: string): string {
   // Use first 7 characters of component ID (like git short hash)
   const idPrefix = componentId.slice(0, 7);
-  
+
   // Slugify the component name
   const slug = componentName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric with hyphens
-    .replace(/^-+|-+$/g, '')     // Trim leading/trailing hyphens
-    .slice(0, 40);               // Limit length
-  
+    .replace(/^-+|-+$/g, '') // Trim leading/trailing hyphens
+    .slice(0, 40); // Limit length
+
   // Build branch name
-  const prefix = userName 
-    ? `${userName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}/` 
-    : '';
-  
+  const prefix = userName ? `${userName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}/` : '';
+
   return `${prefix}${idPrefix}-${slug}`;
 }
 
 export default function CopyBranchButton({ componentId, componentName, userName }: Props) {
   const [copied, setCopied] = useState(false);
-  
+
   const branchName = generateBranchName(componentId, componentName, userName);
-  
+
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(branchName);
@@ -46,14 +44,14 @@ export default function CopyBranchButton({ componentId, componentName, userName 
       toast.success('Branch name copied!', {
         description: branchName,
       });
-      
+
       // Reset copied state after 2 seconds
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       toast.error('Failed to copy branch name');
     }
   };
-  
+
   return (
     <button
       onClick={handleCopy}

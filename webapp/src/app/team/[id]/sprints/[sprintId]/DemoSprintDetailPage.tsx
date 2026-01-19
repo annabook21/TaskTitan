@@ -219,10 +219,7 @@ export default function DemoSprintDetailPage() {
               <div className="text-3xl font-bold text-cyan-400">{progress}%</div>
               <div className="text-sm text-slate-400 mt-1">Complete</div>
               <div className="h-2 bg-slate-700 rounded-full mt-3 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-500 to-green-500"
-                  style={{ width: `${progress}%` }}
-                />
+                <div className="h-full bg-gradient-to-r from-cyan-500 to-green-500" style={{ width: `${progress}%` }} />
               </div>
             </div>
 
@@ -274,9 +271,7 @@ export default function DemoSprintDetailPage() {
                         <p className="text-sm text-slate-500 truncate">{component.description}</p>
                       )}
                     </div>
-                    <span
-                      className={`text-xs px-2 py-1 rounded border ${componentStatusColors[component.status]}`}
-                    >
+                    <span className={`text-xs px-2 py-1 rounded border ${componentStatusColors[component.status]}`}>
                       {component.status.replace('_', ' ')}
                     </span>
                     {component.estimatedHours && (

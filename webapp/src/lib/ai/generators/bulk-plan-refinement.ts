@@ -107,10 +107,7 @@ function buildBulkRefinementPrompt(input: BulkPlanRefinementInput): string {
     : 'No sprints defined (Kanban workflow)';
 
   const epicSummary = currentPlan.epics
-    ? '\n\nEpics:\n' +
-      currentPlan.epics
-        .map((e) => `- ${e.name}: ${e.componentNames.join(', ')}`)
-        .join('\n')
+    ? '\n\nEpics:\n' + currentPlan.epics.map((e) => `- ${e.name}: ${e.componentNames.join(', ')}`).join('\n')
     : '';
 
   return `Project: ${projectContext.projectName}

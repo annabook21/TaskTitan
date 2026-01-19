@@ -54,14 +54,7 @@ vi.mock('@/lib/safe-action', async () => {
   };
 });
 
-import {
-  createTeam,
-  updateTeam,
-  inviteMember,
-  updateMemberRole,
-  removeMember,
-  deleteTeam,
-} from './actions';
+import { createTeam, updateTeam, inviteMember, updateMemberRole, removeMember, deleteTeam } from './actions';
 
 describe('Team Management Actions', () => {
   beforeEach(() => {
@@ -224,9 +217,7 @@ describe('Team Management Actions', () => {
       const existingUser = createTestUser({ id: 'existing-user' });
       const existingMembership = createTestMembership({ userId: 'existing-user' });
 
-      mockPrisma.membership.findUnique
-        .mockResolvedValueOnce(adminMembership)
-        .mockResolvedValueOnce(existingMembership);
+      mockPrisma.membership.findUnique.mockResolvedValueOnce(adminMembership).mockResolvedValueOnce(existingMembership);
       mockPrisma.user.findUnique.mockResolvedValue(existingUser);
 
       const result = await inviteMember({
@@ -262,9 +253,7 @@ describe('Team Management Actions', () => {
       });
       const updatedMembership = { ...targetMembership, role: 'ADMIN' };
 
-      mockPrisma.membership.findUnique
-        .mockResolvedValueOnce(ownerMembership)
-        .mockResolvedValueOnce(targetMembership);
+      mockPrisma.membership.findUnique.mockResolvedValueOnce(ownerMembership).mockResolvedValueOnce(targetMembership);
       mockPrisma.membership.update.mockResolvedValue(updatedMembership);
 
       const result = await updateMemberRole({
@@ -320,9 +309,7 @@ describe('Team Management Actions', () => {
         role: 'MEMBER',
       });
 
-      mockPrisma.membership.findUnique
-        .mockResolvedValueOnce(ownerMembership)
-        .mockResolvedValueOnce(targetMembership);
+      mockPrisma.membership.findUnique.mockResolvedValueOnce(ownerMembership).mockResolvedValueOnce(targetMembership);
       mockPrisma.membership.delete.mockResolvedValue(targetMembership);
 
       const result = await removeMember({
@@ -369,9 +356,7 @@ describe('Team Management Actions', () => {
         role: 'OWNER',
       });
 
-      mockPrisma.membership.findUnique
-        .mockResolvedValueOnce(adminMembership)
-        .mockResolvedValueOnce(ownerMembership);
+      mockPrisma.membership.findUnique.mockResolvedValueOnce(adminMembership).mockResolvedValueOnce(ownerMembership);
 
       const result = await removeMember({
         teamId: 'team-123',

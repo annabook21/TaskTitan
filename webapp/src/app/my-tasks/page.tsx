@@ -57,13 +57,13 @@ export default async function MyTasksPage() {
 
   const tasks = assignments.map((a) => {
     const component = a.Component;
-    
+
     // Find current status entry
-    const currentStatusEntry = component.StatusHistory.find((h) => !h.exitedAt) || 
-      component.StatusHistory[component.StatusHistory.length - 1];
-    
+    const currentStatusEntry =
+      component.StatusHistory.find((h) => !h.exitedAt) || component.StatusHistory[component.StatusHistory.length - 1];
+
     // Calculate how long in current status
-    const statusAge = currentStatusEntry 
+    const statusAge = currentStatusEntry
       ? Math.floor((Date.now() - new Date(currentStatusEntry.enteredAt).getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
@@ -169,7 +169,9 @@ export default async function MyTasksPage() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-2">
                                   <h3 className="font-medium text-slate-200 truncate">{task.name}</h3>
-                                  <span className={`px-1.5 py-0.5 text-xs rounded bg-${config.color}-500/20 text-${config.color}-400`}>
+                                  <span
+                                    className={`px-1.5 py-0.5 text-xs rounded bg-${config.color}-500/20 text-${config.color}-400`}
+                                  >
                                     {task.type}
                                   </span>
                                 </div>
@@ -189,11 +191,7 @@ export default async function MyTasksPage() {
                                       {isOverdue && ' (overdue)'}
                                     </span>
                                   )}
-                                  {task.sprint && (
-                                    <span className="flex items-center gap-1">
-                                      {task.sprint.name}
-                                    </span>
-                                  )}
+                                  {task.sprint && <span className="flex items-center gap-1">{task.sprint.name}</span>}
                                   {isAging && (
                                     <span className="flex items-center gap-1 text-amber-400">
                                       <AlertCircle className="w-3.5 h-3.5" />

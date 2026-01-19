@@ -29,11 +29,17 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
     onSuccess: ({ data }) => {
       if (isDemoResult(data)) {
         // Apply the refined sprint and components to demo store
-        const refinedData = data as { 
+        const refinedData = data as {
           sprint?: { name: string; goal: string; capacity?: number };
-          componentUpdates?: { id: string; name: string; description: string; estimatedHours: number; priority: number }[];
+          componentUpdates?: {
+            id: string;
+            name: string;
+            description: string;
+            estimatedHours: number;
+            priority: number;
+          }[];
         };
-        
+
         if (refinedData.sprint) {
           demoStore.updateSprint(sprintId, {
             name: refinedData.sprint.name,
@@ -41,7 +47,7 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
             capacity: refinedData.sprint.capacity,
           });
         }
-        
+
         if (refinedData.componentUpdates) {
           for (const comp of refinedData.componentUpdates) {
             if (comp.id) {
@@ -53,7 +59,7 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
             }
           }
         }
-        
+
         handleResult(data);
       }
       toast.success('Sprint updated with AI suggestions');
@@ -80,16 +86,19 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
       const projects = team ? demoStore.getProjectsByTeam(teamId) : [];
       const project = projects[0];
       const workflowConfig = team ? demoStore.getWorkflowConfig(teamId) : null;
-      
+
       if (sprint && project) {
         // Get components assigned to this sprint
         const allComponents = demoStore.getComponentsByProject(project.id);
         const sprintComponents = allComponents.filter((c) => c.sprintId === sprintId);
-        
+
         const startDate = sprint.startDate ? new Date(sprint.startDate) : new Date();
         const endDate = sprint.endDate ? new Date(sprint.endDate) : new Date();
-        const durationWeeks = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-        
+        const durationWeeks = Math.max(
+          1,
+          Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 7)),
+        );
+
         demoSprintData = {
           name: sprint.name,
           goal: sprint.goal || '',
@@ -151,9 +160,7 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
         <div className="p-4 space-y-4">
           {/* Suggested Prompts */}
           <div>
-            <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">
-              Quick Actions
-            </label>
+            <label className="text-xs text-slate-500 uppercase tracking-wide mb-2 block">Quick Actions</label>
             <div className="flex flex-wrap gap-2">
               {suggestions.map((suggestion, i) => (
                 <button
@@ -170,9 +177,7 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
 
           {/* Custom Input */}
           <div>
-            <label className="text-sm font-medium text-slate-300 mb-2 block">
-              Or describe your changes
-            </label>
+            <label className="text-sm font-medium text-slate-300 mb-2 block">Or describe your changes</label>
             <textarea
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
@@ -185,9 +190,7 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
                 }
               }}
             />
-            <p className="text-xs text-slate-500 mt-1">
-              Press Cmd+Enter to apply
-            </p>
+            <p className="text-xs text-slate-500 mt-1">Press Cmd+Enter to apply</p>
           </div>
 
           {/* Info */}
@@ -207,11 +210,7 @@ export default function SprintRefineButton({ sprintId, sprintName, teamId }: Pro
           <button onClick={() => setIsOpen(false)} className="btn-secondary">
             Cancel
           </button>
-          <button
-            onClick={() => handleRefine()}
-            disabled={isExecuting || !chatInput.trim()}
-            className="btn-primary"
-          >
+          <button onClick={() => handleRefine()} disabled={isExecuting || !chatInput.trim()} className="btn-primary">
             {isExecuting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             Apply Changes
           </button>

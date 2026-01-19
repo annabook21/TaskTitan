@@ -536,68 +536,66 @@ const refineBulkPlanSchema = z.object({
  * Refine a bulk AI-generated plan using conversational chat
  * Uses real Bedrock AI for both demo and production modes
  */
-export const refineBulkAIPlan = authActionClient
-  .schema(refineBulkPlanSchema)
-  .action(async ({ parsedInput, ctx }) => {
-    const { projectId, currentPlan, refinementRequest, demoProjectData } = parsedInput;
-    const { userId, isDemo } = ctx;
+export const refineBulkAIPlan = authActionClient.schema(refineBulkPlanSchema).action(async ({ parsedInput, ctx }) => {
+  const { projectId, currentPlan, refinementRequest, demoProjectData } = parsedInput;
+  const { userId, isDemo } = ctx;
 
-    // Check if AI is configured (required for both demo and production)
-    if (!isAIConfigured()) {
-      throw new MyCustomError('AI features require Amazon Bedrock access.');
+  // Check if AI is configured (required for both demo and production)
+  if (!isAIConfigured()) {
+    throw new MyCustomError('AI features require Amazon Bedrock access.');
+  }
+
+  let projectName: string;
+  let projectDescription: string;
+  let workflowType: 'SCRUM' | 'KANBAN' | 'CUSTOM';
+  let cycleName: string | undefined;
+
+  if (isDemo) {
+    if (!demoProjectData) {
+      throw new MyCustomError('Demo project data not provided');
     }
-
-    let projectName: string;
-    let projectDescription: string;
-    let workflowType: 'SCRUM' | 'KANBAN' | 'CUSTOM';
-    let cycleName: string | undefined;
-
-    if (isDemo) {
-      if (!demoProjectData) {
-        throw new MyCustomError('Demo project data not provided');
-      }
-      projectName = demoProjectData.name;
-      projectDescription = demoProjectData.description;
-      workflowType = demoProjectData.workflowType;
-      cycleName = demoProjectData.cycleName;
-    } else {
-      // Production mode - get project from database
-      const project = await prisma.project.findFirst({
-        where: {
-          id: projectId,
-          Team: { Membership: { some: { userId } } },
-        },
-        include: {
-          Team: {
-            include: {
-              WorkflowConfig: true,
-            },
+    projectName = demoProjectData.name;
+    projectDescription = demoProjectData.description;
+    workflowType = demoProjectData.workflowType;
+    cycleName = demoProjectData.cycleName;
+  } else {
+    // Production mode - get project from database
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        Team: { Membership: { some: { userId } } },
+      },
+      include: {
+        Team: {
+          include: {
+            WorkflowConfig: true,
           },
         },
-      });
-
-      if (!project) {
-        throw new MyCustomError('Project not found or access denied');
-      }
-
-      projectName = project.name;
-      projectDescription = project.description || '';
-      const config = project.Team.WorkflowConfig;
-      workflowType = config?.workflowTemplate || 'CUSTOM';
-      cycleName = config?.cycleName || undefined;
-    }
-
-    // Refine the plan using Bedrock AI
-    const result = await refineBulkPlan({
-      currentPlan,
-      refinementRequest,
-      projectContext: {
-        projectName,
-        projectDescription,
-        workflowType,
-        cycleName,
       },
     });
 
-    return result;
+    if (!project) {
+      throw new MyCustomError('Project not found or access denied');
+    }
+
+    projectName = project.name;
+    projectDescription = project.description || '';
+    const config = project.Team.WorkflowConfig;
+    workflowType = config?.workflowTemplate || 'CUSTOM';
+    cycleName = config?.cycleName || undefined;
+  }
+
+  // Refine the plan using Bedrock AI
+  const result = await refineBulkPlan({
+    currentPlan,
+    refinementRequest,
+    projectContext: {
+      projectName,
+      projectDescription,
+      workflowType,
+      cycleName,
+    },
   });
+
+  return result;
+});

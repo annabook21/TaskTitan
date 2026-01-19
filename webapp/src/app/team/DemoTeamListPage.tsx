@@ -145,9 +145,7 @@ export default function DemoTeamListPage() {
                     {team.name}
                   </h3>
 
-                  {team.description && (
-                    <p className="text-sm text-slate-400 line-clamp-2 mb-4">{team.description}</p>
-                  )}
+                  {team.description && <p className="text-sm text-slate-400 line-clamp-2 mb-4">{team.description}</p>}
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                     <div className="flex items-center gap-4 text-xs text-slate-500">
