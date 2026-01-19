@@ -196,8 +196,9 @@ export default async function DocsPage() {
             </div>
 
             <p className="text-slate-300 mb-6">
-              Components are the work items in TaskTitan. They follow agile best practices and can be organized
-              hierarchically.
+              Components are the work items in TaskTitan. They follow the INVEST criteria for well-defined work items
+              and can be organized hierarchically, supporting various methodologies including Scrum, Kanban, and Shape
+              Up.
             </p>
 
             {/* Component Types */}
