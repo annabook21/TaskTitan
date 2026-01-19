@@ -151,10 +151,7 @@ export class Webapp extends Construct {
         enableLogging: true,
         secrets: {
           ...dbSecrets,
-          NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: EcsSecret.fromSecretsManager(
-            serverActionsKeySecret,
-            'encryptionKey',
-          ),
+          NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: EcsSecret.fromSecretsManager(serverActionsKeySecret, 'encryptionKey'),
         },
         environment: {
           // Database configuration (non-sensitive values only)
