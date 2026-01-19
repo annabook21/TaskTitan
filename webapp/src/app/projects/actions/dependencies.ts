@@ -5,10 +5,10 @@ import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 
-// Schemas
+// Schemas - use min(1) instead of cuid() to allow demo IDs
 const addDependencySchema = z.object({
-  dependentComponentId: z.string().cuid(),
-  requiredComponentId: z.string().cuid(),
+  dependentComponentId: z.string().min(1),
+  requiredComponentId: z.string().min(1),
   description: z.string().max(500).optional(),
 });
 
@@ -98,7 +98,7 @@ export const addDependency = authActionClient.schema(addDependencySchema).action
  * Removes a dependency relationship between two components
  */
 export const removeDependency = authActionClient
-  .schema(z.object({ id: z.string().cuid() }))
+  .schema(z.object({ id: z.string().min(1) }))
   .action(async ({ parsedInput, ctx }) => {
     const { id } = parsedInput;
     const { userId, isDemo } = ctx;

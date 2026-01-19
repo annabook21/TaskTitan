@@ -11,8 +11,9 @@ import { revalidatePath } from 'next/cache';
 export const assignComponent = authActionClient
   .schema(
     z.object({
-      componentId: z.string().cuid(),
-      assigneeId: z.string(),
+      // Use min(1) instead of cuid() to allow demo IDs like 'demo-component-001'
+      componentId: z.string().min(1),
+      assigneeId: z.string().min(1),
     }),
   )
   .action(async ({ parsedInput, ctx }) => {
@@ -101,8 +102,9 @@ export const assignComponent = authActionClient
 export const unassignComponent = authActionClient
   .schema(
     z.object({
-      componentId: z.string().cuid(),
-      assigneeId: z.string(),
+      // Use min(1) instead of cuid() to allow demo IDs like 'demo-component-001'
+      componentId: z.string().min(1),
+      assigneeId: z.string().min(1),
     }),
   )
   .action(async ({ parsedInput, ctx }) => {

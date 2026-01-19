@@ -5,9 +5,9 @@ import { prisma } from '@/lib/prisma';
 import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 
-// Schemas
+// Schemas - use min(1) instead of cuid() to allow demo IDs like 'demo-sprint-001'
 const createSprintSchema = z.object({
-  teamId: z.string().cuid(),
+  teamId: z.string().min(1),
   name: z.string().min(1, 'Name is required').max(100),
   goal: z.string().max(500).optional(),
   startDate: z.string().datetime(),
@@ -16,7 +16,7 @@ const createSprintSchema = z.object({
 });
 
 const updateSprintSchema = z.object({
-  id: z.string().cuid(),
+  id: z.string().min(1),
   name: z.string().min(1).max(100).optional(),
   goal: z.string().max(500).optional(),
   startDate: z.string().datetime().optional(),
@@ -25,13 +25,13 @@ const updateSprintSchema = z.object({
 });
 
 const sprintStatusSchema = z.object({
-  id: z.string().cuid(),
+  id: z.string().min(1),
   status: z.enum(['PLANNING', 'ACTIVE', 'COMPLETED', 'CANCELLED']),
 });
 
 const assignToSprintSchema = z.object({
-  componentId: z.string().cuid(),
-  sprintId: z.string().cuid().nullable(),
+  componentId: z.string().min(1),
+  sprintId: z.string().min(1).nullable(),
 });
 
 /**
@@ -256,7 +256,7 @@ export const assignComponentToSprint = authActionClient
  * Deletes a sprint (owner only)
  */
 export const deleteSprint = authActionClient
-  .schema(z.object({ id: z.string().cuid() }))
+  .schema(z.object({ id: z.string().min(1) }))
   .action(async ({ parsedInput, ctx }) => {
     const { id } = parsedInput;
     const { userId, isDemo } = ctx;
@@ -296,7 +296,7 @@ export const deleteSprint = authActionClient
  * Gets sprint metrics (burndown, velocity, etc.)
  */
 export const getSprintMetrics = authActionClient
-  .schema(z.object({ id: z.string().cuid() }))
+  .schema(z.object({ id: z.string().min(1) }))
   .action(async ({ parsedInput, ctx }) => {
     const { id } = parsedInput;
     const { userId } = ctx;
