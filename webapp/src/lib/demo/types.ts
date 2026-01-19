@@ -56,6 +56,7 @@ export interface DemoComponent {
   statusEnteredAt: string;
   priority: number;
   estimatedHours: number | null;
+  actualHours: number | null;
   dueDate: string | null;
   owner: string | null;
   tags: string[];

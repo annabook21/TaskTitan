@@ -53,6 +53,7 @@ export const generateSprintRetrospective = authActionClient
             estimatedHours: true,
             actualHours: true,
             description: true,
+            projectId: true,
           },
         },
         Team: {

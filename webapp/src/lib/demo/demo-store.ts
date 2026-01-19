@@ -96,9 +96,9 @@ class DemoStore {
     // Migrate memberships to include capacity planning fields
     data.memberships = data.memberships.map((m) => ({
       ...m,
-      title: (m as Record<string, unknown>).title ?? null,
-      hoursPerDay: (m as Record<string, unknown>).hoursPerDay ?? 6,
-      availability: (m as Record<string, unknown>).availability ?? 100,
+      title: (m as unknown as Record<string, unknown>).title ?? null,
+      hoursPerDay: (m as unknown as Record<string, unknown>).hoursPerDay ?? 6,
+      availability: (m as unknown as Record<string, unknown>).availability ?? 100,
     })) as DemoDataStore['memberships'];
 
     return data;
@@ -582,6 +582,7 @@ class DemoStore {
       statusEnteredAt: timestamp,
       priority: input.priority ?? 0,
       estimatedHours: input.estimatedHours || null,
+      actualHours: null,
       dueDate: input.dueDate || null,
       owner: null,
       tags: input.tags || [],
@@ -625,6 +626,7 @@ class DemoStore {
         | 'status'
         | 'priority'
         | 'estimatedHours'
+        | 'actualHours'
         | 'dueDate'
         | 'parentId'
         | 'sprintId'
@@ -636,6 +638,11 @@ class DemoStore {
         | 'contextAiSummary'
         | 'contextUpdatedAt'
         | 'contextUpdatedBy'
+        | 'githubPrUrl'
+        | 'githubPrNumber'
+        | 'githubPrTitle'
+        | 'githubPrStatus'
+        | 'githubPrUpdatedAt'
       >
     >,
   ): DemoComponent | null {

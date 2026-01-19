@@ -581,7 +581,7 @@ export const refineBulkAIPlan = authActionClient.schema(refineBulkPlanSchema).ac
     projectName = project.name;
     projectDescription = project.description || '';
     const config = project.Team.WorkflowConfig;
-    workflowType = config?.workflowTemplate || 'CUSTOM';
+    workflowType = (config?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM') || 'CUSTOM';
     cycleName = config?.cycleName || undefined;
   }
 

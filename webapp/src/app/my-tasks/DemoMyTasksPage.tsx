@@ -76,7 +76,7 @@ export default function DemoMyTasksPage() {
               name: sprint.name,
             }
           : null,
-        assignedAt: new Date(assignment.createdAt),
+        assignedAt: new Date(assignment.assignedAt),
       };
     });
 

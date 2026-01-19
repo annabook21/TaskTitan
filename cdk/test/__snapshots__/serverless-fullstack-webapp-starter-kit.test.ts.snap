@@ -3316,6 +3316,20 @@ exports.handler = async function (event, context) {
                   ],
                 },
               },
+              {
+                "Name": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Ref": "WebappServerActionsEncryptionKeyE7854C03",
+                      },
+                      ":encryptionKey::",
+                    ],
+                  ],
+                },
+              },
             ],
           },
         ],
@@ -3412,6 +3426,16 @@ exports.handler = async function (event, context) {
               "Effect": "Allow",
               "Resource": {
                 "Ref": "DatabaseClusterSecretAttachmentDC8466C0",
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "WebappServerActionsEncryptionKeyE7854C03",
               },
             },
           ],
@@ -3918,6 +3942,21 @@ exports.handler = async function (event, context) {
         "Priority": 20,
       },
       "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
+    "WebappServerActionsEncryptionKeyE7854C03": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "Description": "Encryption key for Next.js Server Actions - must be consistent across deployments",
+        "GenerateSecretString": {
+          "ExcludeCharacters": ""@/\\",
+          "GenerateStringKey": "encryptionKey",
+          "PasswordLength": 32,
+          "SecretStringTemplate": "{}",
+        },
+        "Name": "/TaskTitanStack/next-server-actions-encryption-key",
+      },
+      "Type": "AWS::SecretsManager::Secret",
+      "UpdateReplacePolicy": "Delete",
     },
     "WebappSetForwardedHost3C7EC8E3": {
       "Properties": {

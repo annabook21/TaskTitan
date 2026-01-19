@@ -33,6 +33,7 @@ export function setupActionTest(options: { userId?: string; isDemo?: boolean; pr
   const originalUserPoolId = process.env.USER_POOL_ID;
 
   // Force local dev mode for testing
+  // @ts-expect-error - NODE_ENV is read-only but we need to override it for testing
   process.env.NODE_ENV = 'development';
   delete process.env.USER_POOL_ID;
 
@@ -47,6 +48,7 @@ export function setupActionTest(options: { userId?: string; isDemo?: boolean; pr
   }
 
   return () => {
+    // @ts-expect-error - NODE_ENV is read-only but we need to restore it for testing
     process.env.NODE_ENV = originalEnv;
     if (originalUserPoolId) {
       process.env.USER_POOL_ID = originalUserPoolId;

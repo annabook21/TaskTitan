@@ -105,7 +105,8 @@ export default function GitHubIntegrationSettings({ projectId, currentSettings, 
       id: projectId,
       githubRepoUrl: repoUrl || null,
       githubWebhookSecret: secret || null,
-      githubPrTargetStatus: transitions.find((t) => t.event === 'PR_MERGED')?.targetStatus || 'REVIEW',
+      githubPrTargetStatus:
+        (transitions.find((t) => t.event === 'PR_MERGED')?.targetStatus as 'REVIEW' | 'COMPLETED' | null) || 'REVIEW',
     });
 
     // Save transition configs
