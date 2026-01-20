@@ -38,7 +38,7 @@ TaskTitan is an AI-powered project planning tool that helps development teams br
 
 TaskTitan is built on AWS Serverless architecture for high availability, scalability, and cost efficiency:
 
-![TaskTitan Architecture](./tasktitan-architecture.drawio.svg)
+![TaskTitan Architecture](./tasktitan_arch.drawio.svg)
 
 ### Key Technologies
 
