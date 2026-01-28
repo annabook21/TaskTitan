@@ -306,6 +306,10 @@ function handler(event) {
     // FORGE: Always use CloudFront default domain
     this.baseUrl = `https://${distribution.domainName}`;
 
+    // Add AMPLIFY_APP_ORIGIN to the container after distribution is created
+    // This is required for OAuth callback URL construction in the middleware
+    fargateService.taskDefinition.defaultContainer?.addEnvironment('AMPLIFY_APP_ORIGIN', this.baseUrl);
+
     // Configure auth callback URLs dynamically (CloudFront domain not known until deployment)
     auth.updateAllowedCallbackUrls(
       [`${this.baseUrl}/api/auth/sign-in-callback`, `http://localhost:3010/api/auth/sign-in-callback`],

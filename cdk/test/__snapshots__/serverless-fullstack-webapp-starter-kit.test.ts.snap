@@ -2991,6 +2991,23 @@ exports.handler = async function (event, context) {
                 "Name": "HOSTNAME",
                 "Value": "0.0.0.0",
               },
+              {
+                "Name": "AMPLIFY_APP_ORIGIN",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "https://",
+                      {
+                        "Fn::GetAtt": [
+                          "Webapp107041BD",
+                          "DomainName",
+                        ],
+                      },
+                    ],
+                  ],
+                },
+              },
             ],
             "Essential": true,
             "Image": {
