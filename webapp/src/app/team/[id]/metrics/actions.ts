@@ -3,6 +3,9 @@
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { dualRead } from '@/lib/dynamodb/dual-write';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 const metricsQuerySchema = z.object({
   teamId: z.string().cuid(),
@@ -35,37 +38,90 @@ export const getCycleTimeMetrics = authActionClient.schema(metricsQuerySchema).a
   const { teamId, days } = parsedInput;
   const { userId } = ctx;
 
-  // Check membership
-  const membership = await prisma.membership.findFirst({
-    where: { teamId, userId },
-  });
+  const entities = getEntities();
 
-  if (!membership) {
-    throw new MyCustomError('You are not a member of this team');
-  }
+  // Check membership (dualRead)
+  await dualRead(
+    'membership',
+    async () => {
+      const membership = await prisma.membership.findFirst({ where: { teamId, userId } });
+      if (!membership) throw new MyCustomError('You are not a member of this team');
+      return true;
+    },
+    async () => {
+      const access = await verifyTeamMembership(userId, teamId);
+      if (!access) throw new MyCustomError('You are not a member of this team');
+      return true;
+    },
+    { context: { action: 'getCycleTimeMetrics', teamId } }
+  );
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  // Get all components that have been completed in the time range
-  // by looking at their status history
-  const completedComponents = await prisma.component.findMany({
-    where: {
-      Project: { teamId },
-      status: 'COMPLETED',
-      StatusHistory: {
-        some: {
+  // Get all components that have been completed in the time range by looking at status history (dualRead)
+  const completedComponents = await dualRead(
+    'componentStatusHistory',
+    async () => {
+      return prisma.component.findMany({
+        where: {
+          Project: { teamId },
           status: 'COMPLETED',
-          enteredAt: { gte: startDate },
+          StatusHistory: {
+            some: {
+              status: 'COMPLETED',
+              enteredAt: { gte: startDate },
+            },
+          },
         },
-      },
+        include: {
+          StatusHistory: {
+            orderBy: { enteredAt: 'asc' },
+          },
+        },
+      });
     },
-    include: {
-      StatusHistory: {
-        orderBy: { enteredAt: 'asc' },
-      },
+    async () => {
+      // DynamoDB: fetch team projects -> components -> status histories per component
+      const projects = await entities.project.query.byTeam({ teamId }).go();
+      const projectIds = projects.data.map((p) => p.id);
+      if (projectIds.length === 0) return [];
+
+      const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+      const allComponents = componentResults.flatMap((r) => r.data);
+
+      const completed = allComponents.filter((c) => c.status === 'COMPLETED');
+      if (completed.length === 0) return [];
+
+      const histories = await Promise.all(completed.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+
+      const cutoffIso = startDate.toISOString();
+
+      const mapped = completed
+        .map((c, idx) => {
+          const statusHistory = histories[idx].data
+            .map((h) => ({
+              status: h.status,
+              enteredAt: new Date(h.enteredAt),
+              exitedAt: h.exitedAt ? new Date(h.exitedAt) : null,
+            }))
+            .sort((a, b) => a.enteredAt.getTime() - b.enteredAt.getTime());
+
+          const hasCompletedInRange = statusHistory.some((h) => h.status === 'COMPLETED' && h.enteredAt.toISOString() >= cutoffIso);
+          if (!hasCompletedInRange) return null;
+
+          return {
+            id: c.id,
+            status: c.status,
+            StatusHistory: statusHistory,
+          };
+        })
+        .filter(Boolean);
+
+      return mapped as unknown;
     },
-  });
+    { context: { action: 'getCycleTimeMetrics', teamId, days } }
+  );
 
   // Calculate cycle times
   const cycleTimes: number[] = [];
@@ -114,32 +170,65 @@ export const getThroughputMetrics = authActionClient.schema(metricsQuerySchema).
   const { teamId, days } = parsedInput;
   const { userId } = ctx;
 
-  // Check membership
-  const membership = await prisma.membership.findFirst({
-    where: { teamId, userId },
-  });
+  const entities = getEntities();
 
-  if (!membership) {
-    throw new MyCustomError('You are not a member of this team');
-  }
+  await dualRead(
+    'membership',
+    async () => {
+      const membership = await prisma.membership.findFirst({ where: { teamId, userId } });
+      if (!membership) throw new MyCustomError('You are not a member of this team');
+      return true;
+    },
+    async () => {
+      const access = await verifyTeamMembership(userId, teamId);
+      if (!access) throw new MyCustomError('You are not a member of this team');
+      return true;
+    },
+    { context: { action: 'getThroughputMetrics', teamId } }
+  );
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  // Get completion events from status history
-  const completionEvents = await prisma.componentStatusHistory.findMany({
-    where: {
-      status: 'COMPLETED',
-      enteredAt: { gte: startDate },
-      Component: {
-        Project: { teamId },
-      },
+  // Get completion events from status history (dualRead)
+  const completionEvents = await dualRead(
+    'componentStatusHistory',
+    async () => {
+      return prisma.componentStatusHistory.findMany({
+        where: {
+          status: 'COMPLETED',
+          enteredAt: { gte: startDate },
+          Component: {
+            Project: { teamId },
+          },
+        },
+        select: {
+          enteredAt: true,
+        },
+        orderBy: { enteredAt: 'asc' },
+      });
     },
-    select: {
-      enteredAt: true,
+    async () => {
+      const projects = await entities.project.query.byTeam({ teamId }).go();
+      const projectIds = projects.data.map((p) => p.id);
+      if (projectIds.length === 0) return [];
+
+      const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+      const allComponents = componentResults.flatMap((r) => r.data);
+
+      const histories = await Promise.all(allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+      const cutoffIso = startDate.toISOString();
+
+      const events = histories
+        .flatMap((r) => r.data)
+        .filter((h) => h.status === 'COMPLETED' && h.enteredAt >= cutoffIso)
+        .map((h) => ({ enteredAt: new Date(h.enteredAt) }))
+        .sort((a, b) => a.enteredAt.getTime() - b.enteredAt.getTime());
+
+      return events as unknown;
     },
-    orderBy: { enteredAt: 'asc' },
-  });
+    { context: { action: 'getThroughputMetrics', teamId, days } }
+  );
 
   // Group by week
   const weeklyThroughput: Map<string, number> = new Map();
@@ -181,24 +270,52 @@ export const getStatusDistribution = authActionClient
     const { teamId } = parsedInput;
     const { userId } = ctx;
 
-    // Check membership
-    const membership = await prisma.membership.findFirst({
-      where: { teamId, userId },
-    });
-
-    if (!membership) {
-      throw new MyCustomError('You are not a member of this team');
-    }
-
-    const distribution = await prisma.component.groupBy({
-      by: ['status'],
-      where: {
-        Project: { teamId },
+    const entities = getEntities();
+    await dualRead(
+      'membership',
+      async () => {
+        const membership = await prisma.membership.findFirst({ where: { teamId, userId } });
+        if (!membership) throw new MyCustomError('You are not a member of this team');
+        return true;
       },
-      _count: {
-        status: true,
+      async () => {
+        const access = await verifyTeamMembership(userId, teamId);
+        if (!access) throw new MyCustomError('You are not a member of this team');
+        return true;
       },
-    });
+      { context: { action: 'getStatusDistribution', teamId } }
+    );
+
+    const distribution = await dualRead(
+      'component',
+      async () => {
+        return prisma.component.groupBy({
+          by: ['status'],
+          where: {
+            Project: { teamId },
+          },
+          _count: {
+            status: true,
+          },
+        });
+      },
+      async () => {
+        const projects = await entities.project.query.byTeam({ teamId }).go();
+        const projectIds = projects.data.map((p) => p.id);
+        if (projectIds.length === 0) return [];
+
+        const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+        const allComponents = componentResults.flatMap((r) => r.data);
+
+        const counts = new Map<string, number>();
+        for (const c of allComponents) {
+          counts.set(c.status, (counts.get(c.status) || 0) + 1);
+        }
+
+        return Array.from(counts.entries()).map(([status, count]) => ({ status, _count: { status: count } })) as unknown;
+      },
+      { context: { action: 'getStatusDistribution', teamId } }
+    );
 
     const data: StatusDistribution[] = distribution.map((d) => ({
       status: d.status,
@@ -215,23 +332,45 @@ export const getWipOverTime = authActionClient.schema(metricsQuerySchema).action
   const { teamId, days } = parsedInput;
   const { userId } = ctx;
 
-  // Check membership
-  const membership = await prisma.membership.findFirst({
-    where: { teamId, userId },
-  });
-
-  if (!membership) {
-    throw new MyCustomError('You are not a member of this team');
-  }
+  const entities = getEntities();
+  await dualRead(
+    'membership',
+    async () => {
+      const membership = await prisma.membership.findFirst({ where: { teamId, userId } });
+      if (!membership) throw new MyCustomError('You are not a member of this team');
+      return true;
+    },
+    async () => {
+      const access = await verifyTeamMembership(userId, teamId);
+      if (!access) throw new MyCustomError('You are not a member of this team');
+      return true;
+    },
+    { context: { action: 'getWipOverTime', teamId } }
+  );
 
   // For simplicity, just return current WIP count
   // A more sophisticated implementation would track historical WIP
-  const currentWip = await prisma.component.count({
-    where: {
-      Project: { teamId },
-      status: 'IN_PROGRESS',
+  const currentWip = await dualRead(
+    'component',
+    async () => {
+      return prisma.component.count({
+        where: {
+          Project: { teamId },
+          status: 'IN_PROGRESS',
+        },
+      });
     },
-  });
+    async () => {
+      const projects = await entities.project.query.byTeam({ teamId }).go();
+      const projectIds = projects.data.map((p) => p.id);
+      if (projectIds.length === 0) return 0;
+
+      const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+      const allComponents = componentResults.flatMap((r) => r.data);
+      return allComponents.filter((c) => c.status === 'IN_PROGRESS').length as unknown;
+    },
+    { context: { action: 'getWipOverTime', teamId } }
+  );
 
   return {
     currentWip,
@@ -258,42 +397,96 @@ export const getCumulativeFlowData = authActionClient
     const { teamId, days } = parsedInput;
     const { userId } = ctx;
 
-    // Check membership
-    const membership = await prisma.membership.findFirst({
-      where: { teamId, userId },
-    });
-
-    if (!membership) {
-      throw new MyCustomError('You are not a member of this team');
-    }
+    const entities = getEntities();
+    await dualRead(
+      'membership',
+      async () => {
+        const membership = await prisma.membership.findFirst({ where: { teamId, userId } });
+        if (!membership) throw new MyCustomError('You are not a member of this team');
+        return true;
+      },
+      async () => {
+        const access = await verifyTeamMembership(userId, teamId);
+        if (!access) throw new MyCustomError('You are not a member of this team');
+        return true;
+      },
+      { context: { action: 'getCumulativeFlowData', teamId } }
+    );
 
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    // Get all status history events for this team's components
-    const statusHistory = await prisma.componentStatusHistory.findMany({
-      where: {
-        Component: {
-          Project: { teamId },
-        },
+    // Get all status history events for this team's components (dualRead)
+    const statusHistory = await dualRead(
+      'componentStatusHistory',
+      async () => {
+        return prisma.componentStatusHistory.findMany({
+          where: {
+            Component: {
+              Project: { teamId },
+            },
+          },
+          select: {
+            status: true,
+            enteredAt: true,
+            exitedAt: true,
+          },
+          orderBy: { enteredAt: 'asc' },
+        });
       },
-      select: {
-        status: true,
-        enteredAt: true,
-        exitedAt: true,
-      },
-      orderBy: { enteredAt: 'asc' },
-    });
+      async () => {
+        const projects = await entities.project.query.byTeam({ teamId }).go();
+        const projectIds = projects.data.map((p) => p.id);
+        if (projectIds.length === 0) return [];
 
-    // Also get current component counts by status
-    const currentCounts = await prisma.component.groupBy({
-      by: ['status'],
-      where: {
-        Project: { teamId },
+        const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+        const allComponents = componentResults.flatMap((r) => r.data);
+
+        const histories = await Promise.all(allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+
+        const events = histories
+          .flatMap((r) => r.data)
+          .map((h) => ({
+            status: h.status,
+            enteredAt: new Date(h.enteredAt),
+            exitedAt: h.exitedAt ? new Date(h.exitedAt) : null,
+          }))
+          .sort((a, b) => a.enteredAt.getTime() - b.enteredAt.getTime());
+
+        return events as unknown;
       },
-      _count: { status: true },
-    });
+      { context: { action: 'getCumulativeFlowData', teamId, days } }
+    );
+
+    // Also get current component counts by status (dualRead)
+    const currentCounts = await dualRead(
+      'component',
+      async () => {
+        return prisma.component.groupBy({
+          by: ['status'],
+          where: {
+            Project: { teamId },
+          },
+          _count: { status: true },
+        });
+      },
+      async () => {
+        const projects = await entities.project.query.byTeam({ teamId }).go();
+        const projectIds = projects.data.map((p) => p.id);
+        if (projectIds.length === 0) return [];
+
+        const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+        const allComponents = componentResults.flatMap((r) => r.data);
+
+        const counts = new Map<string, number>();
+        for (const c of allComponents) {
+          counts.set(c.status, (counts.get(c.status) || 0) + 1);
+        }
+        return Array.from(counts.entries()).map(([status, count]) => ({ status, _count: { status: count } })) as unknown;
+      },
+      { context: { action: 'getCumulativeFlowData_counts', teamId } }
+    );
 
     const currentCountMap: Record<string, number> = {};
     for (const c of currentCounts) {
@@ -364,29 +557,58 @@ export const getAgingAnalysis = authActionClient
     const { teamId } = parsedInput;
     const { userId } = ctx;
 
-    // Check membership
-    const membership = await prisma.membership.findFirst({
-      where: { teamId, userId },
-    });
-
-    if (!membership) {
-      throw new MyCustomError('You are not a member of this team');
-    }
-
-    // Get current status entries (exitedAt is null)
-    const currentStatusEntries = await prisma.componentStatusHistory.findMany({
-      where: {
-        exitedAt: null,
-        Component: {
-          Project: { teamId },
-          status: { not: 'COMPLETED' },
-        },
+    const entities = getEntities();
+    await dualRead(
+      'membership',
+      async () => {
+        const membership = await prisma.membership.findFirst({ where: { teamId, userId } });
+        if (!membership) throw new MyCustomError('You are not a member of this team');
+        return true;
       },
-      select: {
-        status: true,
-        enteredAt: true,
+      async () => {
+        const access = await verifyTeamMembership(userId, teamId);
+        if (!access) throw new MyCustomError('You are not a member of this team');
+        return true;
       },
-    });
+      { context: { action: 'getAgingAnalysis', teamId } }
+    );
+
+    // Get current status entries (exitedAt is null / undefined) (dualRead)
+    const currentStatusEntries = await dualRead(
+      'componentStatusHistory',
+      async () => {
+        return prisma.componentStatusHistory.findMany({
+          where: {
+            exitedAt: null,
+            Component: {
+              Project: { teamId },
+              status: { not: 'COMPLETED' },
+            },
+          },
+          select: {
+            status: true,
+            enteredAt: true,
+          },
+        });
+      },
+      async () => {
+        const projects = await entities.project.query.byTeam({ teamId }).go();
+        const projectIds = projects.data.map((p) => p.id);
+        if (projectIds.length === 0) return [];
+
+        const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+        const allComponents = componentResults.flatMap((r) => r.data).filter((c) => c.status !== 'COMPLETED');
+
+        const histories = await Promise.all(allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+        const entries = histories
+          .flatMap((r) => r.data)
+          .filter((h) => !h.exitedAt)
+          .map((h) => ({ status: h.status, enteredAt: new Date(h.enteredAt) }));
+
+        return entries as unknown;
+      },
+      { context: { action: 'getAgingAnalysis', teamId } }
+    );
 
     // Calculate aging by status
     const agingByStatus: Record<string, { days: number[] }> = {

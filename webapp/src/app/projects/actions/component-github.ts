@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
+import { randomUUID } from 'crypto';
+
+// DynamoDB migration imports
+import { dualRead, dualWrite } from '@/lib/dynamodb/dual-write';
+import { getEntities, getService } from '@/lib/dynamodb/service';
 
 // Schema for linking a PR to a component
 const linkComponentToPRSchema = z.object({
@@ -32,61 +37,139 @@ export const linkComponentToPR = authActionClient
       };
     }
 
-    // Verify user has access to the component's project
-    const component = await prisma.component.findFirst({
-      where: {
-        id: componentId,
-        Project: {
-          Team: {
-            Membership: {
-              some: { userId },
+    const entities = getEntities();
+
+    // Verify user has access to the component's project (dualRead-aware)
+    const component = await dualRead(
+      'component',
+      async () => {
+        return prisma.component.findFirst({
+          where: {
+            id: componentId,
+            Project: {
+              Team: {
+                Membership: {
+                  some: { userId },
+                },
+              },
             },
           },
-        },
+          include: {
+            Project: {
+              select: { id: true },
+            },
+          },
+        });
       },
-      include: {
-        Project: {
-          select: { id: true },
-        },
+      async () => {
+        // DynamoDB: component.get -> verify membership via project.teamId
+        const compResult = await entities.component.get({ id: componentId }).go();
+        const comp = compResult.data;
+        if (!comp) return null;
+
+        const projResult = await entities.project.get({ id: comp.projectId }).go();
+        const proj = projResult.data;
+        if (!proj) return null;
+
+        // Membership primary key is (teamId, userId) so we can use a direct get().
+        const membershipResult = await entities.membership.get({ teamId: proj.teamId, userId }).go();
+        if (!membershipResult.data) return null;
+
+        // Shape-match Prisma include we use below
+        return {
+          id: comp.id,
+          name: comp.name,
+          projectId: comp.projectId,
+          Project: { id: comp.projectId },
+        } as unknown;
       },
-    });
+      { context: { action: 'linkComponentToPR', componentId } }
+    );
 
     if (!component) {
       throw new MyCustomError('Component not found or access denied');
     }
 
-    // Update the component with PR info
-    const updated = await prisma.component.update({
-      where: { id: componentId },
-      data: {
-        githubPrUrl: prUrl,
-        githubPrNumber: prNumber,
-        githubPrTitle: prTitle || null,
-        githubPrStatus: prStatus || (prUrl ? 'open' : null),
-        githubPrUpdatedAt: prUrl ? new Date() : null,
+    const activityId = randomUUID();
+
+    // Update the component with PR info (dual-write)
+    const result = await dualWrite(
+      'component',
+      'update',
+      async () => {
+        return prisma.component.update({
+          where: { id: componentId },
+          data: {
+            githubPrUrl: prUrl,
+            githubPrNumber: prNumber,
+            githubPrTitle: prTitle || null,
+            githubPrStatus: prStatus || (prUrl ? 'open' : null),
+            githubPrUpdatedAt: prUrl ? new Date() : null,
+          },
+        });
       },
-    });
+      async () => {
+        const updateData: Record<string, unknown> = {
+          githubRepoUrl: undefined,
+          githubWebhookSecret: undefined,
+        };
+        updateData.githubPrUrl = prUrl || undefined;
+        updateData.githubPrNumber = prNumber ?? undefined;
+        updateData.githubPrTitle = prTitle || undefined;
+        updateData.githubPrStatus = prStatus || (prUrl ? 'open' : undefined);
+        updateData.githubPrUpdatedAt = prUrl ? new Date().toISOString() : undefined;
+
+        const updated = await entities.component.update({ id: componentId }).set(updateData).go({ response: 'all_new' });
+        return updated.data;
+      },
+      { context: { action: 'linkComponentToPR', componentId } }
+    );
 
     // Create activity log for PR linking
     if (prUrl) {
-      await prisma.activity.create({
-        data: {
-          type: 'GITHUB_PR_LINKED',
-          projectId: component.Project.id,
-          userId,
-          metadata: {
-            componentId,
-            componentName: component.name,
-            prUrl,
-            prNumber,
-          },
+      await dualWrite(
+        'activity',
+        'create',
+        async () => {
+          return prisma.activity.create({
+            data: {
+              id: activityId,
+              type: 'GITHUB_PR_LINKED',
+              projectId: (component as any).Project.id,
+              userId,
+              metadata: {
+                componentId,
+                componentName: (component as any).name,
+                prUrl,
+                prNumber,
+              },
+            },
+          });
         },
-      });
+        async () => {
+          const service = getService();
+          await service.transaction
+            .write(({ activity }) => [
+              activity
+                .create({
+                  id: activityId,
+                  type: 'GITHUB_PR_LINKED',
+                  projectId: (component as any).Project.id,
+                  userId,
+                  metadata: { componentId, componentName: (component as any).name, prUrl, prNumber },
+                })
+                .commit(),
+            ])
+            .go();
+          return { id: activityId };
+        },
+        { context: { action: 'linkComponentToPR', componentId } }
+      );
     }
 
-    revalidatePath(`/projects/${component.Project.id}`);
+    revalidatePath(`/projects/${(component as any).Project.id}`);
 
-    return { component: updated };
+    return { component: result.data };
   });
 
 // Schema for updating PR status (called from webhook)
@@ -104,12 +187,27 @@ export async function updateComponentPRStatus(
   prStatus: 'open' | 'draft' | 'merged' | 'closed',
   prTitle?: string,
 ) {
-  return prisma.component.update({
-    where: { id: componentId },
-    data: {
-      githubPrStatus: prStatus,
-      githubPrTitle: prTitle,
-      githubPrUpdatedAt: new Date(),
+  const entities = getEntities();
+  return dualWrite(
+    'component',
+    'update',
+    async () => {
+      return prisma.component.update({
+        where: { id: componentId },
+        data: {
+          githubPrStatus: prStatus,
+          githubPrTitle: prTitle,
+          githubPrUpdatedAt: new Date(),
+        },
+      });
     },
-  });
+    async () => {
+      const updated = await entities.component
+        .update({ id: componentId })
+        .set({ githubPrStatus: prStatus, githubPrTitle: prTitle || undefined, githubPrUpdatedAt: new Date().toISOString() })
+        .go({ response: 'all_new' });
+      return updated.data;
+    },
+    { context: { action: 'updateComponentPRStatus', componentId, prStatus } }
+  );
 }

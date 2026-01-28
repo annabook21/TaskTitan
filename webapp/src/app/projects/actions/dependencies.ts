@@ -4,6 +4,13 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
+import { randomUUID } from 'crypto';
+
+// DynamoDB migration imports
+import { dualWrite } from '@/lib/dynamodb/dual-write';
+import { getEntities, getService } from '@/lib/dynamodb/service';
+import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { verifyComponentAccess } from '@/lib/dynamodb/auth-helpers';
 
 // Schemas - use min(1) instead of cuid() to allow demo IDs
 const addDependencySchema = z.object({
@@ -32,66 +39,138 @@ export const addDependency = authActionClient.schema(addDependencySchema).action
     throw new MyCustomError('A component cannot depend on itself');
   }
 
-  // Verify both components exist AND user has access through team membership
-  const [dependent, required] = await Promise.all([
-    prisma.component.findFirst({
-      where: {
-        id: dependentComponentId,
-        Project: {
-          Team: {
-            Membership: {
-              some: { userId },
+  const phase = getMigrationPhase('dependency');
+
+  let projectId: string;
+  let dependentName: string;
+  let requiredName: string;
+
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    const [depAccess, reqAccess] = await Promise.all([
+      verifyComponentAccess(userId, dependentComponentId),
+      verifyComponentAccess(userId, requiredComponentId),
+    ]);
+
+    if (!depAccess || !reqAccess) {
+      throw new MyCustomError('One or both components not found or access denied');
+    }
+
+    if (depAccess.component.projectId !== reqAccess.component.projectId) {
+      throw new MyCustomError('Components must be in the same project');
+    }
+
+    projectId = depAccess.component.projectId;
+    dependentName = depAccess.component.name;
+    requiredName = reqAccess.component.name;
+  } else {
+    // Verify both components exist AND user has access through team membership
+    const [dependent, required] = await Promise.all([
+      prisma.component.findFirst({
+        where: {
+          id: dependentComponentId,
+          Project: {
+            Team: {
+              Membership: {
+                some: { userId },
+              },
             },
           },
         },
-      },
-    }),
-    prisma.component.findFirst({
-      where: {
-        id: requiredComponentId,
-        Project: {
-          Team: {
-            Membership: {
-              some: { userId },
+      }),
+      prisma.component.findFirst({
+        where: {
+          id: requiredComponentId,
+          Project: {
+            Team: {
+              Membership: {
+                some: { userId },
+              },
             },
           },
         },
-      },
-    }),
-  ]);
+      }),
+    ]);
 
-  if (!dependent || !required) {
-    throw new MyCustomError('One or both components not found or access denied');
+    if (!dependent || !required) {
+      throw new MyCustomError('One or both components not found or access denied');
+    }
+
+    if (dependent.projectId !== required.projectId) {
+      throw new MyCustomError('Components must be in the same project');
+    }
+
+    projectId = dependent.projectId;
+    dependentName = dependent.name;
+    requiredName = required.name;
   }
 
-  if (dependent.projectId !== required.projectId) {
-    throw new MyCustomError('Components must be in the same project');
-  }
+  const dependencyId = randomUUID();
+  const activityId = randomUUID();
 
-  const dependency = await prisma.dependency.create({
-    data: {
-      dependentComponentId,
-      requiredComponentId,
-      description,
+  const result = await dualWrite(
+    'dependency',
+    'create',
+    async () => {
+      const dependency = await prisma.dependency.create({
+        data: {
+          id: dependencyId,
+          dependentComponentId,
+          requiredComponentId,
+          description,
+        },
+      });
+
+      await prisma.activity.create({
+        data: {
+          id: activityId,
+          type: 'DEPENDENCY_ADDED',
+          projectId,
+          userId,
+          metadata: {
+            dependentComponent: dependentName,
+            requiredComponent: requiredName,
+          },
+        },
+      });
+
+      return dependency;
     },
-  });
+    async () => {
+      const service = getService();
 
-  // Log activity
-  await prisma.activity.create({
-    data: {
-      type: 'DEPENDENCY_ADDED',
-      projectId: dependent.projectId,
-      userId,
-      metadata: {
-        dependentComponent: dependent.name,
-        requiredComponent: required.name,
-      },
+      await service.transaction
+        .write(({ dependency, activity }) => [
+          dependency
+            .create({
+              id: dependencyId,
+              dependentComponentId,
+              requiredComponentId,
+              description,
+            })
+            .commit(),
+          activity
+            .create({
+              id: activityId,
+              type: 'DEPENDENCY_ADDED',
+              projectId,
+              userId,
+              metadata: {
+                dependentComponent: dependentName,
+                requiredComponent: requiredName,
+              },
+            })
+            .commit(),
+        ])
+        .go();
+
+      return { id: dependencyId, dependentComponentId, requiredComponentId, description };
     },
-  });
+    { context: { action: 'addDependency', dependentComponentId, requiredComponentId } }
+  );
 
-  revalidatePath(`/projects/${dependent.projectId}`);
+  revalidatePath(`/projects/${projectId}`);
 
-  return { dependency };
+  return { dependency: result.data };
 });
 
 /**
@@ -108,7 +187,9 @@ export const removeDependency = authActionClient
       return { _demo: true, _action: 'removeDependency', _input: { id } };
     }
 
-    // Verify dependency exists AND user has access to the project
+    // NOTE: Dependency items in DynamoDB are keyed by (dependentComponentId, requiredComponentId),
+    // but this action currently receives only the Prisma dependency `id`. During migration,
+    // we keep the authoritative lookup in Prisma and use the derived keys for the DynamoDB delete.
     const dependency = await prisma.dependency.findFirst({
       where: {
         id,
@@ -135,22 +216,56 @@ export const removeDependency = authActionClient
     const dependentComponent = dependency.Component_Dependency_dependentComponentIdToComponent;
     const requiredComponent = dependency.Component_Dependency_requiredComponentIdToComponent;
 
-    await prisma.dependency.delete({ where: { id } });
+    const dependentComponentId = dependentComponent.id;
+    const requiredComponentId = requiredComponent.id;
+    const projectId = dependentComponent.projectId;
+    const dependentName = dependentComponent.name;
+    const requiredName = requiredComponent.name;
 
-    // Log activity
-    await prisma.activity.create({
-      data: {
-        type: 'DEPENDENCY_REMOVED',
-        projectId: dependentComponent.projectId,
-        userId,
-        metadata: {
-          dependentComponent: dependentComponent.name,
-          requiredComponent: requiredComponent.name,
-        },
+    const activityId = randomUUID();
+
+    await dualWrite(
+      'dependency',
+      'delete',
+      async () => {
+        await prisma.dependency.delete({ where: { id } });
+        await prisma.activity.create({
+          data: {
+            id: activityId,
+            type: 'DEPENDENCY_REMOVED',
+            projectId,
+            userId,
+            metadata: {
+              dependentComponent: dependentName,
+              requiredComponent: requiredName,
+            },
+          },
+        });
+        return { success: true };
       },
-    });
+      async () => {
+        const service = getService();
+        await service.transaction
+          .write(({ dependency, activity }) => [
+            dependency.delete({ dependentComponentId, requiredComponentId }).commit(),
+            activity
+              .create({
+                id: activityId,
+                type: 'DEPENDENCY_REMOVED',
+                projectId,
+                userId,
+                metadata: { dependentComponent: dependentName, requiredComponent: requiredName },
+              })
+              .commit(),
+          ])
+          .go();
 
-    revalidatePath(`/projects/${dependentComponent.projectId}`);
+        return { success: true };
+      },
+      { context: { action: 'removeDependency', dependencyId: id } }
+    );
+
+    revalidatePath(`/projects/${projectId}`);
 
     return { success: true };
   });

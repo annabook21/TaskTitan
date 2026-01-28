@@ -6,6 +6,12 @@ import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { isAIConfigured } from '@/lib/ai';
 import { refineBulkPlan } from '@/lib/ai/generators/bulk-plan-refinement';
+import { randomUUID } from 'crypto';
+
+// DynamoDB migration imports
+import { dualRead, dualWrite } from '@/lib/dynamodb/dual-write';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifySprintAccess } from '@/lib/dynamodb/auth-helpers';
 
 const refineSprintSchema = z.object({
   sprintId: z.string().min(1),
@@ -102,37 +108,84 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
     teamId = demoSprintData.teamId;
     componentIdMap = new Map(demoSprintData.components.map((c) => [c.name, c.id]));
   } else {
-    // Production mode - get sprint from database
-    const sprint = await prisma.sprint.findFirst({
-      where: {
-        id: sprintId,
-        Team: { Membership: { some: { userId } } },
-      },
-      include: {
-        Component: {
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            type: true,
-            estimatedHours: true,
-            priority: true,
+    const entities = getEntities();
+
+    // Production mode - get sprint from database (dualRead)
+    const sprint = await dualRead(
+      'sprint',
+      async () => {
+        return prisma.sprint.findFirst({
+          where: {
+            id: sprintId,
+            Team: { Membership: { some: { userId } } },
           },
-        },
-        Team: {
           include: {
-            Project: {
+            Component: {
               select: {
                 id: true,
                 name: true,
                 description: true,
+                type: true,
+                estimatedHours: true,
+                priority: true,
               },
             },
-            WorkflowConfig: true,
+            Team: {
+              include: {
+                Project: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                  },
+                },
+                WorkflowConfig: true,
+              },
+            },
           },
-        },
+        });
       },
-    });
+      async () => {
+        const access = await verifySprintAccess(userId, sprintId);
+        if (!access) return null;
+
+        // Get components currently assigned to sprint
+        const projects = await entities.project.query.byTeam({ teamId: access.sprint.teamId }).go();
+        const projectIds = projects.data.map((p) => p.id);
+        const componentResults = await Promise.all(
+          projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+        );
+        const allComponents = componentResults.flatMap((r) => r.data);
+        const sprintComponents = allComponents
+          .filter((c) => c.sprintId === sprintId)
+          .map((c) => ({
+            id: c.id,
+            name: c.name,
+            description: (c as any).description ?? null,
+            type: (c as any).type,
+            estimatedHours: (c as any).estimatedHours ?? null,
+            priority: (c as any).priority ?? 0,
+          }));
+
+        const workflowConfig = await entities.teamWorkflowConfig.get({ teamId: access.sprint.teamId }).go();
+
+        return {
+          id: access.sprint.id,
+          teamId: access.sprint.teamId,
+          name: access.sprint.name,
+          goal: (access.sprint as any).goal ?? null,
+          startDate: (access.sprint as any).startDate,
+          endDate: (access.sprint as any).endDate,
+          capacity: (access.sprint as any).capacity ?? null,
+          Component: sprintComponents,
+          Team: {
+            Project: projects.data.map((p) => ({ id: p.id, name: p.name, description: (p as any).description ?? null })),
+            WorkflowConfig: workflowConfig.data ?? null,
+          },
+        } as unknown;
+      },
+      { context: { action: 'refineExistingSprint', sprintId } }
+    );
 
     if (!sprint) {
       throw new MyCustomError('Sprint not found or access denied');
@@ -210,28 +263,62 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
   if (result.sprints && result.sprints[0]) {
     const updatedSprint = result.sprints[0];
 
-    await prisma.sprint.update({
-      where: { id: sprintId },
-      data: {
-        name: updatedSprint.name,
-        goal: updatedSprint.goal,
-        capacity: updatedSprint.capacity,
+    await dualWrite(
+      'sprint',
+      'update',
+      async () => {
+        return prisma.sprint.update({
+          where: { id: sprintId },
+          data: {
+            name: updatedSprint.name,
+            goal: updatedSprint.goal,
+            capacity: updatedSprint.capacity,
+          },
+        });
       },
-    });
+      async () => {
+        const { sprint } = getEntities();
+        const updated = await sprint
+          .update({ id: sprintId })
+          .set({ name: updatedSprint.name, goal: updatedSprint.goal, capacity: updatedSprint.capacity })
+          .go({ response: 'all_new' });
+        return updated.data;
+      },
+      { context: { action: 'refineExistingSprint', sprintId } }
+    );
   }
 
   // Update components if changed
+  const entities = getEntities();
   for (const updatedComp of result.components) {
     const componentId = componentIdMap.get(updatedComp.name);
     if (componentId) {
-      await prisma.component.update({
-        where: { id: componentId },
-        data: {
-          description: updatedComp.description,
-          estimatedHours: updatedComp.estimatedHours,
-          priority: Math.round(updatedComp.priority * 10),
+      await dualWrite(
+        'component',
+        'update',
+        async () => {
+          return prisma.component.update({
+            where: { id: componentId },
+            data: {
+              description: updatedComp.description,
+              estimatedHours: updatedComp.estimatedHours,
+              priority: Math.round(updatedComp.priority * 10),
+            },
+          });
         },
-      });
+        async () => {
+          const updated = await entities.component
+            .update({ id: componentId })
+            .set({
+              description: updatedComp.description || undefined,
+              estimatedHours: updatedComp.estimatedHours,
+              priority: Math.round(updatedComp.priority * 10),
+            })
+            .go({ response: 'all_new' });
+          return updated.data;
+        },
+        { context: { action: 'refineExistingSprint', sprintId, componentId } }
+      );
     }
   }
 

@@ -4,6 +4,7 @@ import { Construct } from 'constructs';
 import { AsyncJob } from './constructs/async-job';
 import { Auth } from './constructs/auth/';
 import { Database } from './constructs/database';
+import { TaskTitanTable } from './constructs/dynamodb';
 import {
   GatewayVpcEndpointAwsService,
   InstanceClass,
@@ -86,7 +87,18 @@ export class MainStack extends Stack {
       service: GatewayVpcEndpointAwsService.DYNAMODB,
     });
 
+    // FORGE v2: DynamoDB Single-Table Design
+    // Phase 1 of migration: Run alongside Aurora during dual-write period
+    // AWS Best Practice: Single-table design with on-demand billing
+    // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-general-nosql-design.html
+    const dynamoTable = new TaskTitanTable(this, 'DynamoTable', {
+      pointInTimeRecovery: true, // 35-day backup retention
+      removalPolicy: RemovalPolicy.RETAIN, // Prevent accidental data loss
+      enableStreams: true, // For real-time updates and migration validation
+    });
+
     // DATA TIER: Aurora PostgreSQL Serverless with automated backups
+    // NOTE: Kept during dual-write migration period - will be removed in Phase 6
     const database = new Database(this, 'Database', {
       vpc,
       backupRetentionDays, // Stretch goal: Regular backups
@@ -114,6 +126,7 @@ export class MainStack extends Stack {
       auth,
       eventBus,
       asyncJob,
+      dynamoTable, // FORGE v2: DynamoDB for dual-write migration
     });
 
     // CloudWatch Monitoring Dashboard
@@ -143,6 +156,17 @@ export class MainStack extends Stack {
     new CfnOutput(this, 'XRayServiceMapUrl', {
       value: `https://${this.region}.console.aws.amazon.com/xray/home?region=${this.region}#/service-map`,
       description: 'X-Ray Service Map for request tracing',
+    });
+
+    // FORGE v2: DynamoDB outputs
+    new CfnOutput(this, 'DynamoDBTableName', {
+      value: dynamoTable.tableName,
+      description: 'DynamoDB table name for TaskTitan data',
+    });
+
+    new CfnOutput(this, 'DynamoDBTableArn', {
+      value: dynamoTable.tableArn,
+      description: 'DynamoDB table ARN for IAM policies',
     });
   }
 }

@@ -122,6 +122,21 @@ exports[`Snapshot test 1`] = `
         ],
       },
     },
+    "DynamoDBTableArn": {
+      "Description": "DynamoDB table ARN for IAM policies",
+      "Value": {
+        "Fn::GetAtt": [
+          "DynamoTableE5532DA8",
+          "Arn",
+        ],
+      },
+    },
+    "DynamoDBTableName": {
+      "Description": "DynamoDB table name for TaskTitan data",
+      "Value": {
+        "Ref": "DynamoTableE5532DA8",
+      },
+    },
     "EventBusHttpEndpoint1C68A807": {
       "Value": {
         "Fn::Join": [
@@ -1470,6 +1485,97 @@ exports[`Snapshot test 1`] = `
         },
       },
       "Type": "AWS::RDS::DBClusterParameterGroup",
+    },
+    "DynamoTableE5532DA8": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "sk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi1pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi1sk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi2pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi2sk",
+            "AttributeType": "S",
+          },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "ContributorInsightsSpecification": {
+          "Enabled": true,
+        },
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "gsi1",
+            "KeySchema": [
+              {
+                "AttributeName": "gsi1pk",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "gsi1sk",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "gsi2",
+            "KeySchema": [
+              {
+                "AttributeName": "gsi2pk",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "gsi2sk",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH",
+          },
+          {
+            "AttributeName": "sk",
+            "KeyType": "RANGE",
+          },
+        ],
+        "PointInTimeRecoverySpecification": {
+          "PointInTimeRecoveryEnabled": true,
+        },
+        "SSESpecification": {
+          "SSEEnabled": true,
+        },
+        "StreamSpecification": {
+          "StreamViewType": "NEW_AND_OLD_IMAGES",
+        },
+        "TableName": "TaskTitanForgeStack-TaskTitan",
+      },
+      "Type": "AWS::DynamoDB::Table",
+      "UpdateReplacePolicy": "Retain",
     },
     "EcsDefaultClusterMnL3mNNYNVpc18E0451A": {
       "Type": "AWS::ECS::Cluster",
@@ -2976,6 +3082,12 @@ exports.handler = async function (event, context) {
                 },
               },
               {
+                "Name": "DYNAMODB_TABLE_NAME",
+                "Value": {
+                  "Ref": "DynamoTableE5532DA8",
+                },
+              },
+              {
                 "Name": "POWERTOOLS_SERVICE_NAME",
                 "Value": "TaskTitanWebapp",
               },
@@ -3249,6 +3361,72 @@ exports.handler = async function (event, context) {
                 },
               ],
             },
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:Query",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:DescribeTable",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DynamoTableE5532DA8",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DynamoTableE5532DA8",
+                          "Arn",
+                        ],
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DynamoTableE5532DA8",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DynamoTableE5532DA8",
+                          "Arn",
+                        ],
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -3426,6 +3604,9 @@ exports.handler = async function (event, context) {
         "VpcPrivateSubnet3DefaultRoute94B74F0D",
         "VpcPrivateSubnet3RouteTableAssociation16BDDC43",
       ],
+      "Metadata": {
+        "aws:cdk:do-not-refactor": true,
+      },
       "Properties": {
         "FunctionName": {
           "Ref": "WebappMigrationRunnerAC67C012",

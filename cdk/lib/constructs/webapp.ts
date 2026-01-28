@@ -30,6 +30,8 @@ import { ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadba
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Secret as EcsSecret } from 'aws-cdk-lib/aws-ecs';
 
+import { TaskTitanTable } from './dynamodb';
+
 // FORGE: Simplified webapp configuration - no custom domain, no wireframe bucket
 export interface WebappProps {
   database: Database;
@@ -37,6 +39,8 @@ export interface WebappProps {
   auth: Auth;
   eventBus: EventBus;
   asyncJob: AsyncJob;
+  /** FORGE v2: DynamoDB table for dual-write migration */
+  dynamoTable?: TaskTitanTable;
 }
 
 export class Webapp extends Construct {
@@ -46,7 +50,7 @@ export class Webapp extends Construct {
   constructor(scope: Construct, id: string, props: WebappProps) {
     super(scope, id);
 
-    const { database, auth, eventBus, asyncJob } = props;
+    const { database, auth, eventBus, asyncJob, dynamoTable } = props;
     const vpc = database.cluster.vpc;
 
     // Build Docker image for ECS Fargate
@@ -132,6 +136,8 @@ export class Webapp extends Construct {
           // Service configuration
           ASYNC_JOB_HANDLER_ARN: asyncJob.handler.functionArn,
           // FORGE: Wireframe bucket removed - export feature disabled
+          // FORGE v2: DynamoDB table for dual-write migration
+          ...(dynamoTable && dynamoTable.getEnvironment()),
           // Logging
           POWERTOOLS_SERVICE_NAME: 'TaskTitanWebapp',
           LOG_LEVEL: 'INFO',
@@ -225,6 +231,11 @@ export class Webapp extends Construct {
 
     // Grant Lambda invoke for async jobs
     asyncJob.handler.grantInvoke(fargateService.taskDefinition.taskRole);
+
+    // FORGE v2: Grant DynamoDB permissions for dual-write migration
+    if (dynamoTable) {
+      dynamoTable.table.grantReadWriteData(fargateService.taskDefinition.taskRole);
+    }
 
     // AWS Best Practice: Origin verification header to prevent direct ALB access
     // This ensures traffic only comes through CloudFront, not directly to the ALB
