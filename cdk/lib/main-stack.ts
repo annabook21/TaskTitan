@@ -13,7 +13,7 @@ import {
   NatProvider,
   Vpc,
 } from 'aws-cdk-lib/aws-ec2';
-import { Webapp } from './constructs/webapp';
+import { AppRunnerService } from './constructs/app-runner';
 import { EventBus } from './constructs/event-bus/';
 import { Monitoring } from './constructs/monitoring';
 
@@ -39,7 +39,7 @@ interface MainStackProps extends StackProps {
 export class MainStack extends Stack {
   constructor(scope: Construct, id: string, props: MainStackProps) {
     super(scope, id, {
-      description: 'TaskTitan FORGE - Cost-Optimized Serverless Application (us-east-2)',
+      description: 'TaskTitan FORGE v2 - App Runner + DynamoDB (us-east-2)',
       ...props,
     });
 
@@ -49,7 +49,7 @@ export class MainStack extends Stack {
     // Reference: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html
     const { useNatInstance = false, backupRetentionDays = 30 } = props;
 
-    // Access logs bucket for CloudFront - Security best practice
+    // Access logs bucket - kept for future CloudFront integration if needed
     const accessLogBucket = new Bucket(this, 'AccessLogBucket', {
       encryption: BucketEncryption.S3_MANAGED,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -59,9 +59,10 @@ export class MainStack extends Stack {
       autoDeleteObjects: true,
     });
 
-    // VPC Configuration
-    // - Default: NAT Gateway (production best practice - managed, HA, auto-scaling)
-    // - Optional: NAT Instance for dev/test cost savings
+    // VPC Configuration - Still needed for:
+    // 1. Aurora PostgreSQL (during dual-write migration)
+    // 2. App Runner VPC Connector (to reach Aurora)
+    // After DynamoDB-only migration, VPC can be simplified or removed
     const vpc = new Vpc(this, `Vpc`, {
       ...(useNatInstance
         ? {
@@ -115,22 +116,24 @@ export class MainStack extends Stack {
     // LOGIC TIER: Async job processing
     const asyncJob = new AsyncJob(this, 'AsyncJob', { database: database, eventBus });
 
-    // PRESENTATION TIER: Next.js webapp on ECS Fargate + CloudFront
-    // ECS Fargate eliminates cold starts - containers stay warm and ready
-    // AI component generation uses Amazon Bedrock (Claude) - no API keys needed!
-    // SECURITY NOTE: Without custom domain, CloudFront uses default TLS settings.
-    // The *.cloudfront.net domain provides HTTPS via AWS-managed certificates.
-    const webapp = new Webapp(this, 'Webapp', {
-      database,
-      accessLogBucket,
+    // PRESENTATION TIER: FORGE v2 - App Runner replaces ECS Fargate + ALB
+    // App Runner provides:
+    // - Zero cold starts (containers stay warm)
+    // - Automatic scaling based on traffic
+    // - Built-in HTTPS on *.awsapprunner.com
+    // - No ALB or NAT Gateway needed for DynamoDB
+    // - ~50-70% cost savings
+    //
+    // VPC Connector enables Aurora access during dual-write migration period
+    const webapp = new AppRunnerService(this, 'Webapp', {
       auth,
+      dynamoTable,
       eventBus,
       asyncJob,
-      dynamoTable, // FORGE v2: DynamoDB for dual-write migration
+      database, // Dual-write migration: VPC Connector for Aurora access
     });
 
     // CloudWatch Monitoring Dashboard
-    // Note: Webapp metrics now come from ECS/CloudWatch Container Insights, not Lambda
     new Monitoring(this, 'Monitoring', {
       applicationName: 'TaskTitan',
       lambdaFunctions: [{ name: 'AsyncJob', fn: asyncJob.handler }],
@@ -139,8 +142,8 @@ export class MainStack extends Stack {
 
     // Outputs
     new CfnOutput(this, 'FrontendDomainName', {
-      value: webapp.baseUrl,
-      description: 'TaskTitan frontend URL (HTTPS)',
+      value: `https://${webapp.serviceUrl}`,
+      description: 'TaskTitan frontend URL (App Runner HTTPS)',
     });
 
     new CfnOutput(this, 'CognitoUserPoolId', {

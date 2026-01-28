@@ -3,6 +3,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import { Secret as AppRunnerSecret } from '@aws-cdk/aws-apprunner-alpha';
 import { Construct } from 'constructs';
 
 interface DatabaseProps {
@@ -150,6 +151,17 @@ export class Database extends Construct implements ec2.IConnectable {
       DATABASE_ENGINE: 'postgresql',
       DATABASE_PORT: Token.asString(this.cluster.clusterEndpoint.port),
       DATABASE_OPTION: option,
+    };
+  }
+
+  /**
+   * Returns App Runner secret references for secure credential injection.
+   * Used by AppRunnerService construct for dual-write migration period.
+   */
+  public getAppRunnerSecrets(): { [key: string]: AppRunnerSecret } {
+    return {
+      DATABASE_PASSWORD: AppRunnerSecret.fromSecretsManager(this.secret, 'password'),
+      DATABASE_USER: AppRunnerSecret.fromSecretsManager(this.secret, 'username'),
     };
   }
 }
