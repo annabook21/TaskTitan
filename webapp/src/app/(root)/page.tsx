@@ -5,6 +5,24 @@ import Link from 'next/link';
 import { FolderKanban, Users, Upload, Plus, ArrowRight, Sparkles, Layers, Clock } from 'lucide-react';
 import DemoDashboard from './DemoDashboard';
 
+// DynamoDB migration imports
+import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { getEntities } from '@/lib/dynamodb/service';
+
+// Type for team data used in the dashboard
+interface DashboardTeam {
+  id: string;
+  name: string;
+  Project: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    updatedAt: Date;
+    _count: { Component: number };
+  }>;
+  _count: { Membership: number };
+}
+
 export default async function Dashboard() {
   const session = await getSession();
   const { userId, user } = session;
@@ -14,33 +32,95 @@ export default async function Dashboard() {
     return <DemoDashboard />;
   }
 
-  // Get user's projects through team memberships
-  const memberships = await prisma.membership.findMany({
-    where: { userId },
-    include: {
-      Team: {
-        include: {
-          Project: {
-            include: {
-              _count: {
-                select: { Component: true },
+  const phase = getMigrationPhase('membership');
+  let teams: DashboardTeam[];
+
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    // DynamoDB: Multiple round-trips with application-layer aggregation
+    const entities = getEntities();
+
+    // Step 1: Get user's memberships (GSI1: userId)
+    const membershipsResult = await entities.membership.query.byUser({ userId }).go();
+    const teamIds = membershipsResult.data.map((m) => m.teamId);
+
+    if (teamIds.length === 0) {
+      teams = [];
+    } else {
+      // Step 2: Fetch teams in parallel
+      const teamResults = await Promise.all(teamIds.map((teamId) => entities.team.get({ id: teamId }).go()));
+
+      // Step 3: For each team, fetch projects and member counts in parallel
+      const teamsWithData = await Promise.all(
+        teamResults.map(async (teamResult) => {
+          const team = teamResult.data;
+          if (!team) return null;
+
+          // Parallel: projects and memberships for this team
+          const [projectsResult, membershipsCountResult] = await Promise.all([
+            entities.project.query.byTeam({ teamId: team.id }).go(),
+            entities.membership.query.primary({ teamId: team.id }).go(),
+          ]);
+
+          // Sort projects by updatedAt desc and take first 5
+          const sortedProjects = projectsResult.data
+            .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+            .slice(0, 5);
+
+          // Step 4: For each project, get component count
+          const projectsWithCounts = await Promise.all(
+            sortedProjects.map(async (project) => {
+              const componentsResult = await entities.component.query.byProject({ projectId: project.id }).go();
+              return {
+                id: project.id,
+                name: project.name,
+                description: project.description ?? null,
+                updatedAt: new Date(project.updatedAt || Date.now()),
+                _count: { Component: componentsResult.data.length },
+              };
+            })
+          );
+
+          return {
+            id: team.id,
+            name: team.name,
+            Project: projectsWithCounts,
+            _count: { Membership: membershipsCountResult.data.length },
+          };
+        })
+      );
+
+      teams = teamsWithData.filter((t): t is DashboardTeam => t !== null);
+    }
+  } else {
+    // Prisma: Nested includes with single query
+    const memberships = await prisma.membership.findMany({
+      where: { userId },
+      include: {
+        Team: {
+          include: {
+            Project: {
+              include: {
+                _count: {
+                  select: { Component: true },
+                },
               },
+              orderBy: { updatedAt: 'desc' },
+              take: 5,
             },
-            orderBy: { updatedAt: 'desc' },
-            take: 5,
-          },
-          _count: {
-            select: { Membership: true },
+            _count: {
+              select: { Membership: true },
+            },
           },
         },
       },
-    },
-  });
+    });
 
-  const teams = memberships.map((m) => m.Team);
+    teams = memberships.map((m) => m.Team);
+  }
+
   const recentProjects = teams.flatMap((t) => t.Project).slice(0, 5);
 
-  // Calculate stats
+  // Calculate stats using application-layer aggregation
   const totalProjects = teams.reduce((acc, t) => acc + t.Project.length, 0);
   const totalComponents = recentProjects.reduce((acc, p) => acc + p._count.Component, 0);
   const totalTeamMembers = teams.reduce((acc, t) => acc + t._count.Membership, 0);

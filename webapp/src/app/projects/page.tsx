@@ -5,6 +5,21 @@ import Link from 'next/link';
 import { Plus, FolderKanban, Layers, Clock, Users, ArrowRight, Filter } from 'lucide-react';
 import DemoProjectsPage from './DemoProjectsPage';
 
+// DynamoDB migration imports
+import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { getEntities } from '@/lib/dynamodb/service';
+
+// Type for project data used in the projects listing
+interface ProjectWithStats {
+  id: string;
+  name: string;
+  description: string | null;
+  updatedAt: Date;
+  team: { id: string; name: string };
+  _count: { components: number };
+  componentsByStatus: Record<string, number>;
+}
+
 export default async function ProjectsPage() {
   const session = await getSession();
   const { userId, user } = session;
@@ -14,67 +29,129 @@ export default async function ProjectsPage() {
     return <DemoProjectsPage />;
   }
 
-  // Get all projects user has access to
-  const projects = await prisma.project.findMany({
-    where: {
-      Team: { Membership: { some: { userId } } },
-    },
-    select: {
-      id: true,
-      name: true,
-      description: true,
-      updatedAt: true,
-      // Only load essential Team fields
-      Team: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      // Only load essential User fields
-      User: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      },
-      _count: {
-        select: { Component: true },
-      },
-    },
-    orderBy: { updatedAt: 'desc' },
-  });
+  const phase = getMigrationPhase('project');
+  let projectsWithStats: ProjectWithStats[];
 
-  // Get status counts for all projects in a single aggregated query (more efficient)
-  const statusCounts = await prisma.component.groupBy({
-    by: ['projectId', 'status'],
-    where: {
-      projectId: { in: projects.map((p) => p.id) },
-    },
-    _count: true,
-  });
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    // DynamoDB: Multiple round-trips with application-layer aggregation
+    const entities = getEntities();
 
-  // Build status count map for quick lookup
-  const statusCountMap = new Map<string, Record<string, number>>();
-  for (const count of statusCounts) {
-    if (!statusCountMap.has(count.projectId)) {
-      statusCountMap.set(count.projectId, {});
+    // Step 1: Get user's team memberships to find accessible teams
+    const membershipsResult = await entities.membership.query.byUser({ userId }).go();
+    const teamIds = membershipsResult.data.map((m) => m.teamId);
+
+    if (teamIds.length === 0) {
+      projectsWithStats = [];
+    } else {
+      // Step 2: Fetch teams for names
+      const teamResults = await Promise.all(teamIds.map((teamId) => entities.team.get({ id: teamId }).go()));
+      const teamMap = new Map<string, { id: string; name: string }>();
+      for (const result of teamResults) {
+        if (result.data) {
+          teamMap.set(result.data.id, { id: result.data.id, name: result.data.name });
+        }
+      }
+
+      // Step 3: Fetch all projects for all teams
+      const projectsByTeam = await Promise.all(
+        teamIds.map((teamId) => entities.project.query.byTeam({ teamId }).go())
+      );
+
+      // Flatten and combine with team info
+      const allProjects = projectsByTeam.flatMap((result, index) =>
+        result.data.map((project) => ({
+          ...project,
+          team: teamMap.get(teamIds[index]) || { id: teamIds[index], name: 'Unknown' },
+        }))
+      );
+
+      // Sort by updatedAt desc
+      allProjects.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+
+      // Step 4: For each project, fetch components and aggregate status counts
+      projectsWithStats = await Promise.all(
+        allProjects.map(async (project) => {
+          const componentsResult = await entities.component.query.byProject({ projectId: project.id }).go();
+
+          // Application-layer aggregation: group by status
+          const componentsByStatus: Record<string, number> = {};
+          for (const component of componentsResult.data) {
+            const status = component.status || 'PLANNING';
+            componentsByStatus[status] = (componentsByStatus[status] || 0) + 1;
+          }
+
+          return {
+            id: project.id,
+            name: project.name,
+            description: project.description ?? null,
+            updatedAt: new Date(project.updatedAt || Date.now()),
+            team: project.team,
+            _count: { components: componentsResult.data.length },
+            componentsByStatus,
+          };
+        })
+      );
     }
-    statusCountMap.get(count.projectId)![count.status] = count._count;
-  }
+  } else {
+    // Prisma: Nested includes with aggregation query
+    const projects = await prisma.project.findMany({
+      where: {
+        Team: { Membership: { some: { userId } } },
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        updatedAt: true,
+        Team: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        User: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        _count: {
+          select: { Component: true },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
 
-  // Attach status counts to projects
-  const projectsWithStats = projects.map((project) => {
-    const componentsByStatus = statusCountMap.get(project.id) || {};
+    // Get status counts for all projects in a single aggregated query
+    const statusCounts = await prisma.component.groupBy({
+      by: ['projectId', 'status'],
+      where: {
+        projectId: { in: projects.map((p) => p.id) },
+      },
+      _count: true,
+    });
 
-    return {
-      ...project,
+    // Build status count map for quick lookup (application-layer aggregation)
+    const statusCountMap = new Map<string, Record<string, number>>();
+    for (const count of statusCounts) {
+      if (!statusCountMap.has(count.projectId)) {
+        statusCountMap.set(count.projectId, {});
+      }
+      statusCountMap.get(count.projectId)![count.status] = count._count;
+    }
+
+    // Attach status counts to projects
+    projectsWithStats = projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      updatedAt: project.updatedAt,
       team: project.Team,
       _count: { components: project._count.Component },
-      componentsByStatus,
-    };
-  });
+      componentsByStatus: statusCountMap.get(project.id) || {},
+    }));
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -90,7 +167,7 @@ export default async function ProjectsPage() {
                 Projects
               </h1>
               <p className="text-slate-400 mt-1">
-                {projects.length} project{projects.length !== 1 ? 's' : ''} across all teams
+                {projectsWithStats.length} project{projectsWithStats.length !== 1 ? 's' : ''} across all teams
               </p>
             </div>
             <div className="flex items-center gap-3">

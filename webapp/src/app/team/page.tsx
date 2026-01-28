@@ -5,6 +5,10 @@ import Link from 'next/link';
 import { Users, Plus, FolderKanban, Crown, Shield, User as UserIcon, Eye, ArrowRight } from 'lucide-react';
 import DemoTeamListPage from './DemoTeamListPage';
 
+// DynamoDB migration imports
+import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { getEntities } from '@/lib/dynamodb/service';
+
 const roleIcons = {
   OWNER: Crown,
   ADMIN: Shield,
@@ -19,6 +23,29 @@ const roleColors = {
   VIEWER: 'text-slate-400',
 };
 
+// Type for membership data used in the teams listing
+type TeamRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+
+interface TeamMembershipData {
+  role: TeamRole;
+  Team: {
+    id: string;
+    name: string;
+    description: string | null;
+    Membership: Array<{
+      User: {
+        id: string;
+        name: string | null;
+        email: string;
+      };
+    }>;
+    _count: {
+      Membership: number;
+      Project: number;
+    };
+  };
+}
+
 export default async function TeamPage() {
   const session = await getSession();
   const { userId, user } = session;
@@ -28,41 +55,118 @@ export default async function TeamPage() {
     return <DemoTeamListPage />;
   }
 
-  const memberships = await prisma.membership.findMany({
-    where: { userId },
-    select: {
-      role: true,
-      joinedAt: true,
-      Team: {
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          Membership: {
-            // Only load first 6 members (5 shown + count)
-            take: 6,
-            orderBy: { joinedAt: 'asc' },
-            select: {
-              User: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true,
+  const phase = getMigrationPhase('membership');
+  let memberships: TeamMembershipData[];
+
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    // DynamoDB: Multiple round-trips with application-layer aggregation
+    const entities = getEntities();
+
+    // Step 1: Get user's memberships (GSI1: userId)
+    const membershipsResult = await entities.membership.query.byUser({ userId }).go();
+
+    if (membershipsResult.data.length === 0) {
+      memberships = [];
+    } else {
+      // Sort by joinedAt desc
+      const sortedMemberships = membershipsResult.data.sort(
+        (a, b) => new Date(b.joinedAt || 0).getTime() - new Date(a.joinedAt || 0).getTime()
+      );
+
+      // Step 2: For each membership, fetch team data in parallel
+      memberships = await Promise.all(
+        sortedMemberships.map(async (membership) => {
+          const teamId = membership.teamId;
+
+          // Parallel: team details, team memberships, and project count
+          const [teamResult, teamMembershipsResult, projectsResult] = await Promise.all([
+            entities.team.get({ id: teamId }).go(),
+            entities.membership.query.primary({ teamId }).go(),
+            entities.project.query.byTeam({ teamId }).go(),
+          ]);
+
+          const team = teamResult.data;
+          if (!team) {
+            return null;
+          }
+
+          // Sort team memberships by joinedAt and take first 6
+          const sortedTeamMembers = teamMembershipsResult.data
+            .sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime())
+            .slice(0, 6);
+
+          // Fetch user details for each team member
+          const teamMembersWithUsers = await Promise.all(
+            sortedTeamMembers.map(async (m) => {
+              const userResult = await entities.user.get({ id: m.userId }).go();
+              return {
+                User: {
+                  id: m.userId,
+                  name: userResult.data?.name ?? null,
+                  email: userResult.data?.email ?? 'unknown@example.com',
+                },
+              };
+            })
+          );
+
+          return {
+            role: (membership.role as TeamRole) || 'MEMBER',
+            Team: {
+              id: team.id,
+              name: team.name,
+              description: team.description ?? null,
+              Membership: teamMembersWithUsers,
+              _count: {
+                Membership: teamMembershipsResult.data.length,
+                Project: projectsResult.data.length,
+              },
+            },
+          };
+        })
+      ).then((results) => results.filter((r): r is TeamMembershipData => r !== null));
+    }
+  } else {
+    // Prisma: Nested includes with single query
+    const prismaResults = await prisma.membership.findMany({
+      where: { userId },
+      select: {
+        role: true,
+        joinedAt: true,
+        Team: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            Membership: {
+              take: 6,
+              orderBy: { joinedAt: 'asc' },
+              select: {
+                User: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
                 },
               },
             },
-          },
-          _count: {
-            select: {
-              Membership: true,
-              Project: true,
+            _count: {
+              select: {
+                Membership: true,
+                Project: true,
+              },
             },
           },
         },
       },
-    },
-    orderBy: { joinedAt: 'desc' },
-  });
+      orderBy: { joinedAt: 'desc' },
+    });
+
+    memberships = prismaResults.map((m) => ({
+      role: m.role as TeamRole,
+      Team: m.Team,
+    }));
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
