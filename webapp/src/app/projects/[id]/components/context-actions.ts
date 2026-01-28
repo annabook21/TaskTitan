@@ -6,6 +6,12 @@ import { summarizeComponentContext } from '@/lib/ai';
 import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 
+// DynamoDB migration imports
+import { dualWrite } from '@/lib/dynamodb/dual-write';
+import { getEntities } from '@/lib/dynamodb/service';
+import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { verifyComponentAccess } from '@/lib/dynamodb/auth-helpers';
+
 /**
  * Update component context (manual fields)
  */
@@ -39,40 +45,76 @@ export const updateComponentContextAction = authActionClient
       };
     }
 
+    const phase = getMigrationPhase('component');
+    let projectId: string;
+
     // Verify user has access to this component
-    const component = await prisma.component.findFirst({
-      where: {
-        id: componentId,
-        Project: {
-          Team: {
-            Membership: {
-              some: { userId },
+    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+      const access = await verifyComponentAccess(userId, componentId);
+      if (!access) {
+        throw new Error('Component not found or access denied');
+      }
+      projectId = access.component.projectId;
+    } else {
+      const component = await prisma.component.findFirst({
+        where: {
+          id: componentId,
+          Project: {
+            Team: {
+              Membership: {
+                some: { userId },
+              },
             },
           },
         },
-      },
-    });
+      });
 
-    if (!component) {
-      throw new Error('Component not found or access denied');
+      if (!component) {
+        throw new Error('Component not found or access denied');
+      }
+      projectId = component.projectId;
     }
 
-    // Update component context
-    const updated = await prisma.component.update({
-      where: { id: componentId },
-      data: {
-        contextDecision,
-        contextRationale,
-        contextAlternatives: contextAlternatives || null,
-        contextLinks: contextLinks || [],
-        contextUpdatedAt: new Date(),
-        contextUpdatedBy: userId,
+    const entities = getEntities();
+
+    // Update component context using dual-write
+    const result = await dualWrite(
+      'component',
+      'update',
+      async () => {
+        return prisma.component.update({
+          where: { id: componentId },
+          data: {
+            contextDecision,
+            contextRationale,
+            contextAlternatives: contextAlternatives || null,
+            contextLinks: contextLinks || [],
+            contextUpdatedAt: new Date(),
+            contextUpdatedBy: userId,
+          },
+        });
       },
-    });
+      async () => {
+        const nowIso = new Date().toISOString();
+        const updated = await entities.component
+          .update({ id: componentId })
+          .set({
+            contextDecision,
+            contextRationale,
+            contextAlternatives: contextAlternatives || undefined,
+            contextLinks: contextLinks || [],
+            contextUpdatedAt: nowIso,
+            contextUpdatedBy: userId,
+          })
+          .go({ response: 'all_new' });
+        return updated.data;
+      },
+      { context: { action: 'updateComponentContext', componentId } }
+    );
 
-    revalidatePath(`/projects/${component.projectId}`);
+    revalidatePath(`/projects/${projectId}`);
 
-    return { component: updated };
+    return { component: result.data };
   });
 
 /**
@@ -93,49 +135,101 @@ export const generateContextSummaryAction = authActionClient
       return { _demo: true, _action: 'generateContextSummary', _input: { componentId } };
     }
 
+    const phase = getMigrationPhase('component');
+    const entities = getEntities();
+
     // Fetch component with access check
-    const component = await prisma.component.findFirst({
-      where: {
-        id: componentId,
-        Project: {
-          Team: {
-            Membership: {
-              some: { userId },
+    let componentData: {
+      id: string;
+      name: string;
+      type: string;
+      projectId: string;
+      contextDecision: string | null;
+      contextRationale: string | null;
+      contextAlternatives: string | null;
+    };
+
+    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+      const access = await verifyComponentAccess(userId, componentId);
+      if (!access) {
+        throw new Error('Component not found or access denied');
+      }
+      componentData = {
+        id: access.component.id,
+        name: access.component.name,
+        type: access.component.type,
+        projectId: access.component.projectId,
+        contextDecision: access.component.contextDecision ?? null,
+        contextRationale: access.component.contextRationale ?? null,
+        contextAlternatives: access.component.contextAlternatives ?? null,
+      };
+    } else {
+      const component = await prisma.component.findFirst({
+        where: {
+          id: componentId,
+          Project: {
+            Team: {
+              Membership: {
+                some: { userId },
+              },
             },
           },
         },
-      },
-    });
+      });
 
-    if (!component) {
-      throw new Error('Component not found or access denied');
+      if (!component) {
+        throw new Error('Component not found or access denied');
+      }
+      componentData = {
+        id: component.id,
+        name: component.name,
+        type: component.type,
+        projectId: component.projectId,
+        contextDecision: component.contextDecision,
+        contextRationale: component.contextRationale,
+        contextAlternatives: component.contextAlternatives,
+      };
     }
 
-    if (!component.contextDecision || !component.contextRationale) {
+    if (!componentData.contextDecision || !componentData.contextRationale) {
       throw new Error('Component must have decision and rationale before generating summary');
     }
 
     // Generate AI summary
     const { summary, keyPoints, inputTokens, outputTokens } = await summarizeComponentContext({
-      decision: component.contextDecision,
-      rationale: component.contextRationale,
-      alternatives: component.contextAlternatives || undefined,
-      componentName: component.name,
-      componentType: component.type,
+      decision: componentData.contextDecision,
+      rationale: componentData.contextRationale,
+      alternatives: componentData.contextAlternatives || undefined,
+      componentName: componentData.name,
+      componentType: componentData.type,
     });
 
-    // Update component with AI summary
-    const updated = await prisma.component.update({
-      where: { id: componentId },
-      data: {
-        contextAiSummary: summary,
+    // Update component with AI summary using dual-write
+    const result = await dualWrite(
+      'component',
+      'update',
+      async () => {
+        return prisma.component.update({
+          where: { id: componentId },
+          data: {
+            contextAiSummary: summary,
+          },
+        });
       },
-    });
+      async () => {
+        const updated = await entities.component
+          .update({ id: componentId })
+          .set({ contextAiSummary: summary })
+          .go({ response: 'all_new' });
+        return updated.data;
+      },
+      { context: { action: 'generateContextSummary', componentId } }
+    );
 
-    revalidatePath(`/projects/${component.projectId}`);
+    revalidatePath(`/projects/${componentData.projectId}`);
 
     return {
-      component: updated,
+      component: result.data,
       keyPoints,
       tokensUsed: { inputTokens, outputTokens },
     };
@@ -159,39 +253,76 @@ export const clearComponentContextAction = authActionClient
       return { _demo: true, _action: 'clearComponentContext', _input: { componentId } };
     }
 
+    const phase = getMigrationPhase('component');
+    let projectId: string;
+
     // Verify user has access
-    const component = await prisma.component.findFirst({
-      where: {
-        id: componentId,
-        Project: {
-          Team: {
-            Membership: {
-              some: { userId },
+    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+      const access = await verifyComponentAccess(userId, componentId);
+      if (!access) {
+        throw new Error('Component not found or access denied');
+      }
+      projectId = access.component.projectId;
+    } else {
+      const component = await prisma.component.findFirst({
+        where: {
+          id: componentId,
+          Project: {
+            Team: {
+              Membership: {
+                some: { userId },
+              },
             },
           },
         },
-      },
-    });
+      });
 
-    if (!component) {
-      throw new Error('Component not found or access denied');
+      if (!component) {
+        throw new Error('Component not found or access denied');
+      }
+      projectId = component.projectId;
     }
 
-    // Clear all context fields
-    const updated = await prisma.component.update({
-      where: { id: componentId },
-      data: {
-        contextDecision: null,
-        contextRationale: null,
-        contextAlternatives: null,
-        contextLinks: [],
-        contextAiSummary: null,
-        contextUpdatedAt: null,
-        contextUpdatedBy: null,
+    const entities = getEntities();
+
+    // Clear all context fields using dual-write
+    const result = await dualWrite(
+      'component',
+      'update',
+      async () => {
+        return prisma.component.update({
+          where: { id: componentId },
+          data: {
+            contextDecision: null,
+            contextRationale: null,
+            contextAlternatives: null,
+            contextLinks: [],
+            contextAiSummary: null,
+            contextUpdatedAt: null,
+            contextUpdatedBy: null,
+          },
+        });
       },
-    });
+      async () => {
+        // DynamoDB: Remove context fields (set to undefined removes the attribute)
+        const updated = await entities.component
+          .update({ id: componentId })
+          .remove([
+            'contextDecision',
+            'contextRationale',
+            'contextAlternatives',
+            'contextAiSummary',
+            'contextUpdatedAt',
+            'contextUpdatedBy',
+          ])
+          .set({ contextLinks: [] })
+          .go({ response: 'all_new' });
+        return updated.data;
+      },
+      { context: { action: 'clearComponentContext', componentId } }
+    );
 
-    revalidatePath(`/projects/${component.projectId}`);
+    revalidatePath(`/projects/${projectId}`);
 
-    return { component: updated };
+    return { component: result.data };
   });

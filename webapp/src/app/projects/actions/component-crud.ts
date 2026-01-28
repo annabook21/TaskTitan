@@ -311,7 +311,11 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
       });
     },
     async () => {
-      // DynamoDB: update component; if status changes, update status history (exitedAt) + create new history + activity + notifications
+      // DynamoDB: Atomic status change with transaction
+      // Best practice: Use transaction for component + history + activity + notifications
+      // If notifications exceed transaction limit (20), use saga pattern with best-effort notifications
+
+      const service = getService();
       const updateData: Record<string, unknown> = {};
       if (name) updateData.name = name;
       if (description !== undefined) updateData.description = description;
@@ -321,69 +325,187 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
       if (actualHours !== undefined) updateData.actualHours = actualHours;
       if (dueDate !== undefined) updateData.dueDate = dueDate || undefined;
 
-      const updatedComponent = await entities.component.update({ id }).set(updateData).go({ response: 'all_new' });
-
-      if (status && status !== oldStatus) {
-        const nowIso = new Date().toISOString();
-
-        // Find the current/open status record (exitedAt not set) so metrics (WIP/aging/CFD) keep working.
-        const historyResult = await entities.componentStatusHistory.query.primary({ componentId: id }).go();
-        const openEntry =
-          historyResult.data.find((h) => !h.exitedAt) ?? historyResult.data[historyResult.data.length - 1];
-
-        if (openEntry) {
-          await entities.componentStatusHistory
-            .update({ componentId: id, enteredAt: openEntry.enteredAt, id: openEntry.id })
-            .set({ exitedAt: nowIso })
-            .go();
-        }
-
-        await entities.componentStatusHistory
-          .create({
-            id: randomUUID(),
-            componentId: id,
-            status,
-            enteredAt: nowIso,
-            exitedAt: undefined,
-          })
-          .go();
-
-        await entities.activity
-          .create({
-            id: randomUUID(),
-            type: 'COMPONENT_STATUS_CHANGED',
-            projectId,
-            userId,
-            metadata: {
-              componentName: updatedComponent.data?.name ?? name ?? '',
-              componentId: id,
-              oldStatus,
-              newStatus: status,
-            },
-          })
-          .go();
-
-        // Notify assignees (best-effort; not transactional due to variable count)
-        const assignments = await entities.assignment.query.primary({ componentId: id }).go();
-        const assigneeIds = assignments.data.map((a) => a.userId).filter((uid) => uid !== userId);
-
-        for (const assigneeId of assigneeIds) {
-          await entities.notification
-            .create({
-              id: randomUUID(),
-              userId: assigneeId,
-              type: 'TASK_STATUS_CHANGED',
-              title: `Status changed: ${updatedComponent.data?.name ?? name ?? ''}`,
-              message: `Changed from ${oldStatus} to ${status}`,
-              componentId: id,
-              projectId,
-              read: false,
-            })
-            .go();
-        }
+      // Simple update without status change - no transaction needed
+      if (!status || status === oldStatus) {
+        const updatedComponent = await entities.component.update({ id }).set(updateData).go({ response: 'all_new' });
+        return updatedComponent.data;
       }
 
-      return updatedComponent.data;
+      // Status change: gather data needed for transaction BEFORE starting it
+      const nowIso = new Date().toISOString();
+      const newHistoryId = randomUUID();
+      const activityId = randomUUID();
+
+      // Query open status history entry and assignments in parallel
+      const [historyResult, assignmentsResult] = await Promise.all([
+        entities.componentStatusHistory.query.primary({ componentId: id }).go(),
+        entities.assignment.query.primary({ componentId: id }).go(),
+      ]);
+
+      const openEntry =
+        historyResult.data.find((h) => !h.exitedAt) ?? historyResult.data[historyResult.data.length - 1];
+      const assigneeIds = assignmentsResult.data.map((a) => a.userId).filter((uid) => uid !== userId);
+
+      // Calculate transaction size: component(1) + close history(0-1) + new history(1) + activity(1) + notifications(N)
+      const coreOpsCount = 3 + (openEntry ? 1 : 0); // component + new history + activity + optional close history
+      const totalOpsCount = coreOpsCount + assigneeIds.length;
+
+      // Transaction limit is 25; use 20 as threshold to leave margin
+      const NOTIFICATION_THRESHOLD = 20;
+
+      if (totalOpsCount <= NOTIFICATION_THRESHOLD + coreOpsCount) {
+        // All operations fit in one transaction - atomic update
+        await service.transaction
+          .write(({ component, componentStatusHistory, activity, notification }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ops: any[] = [];
+
+            // 1. Update component
+            ops.push(component.update({ id }).set(updateData).commit());
+
+            // 2. Close previous status history entry (if exists)
+            if (openEntry) {
+              ops.push(
+                componentStatusHistory
+                  .update({ componentId: id, enteredAt: openEntry.enteredAt, id: openEntry.id })
+                  .set({ exitedAt: nowIso })
+                  .commit()
+              );
+            }
+
+            // 3. Create new status history entry
+            ops.push(
+              componentStatusHistory
+                .create({
+                  id: newHistoryId,
+                  componentId: id,
+                  status,
+                  enteredAt: nowIso,
+                  exitedAt: undefined,
+                })
+                .commit()
+            );
+
+            // 4. Create activity log
+            ops.push(
+              activity
+                .create({
+                  id: activityId,
+                  type: 'COMPONENT_STATUS_CHANGED',
+                  projectId,
+                  userId,
+                  metadata: {
+                    componentName: name ?? '',
+                    componentId: id,
+                    oldStatus,
+                    newStatus: status,
+                  },
+                })
+                .commit()
+            );
+
+            // 5. Create notifications for assignees
+            for (const assigneeId of assigneeIds) {
+              ops.push(
+                notification
+                  .create({
+                    id: randomUUID(),
+                    userId: assigneeId,
+                    type: 'TASK_STATUS_CHANGED',
+                    title: `Status changed: ${name ?? 'Component'}`,
+                    message: `Changed from ${oldStatus} to ${status}`,
+                    componentId: id,
+                    projectId,
+                    read: false,
+                  })
+                  .commit()
+              );
+            }
+
+            return ops;
+          })
+          .go();
+
+        // Fetch the updated component to return
+        const updatedComponent = await entities.component.get({ id }).go();
+        return updatedComponent.data;
+      } else {
+        // Large assignee list: use saga pattern
+        // Step 1 (Critical): Atomic transaction for core operations
+        // Step 2 (Best-effort): Batch notifications separately
+
+        // Step 1: Core transaction
+        await service.transaction
+          .write(({ component, componentStatusHistory, activity }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ops: any[] = [];
+
+            ops.push(component.update({ id }).set(updateData).commit());
+
+            if (openEntry) {
+              ops.push(
+                componentStatusHistory
+                  .update({ componentId: id, enteredAt: openEntry.enteredAt, id: openEntry.id })
+                  .set({ exitedAt: nowIso })
+                  .commit()
+              );
+            }
+
+            ops.push(
+              componentStatusHistory
+                .create({
+                  id: newHistoryId,
+                  componentId: id,
+                  status,
+                  enteredAt: nowIso,
+                  exitedAt: undefined,
+                })
+                .commit()
+            );
+
+            ops.push(
+              activity
+                .create({
+                  id: activityId,
+                  type: 'COMPONENT_STATUS_CHANGED',
+                  projectId,
+                  userId,
+                  metadata: {
+                    componentName: name ?? '',
+                    componentId: id,
+                    oldStatus,
+                    newStatus: status,
+                  },
+                })
+                .commit()
+            );
+
+            return ops;
+          })
+          .go();
+
+        // Step 2: Best-effort notifications (non-critical, can tolerate partial failure)
+        // Use Promise.allSettled to continue even if some fail
+        await Promise.allSettled(
+          assigneeIds.map((assigneeId) =>
+            entities.notification
+              .create({
+                id: randomUUID(),
+                userId: assigneeId,
+                type: 'TASK_STATUS_CHANGED',
+                title: `Status changed: ${name ?? 'Component'}`,
+                message: `Changed from ${oldStatus} to ${status}`,
+                componentId: id,
+                projectId,
+                read: false,
+              })
+              .go()
+          )
+        );
+
+        const updatedComponent = await entities.component.get({ id }).go();
+        return updatedComponent.data;
+      }
     },
     { context: { action: 'updateComponent', componentId: id, projectId } }
   );
