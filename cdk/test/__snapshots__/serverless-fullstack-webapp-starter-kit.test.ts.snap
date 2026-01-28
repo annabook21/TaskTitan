@@ -2662,6 +2662,15 @@ exports.handler = async function (event, context) {
     "WebappFargateLBSecurityGroupB64828EA": {
       "Properties": {
         "GroupDescription": "Automatically created Security Group for ELB TaskTitanForgeStackWebappFargateLBB29C52E8",
+        "SecurityGroupIngress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow HTTP from CloudFront",
+            "FromPort": 80,
+            "IpProtocol": "tcp",
+            "ToPort": 80,
+          },
+        ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
         },

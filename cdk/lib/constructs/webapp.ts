@@ -25,7 +25,7 @@ import {
   FunctionEventType,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { LoadBalancerV2Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { Port } from 'aws-cdk-lib/aws-ec2';
+import { Peer, Port } from 'aws-cdk-lib/aws-ec2';
 import { ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Secret as EcsSecret } from 'aws-cdk-lib/aws-ecs';
@@ -163,6 +163,11 @@ export class Webapp extends Construct {
     // Increase ALB idle timeout for long-running AI generation requests
     // Default is 60s which is too short for Bedrock API calls
     fargateService.loadBalancer.setAttribute('idle_timeout.timeout_seconds', '120');
+
+    // Allow inbound HTTP traffic to the ALB from anywhere (CloudFront)
+    // Note: openListener: false prevents automatic security group rule creation
+    // Origin verification header ensures only CloudFront traffic is processed
+    fargateService.loadBalancer.connections.allowFromAnyIpv4(Port.tcp(80), 'Allow HTTP from CloudFront');
 
     // Use the listener created by ApplicationLoadBalancedFargateService
     // Configure default action to return 403 - only requests with valid origin header should pass
