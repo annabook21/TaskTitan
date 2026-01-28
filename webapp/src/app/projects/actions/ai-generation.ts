@@ -5,6 +5,13 @@ import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { generateComponents, isAIConfigured, type TeamCapacityInfo, refineBulkPlan } from '@/lib/ai';
+import { randomUUID } from 'crypto';
+
+// DynamoDB migration imports
+import { dualWrite } from '@/lib/dynamodb/dual-write';
+import { getEntities, getService } from '@/lib/dynamodb/service';
+import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
 
 // Schemas
 const generateComponentsSchema = z.object({
@@ -151,67 +158,149 @@ export const generateAIComponents = authActionClient
         teamCapacity = demoProjectData.teamCapacity;
       }
     } else {
-      // Production mode - get project from database
-      const project = await prisma.project.findFirst({
-        where: {
-          id: projectId,
-          Team: { Membership: { some: { userId } } },
-        },
-        include: {
-          Component: {
-            select: { name: true },
+      // Production mode - get project from database (phase-aware)
+      const phase = getMigrationPhase('project');
+      const entities = getEntities();
+
+      if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+        // DynamoDB: Verify access and fetch project data
+        const access = await verifyProjectAccess(userId, projectId);
+        if (!access) {
+          throw new MyCustomError('Project not found or access denied');
+        }
+
+        const project = access.project;
+        if (!project.description || project.description.trim().length < 20) {
+          throw new MyCustomError(
+            'Please add a detailed project description (at least 20 characters) to generate components',
+          );
+        }
+
+        projectName = project.name;
+        projectDescription = project.description;
+
+        // Fetch components for this project
+        const componentsResult = await entities.component.query.byProject({ projectId }).go();
+        existingNames = componentsResult.data.map((c) => c.name);
+
+        // Fetch workflow config
+        const workflowConfigResult = await entities.teamWorkflowConfig.query.primary({ teamId: project.teamId }).go();
+        const config = workflowConfigResult.data[0];
+
+        if (config) {
+          workflowConfig = {
+            id: config.id,
+            teamId: config.teamId,
+            wipLimitPlanning: config.wipLimitPlanning ?? null,
+            wipLimitInProgress: config.wipLimitInProgress ?? null,
+            wipLimitBlocked: config.wipLimitBlocked ?? null,
+            wipLimitReview: config.wipLimitReview ?? null,
+            cycleEnabled: config.cycleEnabled ?? false,
+            cycleDurationWeeks: config.cycleDurationWeeks ?? 2,
+            cycleStartDayOfWeek: config.cycleStartDayOfWeek ?? 1,
+            workflowTemplate: config.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM' | null,
+            cycleName: config.cycleName ?? null,
+            backlogName: config.backlogName ?? null,
+            enforceEstimates: config.enforceEstimates ?? false,
+            autoArchiveCompleted: config.autoArchiveCompleted ?? false,
+            createdAt: new Date(config.createdAt || Date.now()),
+            updatedAt: new Date(config.updatedAt || Date.now()),
+          };
+
+          // Calculate team capacity for Scrum workflows
+          if (config.cycleEnabled) {
+            // Membership primary index is keyed by teamId
+            const membershipsResult = await entities.membership.query.primary({ teamId: project.teamId }).go();
+            const sprintDays = (config.cycleDurationWeeks ?? 2) * 5;
+
+            // Fetch user names for members
+            const members = await Promise.all(
+              membershipsResult.data.map(async (m) => {
+                const userResult = await entities.user.get({ id: m.userId }).go();
+                return {
+                  name: userResult.data?.name || 'Unknown',
+                  title: m.title ?? undefined,
+                  hoursPerDay: m.hoursPerDay ?? 6,
+                  availability: m.availability ?? 100,
+                };
+              })
+            );
+
+            const totalCapacityHours = members.reduce((total, member) => {
+              return total + member.hoursPerDay * (member.availability / 100) * sprintDays;
+            }, 0);
+
+            teamCapacity = {
+              memberCount: members.length,
+              members,
+              sprintDays,
+              totalCapacityHours,
+            };
+          }
+        }
+      } else {
+        // Prisma path
+        const project = await prisma.project.findFirst({
+          where: {
+            id: projectId,
+            Team: { Membership: { some: { userId } } },
           },
-          Team: {
-            include: {
-              WorkflowConfig: true,
-              // Include memberships for capacity calculation
-              Membership: {
-                include: {
-                  User: { select: { name: true } },
+          include: {
+            Component: {
+              select: { name: true },
+            },
+            Team: {
+              include: {
+                WorkflowConfig: true,
+                // Include memberships for capacity calculation
+                Membership: {
+                  include: {
+                    User: { select: { name: true } },
+                  },
                 },
               },
             },
           },
-        },
-      });
+        });
 
-      if (!project) {
-        throw new MyCustomError('Project not found or access denied');
-      }
+        if (!project) {
+          throw new MyCustomError('Project not found or access denied');
+        }
 
-      if (!project.description || project.description.trim().length < 20) {
-        throw new MyCustomError(
-          'Please add a detailed project description (at least 20 characters) to generate components',
-        );
-      }
+        if (!project.description || project.description.trim().length < 20) {
+          throw new MyCustomError(
+            'Please add a detailed project description (at least 20 characters) to generate components',
+          );
+        }
 
-      projectName = project.name;
-      projectDescription = project.description;
-      existingNames = project.Component.map((c: { name: string }) => c.name);
-      workflowConfig = project.Team.WorkflowConfig;
+        projectName = project.name;
+        projectDescription = project.description;
+        existingNames = project.Component.map((c: { name: string }) => c.name);
+        workflowConfig = project.Team.WorkflowConfig;
 
-      // Calculate team capacity for Scrum workflows
-      if (project.Team.WorkflowConfig?.cycleEnabled) {
-        const memberships = project.Team.Membership;
-        const sprintDays = (project.Team.WorkflowConfig.cycleDurationWeeks ?? 2) * 5;
+        // Calculate team capacity for Scrum workflows
+        if (project.Team.WorkflowConfig?.cycleEnabled) {
+          const memberships = project.Team.Membership;
+          const sprintDays = (project.Team.WorkflowConfig.cycleDurationWeeks ?? 2) * 5;
 
-        const members = memberships.map((m) => ({
-          name: m.User.name || 'Unknown',
-          title: m.title ?? undefined,
-          hoursPerDay: m.hoursPerDay ?? 6,
-          availability: m.availability ?? 100,
-        }));
+          const members = memberships.map((m) => ({
+            name: m.User.name || 'Unknown',
+            title: m.title ?? undefined,
+            hoursPerDay: m.hoursPerDay ?? 6,
+            availability: m.availability ?? 100,
+          }));
 
-        const totalCapacityHours = members.reduce((total, member) => {
-          return total + member.hoursPerDay * (member.availability / 100) * sprintDays;
-        }, 0);
+          const totalCapacityHours = members.reduce((total, member) => {
+            return total + member.hoursPerDay * (member.availability / 100) * sprintDays;
+          }, 0);
 
-        teamCapacity = {
-          memberCount: members.length,
-          members,
-          sprintDays,
-          totalCapacityHours,
-        };
+          teamCapacity = {
+            memberCount: members.length,
+            members,
+            sprintDays,
+            totalCapacityHours,
+          };
+        }
       }
     }
 
@@ -255,86 +344,74 @@ export const applyAIComponents = authActionClient
       };
     }
 
-    // Verify access
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        Team: { Membership: { some: { userId } } },
-      },
-    });
+    const phase = getMigrationPhase('component');
+    const entities = getEntities();
 
-    if (!project) {
-      throw new MyCustomError('Project not found or access denied');
+    // Verify access using primary store (phase-aware)
+    let teamId: string;
+    let currentDescription: string | null;
+
+    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+      const access = await verifyProjectAccess(userId, projectId);
+      if (!access) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+      teamId = access.project.teamId;
+      currentDescription = access.project.description ?? null;
+    } else {
+      const project = await prisma.project.findFirst({
+        where: {
+          id: projectId,
+          Team: { Membership: { some: { userId } } },
+        },
+      });
+
+      if (!project) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+      teamId = project.teamId;
+      currentDescription = project.description;
     }
 
     // Update project description if enhanced description provided
-    if (enhancedDescription && (!project.description || project.description.length < enhancedDescription.length)) {
-      await prisma.project.update({
-        where: { id: projectId },
-        data: { description: enhancedDescription },
-      });
-    }
-
-    // Create components hierarchically: parents first, then children
-    // This ensures parentId references are valid when creating child components
-    const nameToId = new Map<string, string>();
-    const createdComponents: Awaited<ReturnType<typeof prisma.component.create>>[] = [];
-
-    // First pass: Create all components without parents (top-level EPICs/FEATUREs)
-    // Use Promise.all for parallel creation to improve performance
-    const topLevelComponents = components.filter((c) => !c.parentName);
-    const topLevelResults = await Promise.all(
-      topLevelComponents.map((c) =>
-        prisma.component.create({
-          data: {
-            name: c.name,
-            description: c.description,
-            type: c.type,
-            projectId,
-            priority: c.priority,
-            estimatedHours: c.estimatedHours,
-            parentId: null,
-          },
-        }),
-      ),
-    );
-
-    // Map names to IDs for parent references
-    topLevelResults.forEach((component, index) => {
-      nameToId.set(topLevelComponents[index].name, component.id);
-      createdComponents.push(component);
-    });
-
-    // Second pass: Create components with parents (nested FEATUREs/STORies/TASKs)
-    // Use Promise.all for parallel creation to improve performance
-    const childComponents = components.filter((c) => c.parentName);
-    if (childComponents.length > 0) {
-      const childResults = await Promise.all(
-        childComponents.map((c) => {
-          const parentId = nameToId.get(c.parentName!);
-          return prisma.component.create({
-            data: {
-              name: c.name,
-              description: c.description,
-              type: c.type,
-              projectId,
-              priority: c.priority,
-              estimatedHours: c.estimatedHours,
-              parentId: parentId || null, // If parent not found, create as top-level
-            },
-          });
-        }),
+    if (enhancedDescription && (!currentDescription || currentDescription.length < enhancedDescription.length)) {
+      await dualWrite(
+        'project',
+        'update',
+        async () => prisma.project.update({ where: { id: projectId }, data: { description: enhancedDescription } }),
+        async () => {
+          await entities.project.update({ id: projectId }).set({ description: enhancedDescription }).go();
+          return { id: projectId };
+        },
+        { context: { action: 'applyAIComponents-updateDescription', projectId } }
       );
-
-      childResults.forEach((component, index) => {
-        nameToId.set(childComponents[index].name, component.id);
-        createdComponents.push(component);
-      });
     }
 
-    // Create dependencies based on suggestions
-    const dependenciesToCreate: { dependentId: string; requiredId: string }[] = [];
+    // Pre-generate UUIDs for all components to enable name→ID mapping before creation
+    const nameToId = new Map<string, string>();
+    for (const c of components) {
+      nameToId.set(c.name, randomUUID());
+    }
 
+    // Separate top-level and child components
+    const topLevelComponents = components.filter((c) => !c.parentName);
+    const childComponents = components.filter((c) => c.parentName);
+
+    // Build component data arrays for batch operations
+    const allComponentData = components.map((c) => ({
+      id: nameToId.get(c.name)!,
+      name: c.name,
+      description: c.description,
+      type: c.type,
+      projectId,
+      priority: c.priority,
+      estimatedHours: c.estimatedHours,
+      parentId: c.parentName ? nameToId.get(c.parentName) || null : null,
+      status: 'PLANNING' as const,
+    }));
+
+    // Build dependency data
+    const dependenciesToCreate: { id: string; dependentId: string; requiredId: string }[] = [];
     for (const comp of components) {
       const dependentId = nameToId.get(comp.name);
       if (!dependentId) continue;
@@ -342,38 +419,23 @@ export const applyAIComponents = authActionClient
       for (const depName of comp.suggestedDependencies) {
         const requiredId = nameToId.get(depName);
         if (requiredId && requiredId !== dependentId) {
-          dependenciesToCreate.push({ dependentId, requiredId });
+          dependenciesToCreate.push({ id: randomUUID(), dependentId, requiredId });
         }
       }
     }
 
-    // Create dependencies
-    if (dependenciesToCreate.length > 0) {
-      await Promise.all(
-        dependenciesToCreate.map(({ dependentId, requiredId }) =>
-          prisma.dependency
-            .create({
-              data: {
-                dependentComponentId: dependentId,
-                requiredComponentId: requiredId,
-              },
-            })
-            .catch((error) => {
-              // Only ignore unique constraint violations (P2002)
-              // Log and re-throw other errors
-              if (error.code === 'P2002') {
-                // Duplicate dependency - safe to ignore
-                return null;
-              }
-              console.error('Error creating dependency:', error);
-              throw error;
-            }),
-        ),
-      );
-    }
+    // Build sprint data with pre-generated IDs
+    const sprintData: Array<{
+      id: string;
+      name: string;
+      goal: string;
+      teamId: string;
+      startDate: Date;
+      endDate: Date;
+      capacity?: number;
+      componentIds: string[];
+    }> = [];
 
-    // Create sprints if provided
-    let createdSprints = 0;
     if (sprints && sprints.length > 0) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -386,94 +448,307 @@ export const applyAIComponents = authActionClient
         const endDate = new Date(startDate);
         endDate.setDate(endDate.getDate() + sprint.durationWeeks * 7);
 
-        // Create the sprint
-        const createdSprint = await prisma.sprint.create({
-          data: {
-            name: sprint.name,
-            goal: sprint.goal,
-            teamId: project.teamId,
-            startDate,
-            endDate,
-            status: 'PLANNING',
-            capacity: sprint.capacity,
-          },
+        const componentIds = sprint.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null) as string[];
+
+        sprintData.push({
+          id: randomUUID(),
+          name: sprint.name,
+          goal: sprint.goal,
+          teamId,
+          startDate,
+          endDate,
+          capacity: sprint.capacity,
+          componentIds,
         });
-
-        // Assign components to this sprint (batch update for performance)
-        const componentIds = sprint.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null);
-
-        if (componentIds.length > 0) {
-          await prisma.component.updateMany({
-            where: {
-              id: { in: componentIds as string[] },
-              projectId,
-            },
-            data: { sprintId: createdSprint.id },
-          });
-        }
-
-        createdSprints++;
       }
     }
 
-    // Create epic groupings if provided (optional backlog organization)
-    // Epics are created as EPIC type components that group related Stories/Tasks
-    let createdEpics = 0;
+    // Build epic data with pre-generated IDs
+    const epicData: Array<{
+      id: string;
+      name: string;
+      description: string;
+      childIds: string[];
+    }> = [];
+
     if (epics && epics.length > 0) {
       for (const epic of epics) {
-        // Create the epic as a top-level component
-        const createdEpic = await prisma.component.create({
-          data: {
-            name: epic.name,
-            description: epic.description,
-            type: 'EPIC',
-            projectId,
-            priority: 5, // Default priority for epics
-            estimatedHours: 0, // Epics don't have direct estimates, sum of children
-            parentId: null,
-          },
+        const childIds = epic.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null) as string[];
+        epicData.push({
+          id: randomUUID(),
+          name: epic.name,
+          description: epic.description,
+          childIds,
         });
-
-        // Update child components to have this epic as their parent
-        const childIds = epic.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null);
-
-        if (childIds.length > 0) {
-          await prisma.component.updateMany({
-            where: {
-              id: { in: childIds as string[] },
-              projectId,
-            },
-            data: { parentId: createdEpic.id },
-          });
-        }
-
-        createdEpics++;
       }
     }
 
-    // Log activity
-    await prisma.activity.create({
-      data: {
-        type: 'COMPONENT_CREATED',
-        projectId,
-        userId,
-        metadata: {
-          aiGenerated: true,
-          componentCount: createdComponents.length,
-          sprintCount: createdSprints,
-          epicCount: createdEpics,
-        },
+    // Activity ID for logging
+    const activityId = randomUUID();
+
+    // Execute dual-write for all operations
+    await dualWrite(
+      'component',
+      'create',
+      async () => {
+        // Prisma: Two-pass creation for hierarchy
+
+        // First pass: Create top-level components
+        if (topLevelComponents.length > 0) {
+          await Promise.all(
+            topLevelComponents.map((c) =>
+              prisma.component.create({
+                data: {
+                  id: nameToId.get(c.name)!,
+                  name: c.name,
+                  description: c.description,
+                  type: c.type,
+                  projectId,
+                  priority: c.priority,
+                  estimatedHours: c.estimatedHours,
+                  parentId: null,
+                },
+              })
+            )
+          );
+        }
+
+        // Second pass: Create child components
+        if (childComponents.length > 0) {
+          await Promise.all(
+            childComponents.map((c) =>
+              prisma.component.create({
+                data: {
+                  id: nameToId.get(c.name)!,
+                  name: c.name,
+                  description: c.description,
+                  type: c.type,
+                  projectId,
+                  priority: c.priority,
+                  estimatedHours: c.estimatedHours,
+                  parentId: c.parentName ? nameToId.get(c.parentName) || null : null,
+                },
+              })
+            )
+          );
+        }
+
+        // Create dependencies
+        if (dependenciesToCreate.length > 0) {
+          await Promise.all(
+            dependenciesToCreate.map(({ id, dependentId, requiredId }) =>
+              prisma.dependency
+                .create({
+                  data: {
+                    id,
+                    dependentComponentId: dependentId,
+                    requiredComponentId: requiredId,
+                  },
+                })
+                .catch((error) => {
+                  if (error.code === 'P2002') return null; // Ignore duplicates
+                  throw error;
+                })
+            )
+          );
+        }
+
+        // Create sprints and assign components
+        for (const sprint of sprintData) {
+          await prisma.sprint.create({
+            data: {
+              id: sprint.id,
+              name: sprint.name,
+              goal: sprint.goal,
+              teamId: sprint.teamId,
+              startDate: sprint.startDate,
+              endDate: sprint.endDate,
+              status: 'PLANNING',
+              capacity: sprint.capacity,
+            },
+          });
+
+          if (sprint.componentIds.length > 0) {
+            await prisma.component.updateMany({
+              where: { id: { in: sprint.componentIds }, projectId },
+              data: { sprintId: sprint.id },
+            });
+          }
+        }
+
+        // Create epics and update children
+        for (const epic of epicData) {
+          await prisma.component.create({
+            data: {
+              id: epic.id,
+              name: epic.name,
+              description: epic.description,
+              type: 'EPIC',
+              projectId,
+              priority: 5,
+              estimatedHours: 0,
+              parentId: null,
+            },
+          });
+
+          if (epic.childIds.length > 0) {
+            await prisma.component.updateMany({
+              where: { id: { in: epic.childIds }, projectId },
+              data: { parentId: epic.id },
+            });
+          }
+        }
+
+        // Log activity
+        await prisma.activity.create({
+          data: {
+            id: activityId,
+            type: 'COMPONENT_CREATED',
+            projectId,
+            userId,
+            metadata: {
+              aiGenerated: true,
+              componentCount: components.length,
+              sprintCount: sprintData.length,
+              epicCount: epicData.length,
+            },
+          },
+        });
+
+        return { count: components.length };
       },
-    });
+      async () => {
+        // DynamoDB: Batch create with chunking (25 items per batch)
+        const BATCH_SIZE = 25;
+
+        // Helper to batch write components
+        const batchWriteComponents = async (items: typeof allComponentData) => {
+          for (let i = 0; i < items.length; i += BATCH_SIZE) {
+            const batch = items.slice(i, i + BATCH_SIZE);
+            await Promise.all(
+              batch.map((c) =>
+                entities.component
+                  .create({
+                    id: c.id,
+                    name: c.name,
+                    description: c.description,
+                    type: c.type,
+                    projectId: c.projectId,
+                    priority: c.priority,
+                    estimatedHours: c.estimatedHours,
+                    parentId: c.parentId || undefined,
+                    status: c.status,
+                  })
+                  .go()
+              )
+            );
+          }
+        };
+
+        // First pass: Create top-level components
+        const topLevelData = allComponentData.filter((c) => !c.parentId);
+        await batchWriteComponents(topLevelData);
+
+        // Second pass: Create child components
+        const childData = allComponentData.filter((c) => c.parentId);
+        await batchWriteComponents(childData);
+
+        // Batch create dependencies
+        for (let i = 0; i < dependenciesToCreate.length; i += BATCH_SIZE) {
+          const batch = dependenciesToCreate.slice(i, i + BATCH_SIZE);
+          await Promise.all(
+            batch.map(({ id, dependentId, requiredId }) =>
+              entities.dependency
+                .create({
+                  id,
+                  dependentComponentId: dependentId,
+                  requiredComponentId: requiredId,
+                })
+                .go()
+                .catch(() => null) // Ignore duplicates
+            )
+          );
+        }
+
+        // Create sprints and update component assignments
+        for (const sprint of sprintData) {
+          await entities.sprint
+            .create({
+              id: sprint.id,
+              name: sprint.name,
+              goal: sprint.goal,
+              teamId: sprint.teamId,
+              startDate: sprint.startDate.toISOString(),
+              endDate: sprint.endDate.toISOString(),
+              status: 'PLANNING',
+              capacity: sprint.capacity,
+            })
+            .go();
+
+          // Batch update components with sprintId
+          for (let i = 0; i < sprint.componentIds.length; i += BATCH_SIZE) {
+            const batch = sprint.componentIds.slice(i, i + BATCH_SIZE);
+            await Promise.all(
+              batch.map((componentId) =>
+                entities.component.update({ id: componentId }).set({ sprintId: sprint.id }).go()
+              )
+            );
+          }
+        }
+
+        // Create epics and update children
+        for (const epic of epicData) {
+          await entities.component
+            .create({
+              id: epic.id,
+              name: epic.name,
+              description: epic.description,
+              type: 'EPIC',
+              projectId,
+              priority: 5,
+              estimatedHours: 0,
+              status: 'PLANNING',
+            })
+            .go();
+
+          // Batch update children with parentId
+          for (let i = 0; i < epic.childIds.length; i += BATCH_SIZE) {
+            const batch = epic.childIds.slice(i, i + BATCH_SIZE);
+            await Promise.all(
+              batch.map((childId) => entities.component.update({ id: childId }).set({ parentId: epic.id }).go())
+            );
+          }
+        }
+
+        // Log activity
+        await entities.activity
+          .create({
+            id: activityId,
+            type: 'COMPONENT_CREATED',
+            projectId,
+            userId,
+            metadata: {
+              aiGenerated: true,
+              componentCount: components.length,
+              sprintCount: sprintData.length,
+              epicCount: epicData.length,
+            },
+          })
+          .go();
+
+        return { count: components.length };
+      },
+      { context: { action: 'applyAIComponents', projectId, componentCount: components.length } }
+    );
 
     revalidatePath(`/projects/${projectId}`);
-    revalidatePath(`/team/${project.teamId}/sprints`);
+    revalidatePath(`/team/${teamId}/sprints`);
 
     return {
-      created: createdComponents.length,
+      created: components.length,
       dependencies: dependenciesToCreate.length,
-      sprints: createdSprints,
-      epics: createdEpics,
+      sprints: sprintData.length,
+      epics: epicData.length,
     };
   });
 
@@ -559,30 +834,54 @@ export const refineBulkAIPlan = authActionClient.schema(refineBulkPlanSchema).ac
     workflowType = demoProjectData.workflowType;
     cycleName = demoProjectData.cycleName;
   } else {
-    // Production mode - get project from database
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        Team: { Membership: { some: { userId } } },
-      },
-      include: {
-        Team: {
-          include: {
-            WorkflowConfig: true,
+    // Production mode - get project from database (phase-aware)
+    const phase = getMigrationPhase('project');
+    const entities = getEntities();
+
+    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+      // DynamoDB path
+      const access = await verifyProjectAccess(userId, projectId);
+      if (!access) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+
+      projectName = access.project.name;
+      projectDescription = access.project.description || '';
+
+      // Fetch workflow config
+      const workflowConfigResult = await entities.teamWorkflowConfig.query
+        .primary({ teamId: access.project.teamId })
+        .go();
+      const config = workflowConfigResult.data[0];
+
+      workflowType = (config?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM') || 'CUSTOM';
+      cycleName = config?.cycleName || undefined;
+    } else {
+      // Prisma path
+      const project = await prisma.project.findFirst({
+        where: {
+          id: projectId,
+          Team: { Membership: { some: { userId } } },
+        },
+        include: {
+          Team: {
+            include: {
+              WorkflowConfig: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    if (!project) {
-      throw new MyCustomError('Project not found or access denied');
+      if (!project) {
+        throw new MyCustomError('Project not found or access denied');
+      }
+
+      projectName = project.name;
+      projectDescription = project.description || '';
+      const config = project.Team.WorkflowConfig;
+      workflowType = (config?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM') || 'CUSTOM';
+      cycleName = config?.cycleName || undefined;
     }
-
-    projectName = project.name;
-    projectDescription = project.description || '';
-    const config = project.Team.WorkflowConfig;
-    workflowType = (config?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM') || 'CUSTOM';
-    cycleName = config?.cycleName || undefined;
   }
 
   // Refine the plan using Bedrock AI

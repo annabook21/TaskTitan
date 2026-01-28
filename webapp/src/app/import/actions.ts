@@ -6,6 +6,13 @@ import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { analyzeImportData, cleanupImportData, isAIConfigured } from '@/lib/ai';
 import type { ComponentType, ComponentStatus } from '@prisma/client';
+import { randomUUID } from 'crypto';
+
+// DynamoDB migration imports
+import { dualWrite } from '@/lib/dynamodb/dual-write';
+import { getEntities } from '@/lib/dynamodb/service';
+import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { verifyTeamMembership, verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
 
 const analyzeSchema = z.object({
   teamId: z.string().min(1),
@@ -40,26 +47,56 @@ export const analyzeImport = authActionClient.schema(analyzeSchema).action(async
     return generateSimpleMappings(headers, sampleRows);
   }
 
-  // Verify user is member of team
-  const membership = await prisma.membership.findUnique({
-    where: { userId_teamId: { userId, teamId } },
-  });
+  const phase = getMigrationPhase('membership');
+  const entities = getEntities();
 
-  if (!membership) {
-    throw new MyCustomError('You must be a team member to import data');
+  // Verify user is member of team (phase-aware)
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    const access = await verifyTeamMembership(userId, teamId);
+    if (!access) {
+      throw new MyCustomError('You must be a team member to import data');
+    }
+  } else {
+    const membership = await prisma.membership.findUnique({
+      where: { userId_teamId: { userId, teamId } },
+    });
+
+    if (!membership) {
+      throw new MyCustomError('You must be a team member to import data');
+    }
   }
 
-  // Get existing projects and sprints for context
-  const [projects, sprints] = await Promise.all([
-    prisma.project.findMany({
-      where: { teamId },
-      select: { name: true },
-    }),
-    prisma.sprint.findMany({
-      where: { teamId, status: { in: ['PLANNING', 'ACTIVE'] } },
-      select: { name: true },
-    }),
-  ]);
+  // Get existing projects and sprints for context (phase-aware)
+  let projectNames: string[];
+  let sprintNames: string[];
+
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    // DynamoDB path
+    const [projectsResult, sprintsResult] = await Promise.all([
+      entities.project.query.byTeam({ teamId }).go(),
+      entities.sprint.query.byTeam({ teamId }).go(),
+    ]);
+
+    projectNames = projectsResult.data.map((p) => p.name);
+    sprintNames = sprintsResult.data
+      .filter((s) => s.status === 'PLANNING' || s.status === 'ACTIVE')
+      .map((s) => s.name);
+  } else {
+    // Prisma path
+    const [projects, sprints] = await Promise.all([
+      prisma.project.findMany({
+        where: { teamId },
+        select: { name: true },
+      }),
+      prisma.sprint.findMany({
+        where: { teamId, status: { in: ['PLANNING', 'ACTIVE'] } },
+        select: { name: true },
+      }),
+    ]);
+
+    projectNames = projects.map((p) => p.name);
+    sprintNames = sprints.map((s) => s.name);
+  }
 
   // Check if AI is configured
   if (!isAIConfigured()) {
@@ -67,12 +104,7 @@ export const analyzeImport = authActionClient.schema(analyzeSchema).action(async
     return generateSimpleMappings(headers, sampleRows);
   }
 
-  const result = await analyzeImportData(
-    headers,
-    sampleRows,
-    projects.map((p) => p.name),
-    sprints.map((s) => s.name),
-  );
+  const result = await analyzeImportData(headers, sampleRows, projectNames, sprintNames);
 
   return result;
 });
@@ -175,13 +207,22 @@ export const cleanupData = authActionClient.schema(cleanupSchema).action(async (
     return simpleCleanup(rows, mappings);
   }
 
-  // Verify user is member of team
-  const membership = await prisma.membership.findUnique({
-    where: { userId_teamId: { userId, teamId } },
-  });
+  const phase = getMigrationPhase('membership');
 
-  if (!membership) {
-    throw new MyCustomError('You must be a team member to clean data');
+  // Verify user is member of team (phase-aware)
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    const access = await verifyTeamMembership(userId, teamId);
+    if (!access) {
+      throw new MyCustomError('You must be a team member to clean data');
+    }
+  } else {
+    const membership = await prisma.membership.findUnique({
+      where: { userId_teamId: { userId, teamId } },
+    });
+
+    if (!membership) {
+      throw new MyCustomError('You must be a team member to clean data');
+    }
   }
 
   // Check if AI is configured
@@ -294,26 +335,57 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     };
   }
 
-  // Verify user is member of team
-  const membership = await prisma.membership.findUnique({
-    where: { userId_teamId: { userId, teamId } },
-  });
+  const phase = getMigrationPhase('component');
+  const entities = getEntities();
 
-  if (!membership) {
-    throw new MyCustomError('You must be a team member to import data');
+  // Verify user is member of team (phase-aware)
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    const access = await verifyTeamMembership(userId, teamId);
+    if (!access) {
+      throw new MyCustomError('You must be a team member to import data');
+    }
+  } else {
+    const membership = await prisma.membership.findUnique({
+      where: { userId_teamId: { userId, teamId } },
+    });
+
+    if (!membership) {
+      throw new MyCustomError('You must be a team member to import data');
+    }
   }
 
   // Create or get project
   let targetProjectId = projectId;
   if (!targetProjectId && projectName) {
-    const project = await prisma.project.create({
-      data: {
-        name: projectName,
-        teamId,
-        ownerId: userId,
+    const newProjectId = randomUUID();
+
+    await dualWrite(
+      'project',
+      'create',
+      async () =>
+        prisma.project.create({
+          data: {
+            id: newProjectId,
+            name: projectName,
+            teamId,
+            ownerId: userId,
+          },
+        }),
+      async () => {
+        await entities.project
+          .create({
+            id: newProjectId,
+            name: projectName,
+            teamId,
+            ownerId: userId,
+          })
+          .go();
+        return { id: newProjectId };
       },
-    });
-    targetProjectId = project.id;
+      { context: { action: 'executeImport-createProject', projectName } }
+    );
+
+    targetProjectId = newProjectId;
   }
 
   if (!targetProjectId) {
@@ -391,13 +463,17 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     return new Date(parsed);
   };
 
+  // Pre-generate UUIDs for all parsed items
+  const nameToId = new Map<string, string>();
+
   // Parse all rows first
   const parsedRows: Array<{
+    id: string;
     rowIndex: number;
     name: string;
     description: string | null;
-    type: string;
-    status: string;
+    type: ComponentType;
+    status: ComponentStatus;
     priority: number;
     owner: string | null;
     externalId: string | null;
@@ -427,6 +503,9 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     }
     seenNames.add(name);
 
+    const id = randomUUID();
+    nameToId.set(name, id);
+
     const description = getValue(row, 'description');
     const type = parseType(getValue(row, 'type'));
     const status = parseStatus(getValue(row, 'status'));
@@ -452,6 +531,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     const dueDate = parseDate(getValue(row, 'dueDate'));
 
     parsedRows.push({
+      id,
       rowIndex: i + 1,
       name,
       description: description || null,
@@ -467,134 +547,27 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     });
   }
 
-  // Separate into components without parents and with parents
-  const componentsWithoutParents = parsedRows.filter((r) => !r.parentName);
-  const componentsWithParents = parsedRows.filter((r) => r.parentName);
-
-  // Batch create components without parents
-  if (componentsWithoutParents.length > 0) {
-    try {
-      await prisma.component.createMany({
-        data: componentsWithoutParents.map((c) => ({
-          name: c.name,
-          description: c.description,
-          type: c.type as any, // Type from parseType is already validated
-          status: c.status as any, // Status from parseStatus is already validated
-          priority: c.priority,
-          owner: c.owner,
-          externalId: c.externalId,
-          tags: c.tags,
-          estimatedHours: c.estimatedHours,
-          dueDate: c.dueDate,
-          projectId: targetProjectId,
-          sprintId: autoAssignSprint || null,
-        })),
-        skipDuplicates: true,
-      });
-
-      // Fetch created components to get their IDs
-      const created = await prisma.component.findMany({
-        where: {
-          projectId: targetProjectId,
-          name: { in: componentsWithoutParents.map((c) => c.name) },
-        },
-        select: { id: true, name: true },
-      });
-
-      created.forEach((c) => {
-        createdItems.set(c.name, c.id);
-      });
-
-      stats.created += created.length;
-    } catch (error) {
-      stats.errors.push(`Batch create failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  // Create missing parents first (if needed)
+  // Identify missing parents and pre-generate IDs for them
   const missingParents = new Set<string>();
-  for (const comp of componentsWithParents) {
-    if (comp.parentName && !createdItems.has(comp.parentName)) {
+  for (const comp of parsedRows) {
+    if (comp.parentName && !nameToId.has(comp.parentName)) {
       missingParents.add(comp.parentName);
     }
   }
 
-  if (missingParents.size > 0 && createMissingParents) {
-    try {
-      await prisma.component.createMany({
-        data: Array.from(missingParents).map((name) => ({
-          name,
-          type: 'EPIC',
-          projectId: targetProjectId,
-          sprintId: autoAssignSprint || null,
-        })),
-        skipDuplicates: true,
-      });
-
-      const createdParents = await prisma.component.findMany({
-        where: {
-          projectId: targetProjectId,
-          name: { in: Array.from(missingParents) },
-        },
-        select: { id: true, name: true },
-      });
-
-      createdParents.forEach((p) => {
-        createdItems.set(p.name, p.id);
-        stats.created++;
-        stats.warnings.push(`Auto-created parent Epic: "${p.name}"`);
-      });
-    } catch (error) {
-      stats.errors.push(
-        `Failed to create missing parents: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+  if (createMissingParents) {
+    for (const parentName of missingParents) {
+      const parentId = randomUUID();
+      nameToId.set(parentName, parentId);
     }
   }
 
-  // Batch create components with parents
-  if (componentsWithParents.length > 0) {
-    try {
-      await prisma.component.createMany({
-        data: componentsWithParents.map((c) => ({
-          name: c.name,
-          description: c.description,
-          type: c.type as any,
-          status: c.status as any,
-          priority: c.priority,
-          owner: c.owner,
-          externalId: c.externalId,
-          tags: c.tags,
-          estimatedHours: c.estimatedHours,
-          dueDate: c.dueDate,
-          projectId: targetProjectId,
-          sprintId: autoAssignSprint || null,
-          parentId: createdItems.get(c.parentName!) || null,
-        })),
-        skipDuplicates: true,
-      });
+  // Separate into components without parents and with parents
+  const componentsWithoutParents = parsedRows.filter((r) => !r.parentName);
+  const componentsWithParents = parsedRows.filter((r) => r.parentName);
 
-      const created = await prisma.component.findMany({
-        where: {
-          projectId: targetProjectId,
-          name: { in: componentsWithParents.map((c) => c.name) },
-        },
-        select: { id: true, name: true },
-      });
-
-      created.forEach((c) => {
-        createdItems.set(c.name, c.id);
-      });
-
-      stats.created += created.length;
-    } catch (error) {
-      stats.errors.push(
-        `Batch create with parents failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
-    }
-  }
-
-  // Resolve dependencies - batch create
-  const dependenciesToCreate: Array<{ dependentComponentId: string; requiredComponentId: string }> = [];
+  // Build dependency data
+  const dependenciesToCreate: Array<{ id: string; dependentComponentId: string; requiredComponentId: string }> = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -603,7 +576,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
 
     if (!name || !depsRaw) continue;
 
-    const componentId = createdItems.get(name);
+    const componentId = nameToId.get(name);
     if (!componentId) continue;
 
     const depNames = depsRaw
@@ -611,9 +584,10 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
       .map((d) => d.trim())
       .filter(Boolean);
     for (const depName of depNames) {
-      const requiredId = createdItems.get(depName);
+      const requiredId = nameToId.get(depName);
       if (requiredId && requiredId !== componentId) {
         dependenciesToCreate.push({
+          id: randomUUID(),
           dependentComponentId: componentId,
           requiredComponentId: requiredId,
         });
@@ -623,20 +597,232 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     }
   }
 
-  // Batch create dependencies
-  if (dependenciesToCreate.length > 0) {
-    try {
-      await prisma.dependency.createMany({
-        data: dependenciesToCreate,
-        skipDuplicates: true,
-      });
-    } catch (error) {
-      // Log but don't fail the import
-      stats.warnings.push(
-        `Some dependencies could not be created: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
-    }
-  }
+  // Execute dual-write for all component operations
+  const BATCH_SIZE = 25;
+
+  await dualWrite(
+    'component',
+    'create',
+    async () => {
+      // Prisma: Batch create components
+
+      // First: Create missing parents if needed
+      if (missingParents.size > 0 && createMissingParents) {
+        try {
+          await prisma.component.createMany({
+            data: Array.from(missingParents).map((name) => ({
+              id: nameToId.get(name)!,
+              name,
+              type: 'EPIC',
+              projectId: targetProjectId,
+              sprintId: autoAssignSprint || null,
+            })),
+            skipDuplicates: true,
+          });
+
+          missingParents.forEach((name) => {
+            createdItems.set(name, nameToId.get(name)!);
+            stats.created++;
+            stats.warnings.push(`Auto-created parent Epic: "${name}"`);
+          });
+        } catch (error) {
+          stats.errors.push(
+            `Failed to create missing parents: ${error instanceof Error ? error.message : 'Unknown error'}`
+          );
+        }
+      }
+
+      // Second: Create components without parents
+      if (componentsWithoutParents.length > 0) {
+        try {
+          await prisma.component.createMany({
+            data: componentsWithoutParents.map((c) => ({
+              id: c.id,
+              name: c.name,
+              description: c.description,
+              type: c.type,
+              status: c.status,
+              priority: c.priority,
+              owner: c.owner,
+              externalId: c.externalId,
+              tags: c.tags,
+              estimatedHours: c.estimatedHours,
+              dueDate: c.dueDate,
+              projectId: targetProjectId,
+              sprintId: autoAssignSprint || null,
+            })),
+            skipDuplicates: true,
+          });
+
+          componentsWithoutParents.forEach((c) => {
+            createdItems.set(c.name, c.id);
+          });
+
+          stats.created += componentsWithoutParents.length;
+        } catch (error) {
+          stats.errors.push(`Batch create failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      // Third: Create components with parents
+      if (componentsWithParents.length > 0) {
+        try {
+          await prisma.component.createMany({
+            data: componentsWithParents.map((c) => ({
+              id: c.id,
+              name: c.name,
+              description: c.description,
+              type: c.type,
+              status: c.status,
+              priority: c.priority,
+              owner: c.owner,
+              externalId: c.externalId,
+              tags: c.tags,
+              estimatedHours: c.estimatedHours,
+              dueDate: c.dueDate,
+              projectId: targetProjectId,
+              sprintId: autoAssignSprint || null,
+              parentId: nameToId.get(c.parentName!) || null,
+            })),
+            skipDuplicates: true,
+          });
+
+          componentsWithParents.forEach((c) => {
+            createdItems.set(c.name, c.id);
+          });
+
+          stats.created += componentsWithParents.length;
+        } catch (error) {
+          stats.errors.push(
+            `Batch create with parents failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+          );
+        }
+      }
+
+      // Fourth: Create dependencies
+      if (dependenciesToCreate.length > 0) {
+        try {
+          await prisma.dependency.createMany({
+            data: dependenciesToCreate.map((d) => ({
+              id: d.id,
+              dependentComponentId: d.dependentComponentId,
+              requiredComponentId: d.requiredComponentId,
+            })),
+            skipDuplicates: true,
+          });
+        } catch (error) {
+          stats.warnings.push(
+            `Some dependencies could not be created: ${error instanceof Error ? error.message : 'Unknown error'}`
+          );
+        }
+      }
+
+      return { count: stats.created };
+    },
+    async () => {
+      // DynamoDB: Batch create with chunking
+
+      // Helper for batch creation
+      const batchCreate = async <T>(
+        items: T[],
+        createFn: (item: T) => Promise<unknown>
+      ): Promise<void> => {
+        for (let i = 0; i < items.length; i += BATCH_SIZE) {
+          const batch = items.slice(i, i + BATCH_SIZE);
+          await Promise.all(batch.map((item) => createFn(item).catch(() => null)));
+        }
+      };
+
+      // First: Create missing parents if needed
+      if (missingParents.size > 0 && createMissingParents) {
+        const parentData = Array.from(missingParents).map((name) => ({
+          id: nameToId.get(name)!,
+          name,
+          type: 'EPIC' as const,
+          projectId: targetProjectId!,
+          status: 'PLANNING' as const,
+          sprintId: autoAssignSprint || undefined,
+        }));
+
+        await batchCreate(parentData, (p) => entities.component.create(p).go());
+
+        parentData.forEach((p) => {
+          createdItems.set(p.name, p.id);
+        });
+      }
+
+      // Second: Create components without parents
+      if (componentsWithoutParents.length > 0) {
+        await batchCreate(componentsWithoutParents, (c) =>
+          entities.component
+            .create({
+              id: c.id,
+              name: c.name,
+              description: c.description || undefined,
+              type: c.type,
+              status: c.status,
+              priority: c.priority,
+              owner: c.owner || undefined,
+              externalId: c.externalId || undefined,
+              tags: c.tags,
+              estimatedHours: c.estimatedHours || undefined,
+              dueDate: c.dueDate?.toISOString(),
+              projectId: targetProjectId!,
+              sprintId: autoAssignSprint || undefined,
+            })
+            .go()
+        );
+
+        componentsWithoutParents.forEach((c) => {
+          createdItems.set(c.name, c.id);
+        });
+      }
+
+      // Third: Create components with parents
+      if (componentsWithParents.length > 0) {
+        await batchCreate(componentsWithParents, (c) =>
+          entities.component
+            .create({
+              id: c.id,
+              name: c.name,
+              description: c.description || undefined,
+              type: c.type,
+              status: c.status,
+              priority: c.priority,
+              owner: c.owner || undefined,
+              externalId: c.externalId || undefined,
+              tags: c.tags,
+              estimatedHours: c.estimatedHours || undefined,
+              dueDate: c.dueDate?.toISOString(),
+              projectId: targetProjectId!,
+              sprintId: autoAssignSprint || undefined,
+              parentId: nameToId.get(c.parentName!) || undefined,
+            })
+            .go()
+        );
+
+        componentsWithParents.forEach((c) => {
+          createdItems.set(c.name, c.id);
+        });
+      }
+
+      // Fourth: Create dependencies
+      if (dependenciesToCreate.length > 0) {
+        await batchCreate(dependenciesToCreate, (d) =>
+          entities.dependency
+            .create({
+              id: d.id,
+              dependentComponentId: d.dependentComponentId,
+              requiredComponentId: d.requiredComponentId,
+            })
+            .go()
+        );
+      }
+
+      return { count: parsedRows.length + (createMissingParents ? missingParents.size : 0) };
+    },
+    { context: { action: 'executeImport', projectId: targetProjectId, rowCount: parsedRows.length } }
+  );
 
   revalidatePath(`/projects/${targetProjectId}`);
   revalidatePath(`/team/${teamId}`);
