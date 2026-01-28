@@ -1,11 +1,6 @@
 'use client';
 
-import { X, Download, Eye, Loader2 } from 'lucide-react';
-import { useState } from 'react';
-import { useAction } from 'next-safe-action/hooks';
-import { exportWireframeAction } from './preview-actions';
-import { toast } from 'sonner';
-import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
+import { X, Eye } from 'lucide-react';
 
 interface Props {
   htmlContent: string;
@@ -14,34 +9,8 @@ interface Props {
   onClose: () => void;
 }
 
-export default function PreviewModal({ htmlContent, componentName, previewId, onClose }: Props) {
-  const [isExporting, setIsExporting] = useState(false);
-  const { handleResult } = useDemoActionHandler();
-
-  const { execute: executeExport } = useAction(exportWireframeAction, {
-    onSuccess: ({ data }) => {
-      if (!data) return;
-      const resolved = isDemoResult(data) ? (handleResult(data) as typeof data) : data;
-      if (resolved?.downloadUrl) {
-        window.open(resolved.downloadUrl, '_blank');
-        toast.success('Wireframe exported successfully!');
-      }
-    },
-    onError: ({ error }) => {
-      toast.error(error.serverError || 'Failed to export wireframe');
-    },
-    onExecute: () => {
-      setIsExporting(true);
-    },
-    onSettled: () => {
-      setIsExporting(false);
-    },
-  });
-
-  const handleExport = () => {
-    executeExport({ previewId });
-  };
-
+// FORGE: Export HTML feature removed - wireframe bucket not available
+export default function PreviewModal({ htmlContent, componentName, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
@@ -79,15 +48,9 @@ export default function PreviewModal({ htmlContent, componentName, previewId, on
           <p className="text-xs text-slate-500">
             This is an AI-generated wireframe. Use it as a starting point for development.
           </p>
-          <div className="flex gap-3">
-            <button onClick={handleExport} className="btn-secondary" disabled={isExporting}>
-              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              Export HTML
-            </button>
-            <button onClick={onClose} className="btn-primary">
-              Close
-            </button>
-          </div>
+          <button onClick={onClose} className="btn-primary">
+            Close
+          </button>
         </div>
       </div>
     </div>

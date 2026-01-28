@@ -1,6 +1,5 @@
 import { UpdateUserPoolClientCommandInput } from '@aws-sdk/client-cognito-identity-provider';
 import { CfnOutput, CfnResource, CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
-import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import {
   AccountRecovery,
   CfnManagedLoginBranding,
@@ -11,25 +10,14 @@ import {
   VerificationEmailStyle,
 } from 'aws-cdk-lib/aws-cognito';
 import { Code, Runtime, SingletonFunction } from 'aws-cdk-lib/aws-lambda';
-import { CnameRecord, IHostedZone } from 'aws-cdk-lib/aws-route53';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+// FORGE: Simplified auth - no custom domain support
 export interface AuthProps {
-  /**
-   * Route 53 hosted zone for custom domain.
-   *
-   * @default No custom domain. A random prefix will be automatically generated for the Cognito domain.
-   */
-  readonly hostedZone?: IHostedZone;
-  /**
-   * ACM certificate for custom domain (must be in us-east-1 for Cognito).
-   *
-   * @default No custom domain.
-   */
-  readonly sharedCertificate?: ICertificate;
+  // No props needed - always uses Cognito default domain
 }
 
 export class Auth extends Construct {
@@ -47,34 +35,27 @@ export class Auth extends Construct {
 
   constructor(scope: Construct, id: string, props: AuthProps) {
     super(scope, id);
-    const { hostedZone } = props;
-    const subDomain = 'auth';
-    let domainPrefix = '';
-    if (!hostedZone) {
-      // When we do not use a custom domain, we must make domainPrefix unique in the AWS region.
-      // To avoid a collision, we generate a random string with CFn custom resource.
-      // This allows the stack to work without requiring a custom domain setup.
-      const generator = new SingletonFunction(this, 'RandomStringGenerator', {
-        runtime: Runtime.NODEJS_22_X,
-        handler: 'index.handler',
-        timeout: Duration.seconds(5),
-        lambdaPurpose: 'RandomStringGenerator',
-        uuid: '11e9c903-f11a-4989-833c-985dddef5eb2',
-        code: Code.fromInline(readFileSync(join(__dirname, 'prefix-generator.js')).toString()),
-      });
 
-      const domainPrefixResource = new CustomResource(this, 'DomainPrefix', {
-        serviceToken: generator.functionArn,
-        resourceType: 'Custom::RandomString',
-        properties: { prefix: 'webapp-', length: 10 },
-        serviceTimeout: Duration.seconds(10),
-      });
-      domainPrefix = domainPrefixResource.getAttString('generated');
-    }
+    // FORGE: Always use Cognito default domain with random prefix
+    // Generate unique domainPrefix to avoid collision in AWS region
+    const generator = new SingletonFunction(this, 'RandomStringGenerator', {
+      runtime: Runtime.NODEJS_22_X,
+      handler: 'index.handler',
+      timeout: Duration.seconds(5),
+      lambdaPurpose: 'RandomStringGenerator',
+      uuid: '11e9c903-f11a-4989-833c-985dddef5eb2',
+      code: Code.fromInline(readFileSync(join(__dirname, 'prefix-generator.js')).toString()),
+    });
 
-    this.domainName = hostedZone
-      ? `${subDomain}.${hostedZone.zoneName}`
-      : `${domainPrefix}.auth.${Stack.of(this).region}.amazoncognito.com`;
+    const domainPrefixResource = new CustomResource(this, 'DomainPrefix', {
+      serviceToken: generator.functionArn,
+      resourceType: 'Custom::RandomString',
+      properties: { prefix: 'webapp-', length: 10 },
+      serviceTimeout: Duration.seconds(10),
+    });
+    const domainPrefix = domainPrefixResource.getAttString('generated');
+
+    this.domainName = `${domainPrefix}.auth.${Stack.of(this).region}.amazoncognito.com`;
 
     const userPool = new UserPool(this, 'UserPool', {
       passwordPolicy: {
@@ -132,29 +113,13 @@ export class Auth extends Construct {
     this.client = client;
     this.userPool = userPool;
 
+    // FORGE: Always use Cognito default domain (no custom domain)
     this.cognitoDomain = userPool.addDomain('CognitoDomain', {
-      ...(hostedZone && props.sharedCertificate
-        ? {
-            customDomain: {
-              domainName: this.domainName,
-              certificate: props.sharedCertificate,
-            },
-          }
-        : {
-            cognitoDomain: {
-              domainPrefix,
-            },
-          }),
+      cognitoDomain: {
+        domainPrefix,
+      },
       managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
-
-    if (hostedZone) {
-      new CnameRecord(this, 'CognitoDomainRecord', {
-        zone: hostedZone,
-        recordName: subDomain,
-        domainName: this.cognitoDomain.cloudFrontEndpoint,
-      });
-    }
 
     new CfnManagedLoginBranding(this, 'Branding', {
       userPoolId: this.userPool.userPoolId,

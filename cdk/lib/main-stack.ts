@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import { CfnOutput, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { AsyncJob } from './constructs/async-job';
@@ -12,32 +12,11 @@ import {
   NatProvider,
   Vpc,
 } from 'aws-cdk-lib/aws-ec2';
-import { IHostedZone } from 'aws-cdk-lib/aws-route53';
-import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { Webapp } from './constructs/webapp';
 import { EventBus } from './constructs/event-bus/';
 import { Monitoring } from './constructs/monitoring';
 
 interface MainStackProps extends StackProps {
-  /**
-   * Custom domain name for the webapp and Cognito.
-   *
-   * @default No custom domain. CloudFront and Cognito will use their default domains.
-   */
-  readonly domainName?: string;
-  /**
-   * Route53 hosted zone for the custom domain (created in us-east-1 stack).
-   *
-   * @default No custom domain.
-   */
-  readonly hostedZone?: IHostedZone;
-  /**
-   * ACM certificate for custom domain (must be in us-east-1).
-   *
-   * @default No custom domain.
-   */
-  readonly sharedCertificate?: ICertificate;
-
   /**
    * Use a NAT instance instead of NAT Gateways for cost optimization.
    *
@@ -59,7 +38,7 @@ interface MainStackProps extends StackProps {
 export class MainStack extends Stack {
   constructor(scope: Construct, id: string, props: MainStackProps) {
     super(scope, id, {
-      description: 'TaskTitan - Serverless 3-Tier Application for Component-Based Project Planning',
+      description: 'TaskTitan FORGE - Cost-Optimized Serverless Application (us-east-2)',
       ...props,
     });
 
@@ -69,11 +48,6 @@ export class MainStack extends Stack {
     // Reference: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html
     const { useNatInstance = false, backupRetentionDays = 30 } = props;
 
-    // Use the hosted zone from us-east-1 stack
-    // CDK cross-stack references (with crossRegionReferences: true) will handle the Route53 reference
-    // Route53 hosted zones are global, so this works across regions
-    const hostedZone = props.hostedZone;
-
     // Access logs bucket for CloudFront - Security best practice
     const accessLogBucket = new Bucket(this, 'AccessLogBucket', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -82,22 +56,6 @@ export class MainStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
       objectOwnership: ObjectOwnership.OBJECT_WRITER,
       autoDeleteObjects: true,
-    });
-
-    // Wireframe export bucket for AI-generated HTML wireframes
-    const wireframeBucket = new Bucket(this, 'WireframeBucket', {
-      encryption: BucketEncryption.S3_MANAGED,
-      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-      autoDeleteObjects: true,
-      lifecycleRules: [
-        {
-          id: 'DeleteOldWireframes',
-          enabled: true,
-          expiration: Duration.days(30), // Auto-delete after 30 days to save storage costs
-        },
-      ],
     });
 
     // VPC Configuration
@@ -134,11 +92,9 @@ export class MainStack extends Stack {
       backupRetentionDays, // Stretch goal: Regular backups
     });
 
-    // Authentication with Cognito
-    const auth = new Auth(this, 'Auth', {
-      hostedZone,
-      sharedCertificate: props.sharedCertificate,
-    });
+    // Authentication with Cognito (using default Cognito domain - no custom domain)
+    // SECURITY NOTE: Without custom domain, Cognito uses *.amazoncognito.com which is secure
+    const auth = new Auth(this, 'Auth', {});
 
     // Real-time event bus for live updates
     const eventBus = new EventBus(this, 'EventBus', {});
@@ -150,24 +106,15 @@ export class MainStack extends Stack {
     // PRESENTATION TIER: Next.js webapp on ECS Fargate + CloudFront
     // ECS Fargate eliminates cold starts - containers stay warm and ready
     // AI component generation uses Amazon Bedrock (Claude) - no API keys needed!
+    // SECURITY NOTE: Without custom domain, CloudFront uses default TLS settings.
+    // The *.cloudfront.net domain provides HTTPS via AWS-managed certificates.
     const webapp = new Webapp(this, 'Webapp', {
       database,
-      hostedZone,
-      certificate: props.sharedCertificate,
       accessLogBucket,
-      wireframeBucket,
       auth,
       eventBus,
       asyncJob,
-      // Serve webapp from root domain (e.g., tasktitan.live instead of web.tasktitan.live)
     });
-
-    // When using a custom domain, Cognito requires the parent domain to have a valid A record.
-    // The webapp's CloudFront A record (for the root domain) satisfies this requirement.
-    // Add explicit dependency to ensure the A record is created before Cognito validates the domain.
-    if (webapp.aRecord) {
-      auth.cognitoDomain.node.addDependency(webapp.aRecord);
-    }
 
     // CloudWatch Monitoring Dashboard
     // Note: Webapp metrics now come from ECS/CloudWatch Container Insights, not Lambda
@@ -196,11 +143,6 @@ export class MainStack extends Stack {
     new CfnOutput(this, 'XRayServiceMapUrl', {
       value: `https://${this.region}.console.aws.amazon.com/xray/home?region=${this.region}#/service-map`,
       description: 'X-Ray Service Map for request tracing',
-    });
-
-    new CfnOutput(this, 'WireframeBucketName', {
-      value: wireframeBucket.bucketName,
-      description: 'S3 bucket for AI-generated wireframe exports',
     });
   }
 }

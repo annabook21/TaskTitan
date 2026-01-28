@@ -73,28 +73,12 @@ export class Database extends Construct implements ec2.IConnectable {
     this.secret = cluster.secret!;
     this.connections = this.cluster.connections;
 
-    const host = new ec2.BastionHostLinux(this, 'BastionHost', {
-      vpc,
-      machineImage: ec2.MachineImage.latestAmazonLinux2023({ cpuType: ec2.AmazonLinuxCpuType.ARM_64 }),
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.NANO),
-      blockDevices: [
-        {
-          deviceName: '/dev/sdf',
-          volume: ec2.BlockDeviceVolume.ebs(8, {
-            encrypted: true,
-          }),
-        },
-      ],
-    });
-    this.connections.allowDefaultPortFrom(host);
+    // FORGE: Bastion host removed for cost optimization
+    // Database access is via:
+    // 1. ECS Fargate tasks (same VPC)
+    // 2. Lambda functions (same VPC)
+    // For manual access, use AWS Session Manager with an EC2 instance if needed
 
-    new CfnOutput(this, 'PortForwardCommand', {
-      value: `aws ssm start-session --region ${Stack.of(this).region} --target ${
-        host.instanceId
-      } --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters '{"portNumber":["${
-        cluster.clusterEndpoint.port
-      }"], "localPortNumber":["5433"], "host": ["${cluster.clusterEndpoint.hostname}"]}'`,
-    });
     new CfnOutput(this, 'DatabaseSecretsCommand', {
       value: `aws secretsmanager get-secret-value --secret-id ${cluster.secret!.secretName} --region ${
         Stack.of(this).region

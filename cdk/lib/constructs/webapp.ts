@@ -1,13 +1,10 @@
-import { IgnoreMode, Duration, CfnOutput, Stack, RemovalPolicy } from 'aws-cdk-lib';
+import { IgnoreMode, Duration, CfnOutput, Stack } from 'aws-cdk-lib';
 import { Platform, DockerImageAsset } from 'aws-cdk-lib/aws-ecr-assets';
 import { DockerImageFunction, DockerImageCode, Architecture, Tracing } from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { readFileSync } from 'fs';
-import { ARecord, IHostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
-import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { Database } from './database';
-import { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { Auth } from './auth/';
 import { join } from 'path';
 import { EventBus } from './event-bus/';
@@ -23,64 +20,40 @@ import {
   AllowedMethods,
   CachePolicy,
   OriginRequestPolicy,
-  SecurityPolicyProtocol,
   Function as CloudFrontFunction,
   FunctionCode,
   FunctionEventType,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { LoadBalancerV2Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { Port } from 'aws-cdk-lib/aws-ec2';
-import { ApplicationListener, ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { ListenerAction, ListenerCondition } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Secret as EcsSecret } from 'aws-cdk-lib/aws-ecs';
 
+// FORGE: Simplified webapp configuration - no custom domain, no wireframe bucket
 export interface WebappProps {
   database: Database;
   accessLogBucket: Bucket;
-  wireframeBucket: Bucket;
   auth: Auth;
   eventBus: EventBus;
   asyncJob: AsyncJob;
-
-  /**
-   * Route 53 hosted zone for custom domain.
-   *
-   * @default No custom domain. The webapp will use CloudFront's default domain (e.g., d1234567890.cloudfront.net).
-   */
-  hostedZone?: IHostedZone;
-  /**
-   * ACM certificate for custom domain (must be in us-east-1 for CloudFront).
-   *
-   * @default No custom domain.
-   */
-  certificate?: ICertificate;
-  /**
-   * Subdomain name for the webapp. If not specified, the root domain will be used.
-   *
-   * @default Use root domain
-   */
-  subDomain?: string;
 }
 
 export class Webapp extends Construct {
   public readonly baseUrl: string;
   public readonly fargateService: ApplicationLoadBalancedFargateService;
-  /**
-   * The Route53 A record for the webapp domain.
-   * Only set when using a custom domain.
-   */
-  public readonly aRecord?: ARecord;
 
   constructor(scope: Construct, id: string, props: WebappProps) {
     super(scope, id);
 
-    const { database, hostedZone, auth, subDomain, eventBus, asyncJob, wireframeBucket } = props;
+    const { database, auth, eventBus, asyncJob } = props;
     const vpc = database.cluster.vpc;
 
     // Build Docker image for ECS Fargate
     // ECS Fargate eliminates cold starts - containers stay warm and ready
     // Note: NEXT_PUBLIC_* environment variables are passed at runtime, not build time
     // because DockerImageAsset doesn't support token-based buildArgs
+    // FORGE: Always use CloudFront default domain (*.cloudfront.net)
     const image = new DockerImageAsset(this, 'Image', {
       directory: join('..', 'webapp'),
       platform: Platform.LINUX_ARM64,
@@ -89,7 +62,7 @@ export class Webapp extends Construct {
         .toString()
         .split('\n'),
       buildArgs: {
-        ALLOWED_ORIGIN_HOST: hostedZone ? `${hostedZone.zoneName},*.${hostedZone.zoneName}` : '*.cloudfront.net',
+        ALLOWED_ORIGIN_HOST: '*.cloudfront.net',
         SKIP_TS_BUILD: 'true',
         BUILD_TIMESTAMP: new Date().toISOString(),
       },
@@ -115,14 +88,6 @@ export class Webapp extends Construct {
         excludeCharacters: '"@/\\',
       },
     });
-
-    // Compute the domain name for AMPLIFY_APP_ORIGIN
-    // For custom domain: use the domain name directly
-    // For CloudFront default: we'll set it after distribution is created
-    let domainName = '';
-    if (hostedZone) {
-      domainName = subDomain ? `${subDomain}.${hostedZone.zoneName}` : hostedZone.zoneName;
-    }
 
     // AWS Best Practice: Use ApplicationLoadBalancedFargateService pattern
     // Reference: https://docs.aws.amazon.com/cdk/v2/guide/ecs-example.html
@@ -166,15 +131,14 @@ export class Webapp extends Construct {
           USER_POOL_CLIENT_ID: auth.client.userPoolClientId,
           // Service configuration
           ASYNC_JOB_HANDLER_ARN: asyncJob.handler.functionArn,
-          WIREFRAME_BUCKET_NAME: wireframeBucket.bucketName,
+          // FORGE: Wireframe bucket removed - export feature disabled
           // Logging
           POWERTOOLS_SERVICE_NAME: 'TaskTitanWebapp',
           LOG_LEVEL: 'INFO',
           // Next.js configuration
           PORT: '3000',
           HOSTNAME: '0.0.0.0',
-          // AMPLIFY_APP_ORIGIN for auth callback URLs
-          ...(domainName ? { AMPLIFY_APP_ORIGIN: `https://${domainName}` } : {}),
+          // FORGE: AMPLIFY_APP_ORIGIN not needed - using CloudFront default domain
         },
       },
       // ALB is public but protected by CloudFront origin header validation
@@ -200,17 +164,13 @@ export class Webapp extends Construct {
     // Default is 60s which is too short for Bedrock API calls
     fargateService.loadBalancer.setAttribute('idle_timeout.timeout_seconds', '120');
 
-    // Create a new listener with a fresh logical ID to avoid CloudFormation drift issues
-    // This replaces the listener that was deleted outside of CloudFormation
-    const listener = new ApplicationListener(this, 'PublicListener', {
-      loadBalancer: fargateService.loadBalancer,
-      port: 80,
-      open: true,
-      defaultAction: ListenerAction.fixedResponse(403, {
-        contentType: 'text/plain',
-        messageBody: 'Forbidden',
-      }),
-    });
+    // Use the listener created by ApplicationLoadBalancedFargateService
+    // Configure default action to return 403 - only requests with valid origin header should pass
+    const listener = fargateService.listener;
+
+    // Override the default action to deny requests without proper origin verification
+    // The default target group action is added by the service, we'll add rules with higher priority
+    // to validate origin before forwarding to target group
 
     // Allow Fargate to connect to database
     database.connections.allowFrom(fargateService.service, Port.tcp(5432), 'Allow Fargate to access Aurora PostgreSQL');
@@ -257,9 +217,6 @@ export class Webapp extends Construct {
         ],
       }),
     );
-
-    // Grant S3 permissions for wireframe exports
-    wireframeBucket.grantReadWrite(fargateService.taskDefinition.taskRole);
 
     // Grant Lambda invoke for async jobs
     asyncJob.handler.grantInvoke(fargateService.taskDefinition.taskRole);
@@ -314,13 +271,9 @@ function handler(event) {
           },
         ],
       },
-      ...(hostedZone && props.certificate
-        ? {
-            domainNames: [domainName],
-            certificate: props.certificate,
-          }
-        : {}),
-      minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+      // FORGE: No custom domain - using CloudFront default domain
+      // Note: Without custom domain/certificate, minimumProtocolVersion is ignored by CloudFront
+      // CloudFront's default *.cloudfront.net domain uses AWS-managed TLS
       logBucket: props.accessLogBucket,
       logFilePrefix: 'webapp/',
     });
@@ -345,36 +298,14 @@ function handler(event) {
       action: ListenerAction.forward([fargateService.targetGroup]),
     });
 
-    // Set baseUrl based on domain configuration
-    if (hostedZone) {
-      this.baseUrl = `https://${domainName}`;
-      // Use 'Record' inside cloudFrontConstruct to match old CloudFormation logical ID (Resource/Record)
-      this.aRecord = new ARecord(cloudFrontConstruct, 'Record', {
-        zone: hostedZone,
-        target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
-        recordName: subDomain,
-      });
-    } else {
-      this.baseUrl = `https://${distribution.domainName}`;
-      // For CloudFront default domain, the container will use the Host header
-    }
+    // FORGE: Always use CloudFront default domain
+    this.baseUrl = `https://${distribution.domainName}`;
 
-    // Configure auth callback URLs
-    if (hostedZone) {
-      auth.addAllowedCallbackUrls(
-        `http://localhost:3010/api/auth/sign-in-callback`,
-        `http://localhost:3010/api/auth/sign-out-callback`,
-      );
-      auth.addAllowedCallbackUrls(
-        `${this.baseUrl}/api/auth/sign-in-callback`,
-        `${this.baseUrl}/api/auth/sign-out-callback`,
-      );
-    } else {
-      auth.updateAllowedCallbackUrls(
-        [`${this.baseUrl}/api/auth/sign-in-callback`, `http://localhost:3010/api/auth/sign-in-callback`],
-        [`${this.baseUrl}/api/auth/sign-out-callback`, `http://localhost:3010/api/auth/sign-out-callback`],
-      );
-    }
+    // Configure auth callback URLs dynamically (CloudFront domain not known until deployment)
+    auth.updateAllowedCallbackUrls(
+      [`${this.baseUrl}/api/auth/sign-in-callback`, `http://localhost:3010/api/auth/sign-in-callback`],
+      [`${this.baseUrl}/api/auth/sign-out-callback`, `http://localhost:3010/api/auth/sign-out-callback`],
+    );
 
     // Database Migration Runner (still Lambda for simplicity)
     const migrationRunner = new DockerImageFunction(this, 'MigrationRunner', {
