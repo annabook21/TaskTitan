@@ -104,6 +104,27 @@ export const addDependency = authActionClient.schema(addDependencySchema).action
     requiredName = required.name;
   }
 
+  // Check for existing dependency (unique constraint: dependentComponentId + requiredComponentId)
+  // Best practice: Use conditional write or query-first pattern to enforce uniqueness
+  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
+    // DynamoDB: Query using primary key (dependentComponentId, requiredComponentId)
+    const { dependency: depEntity } = getEntities();
+    const existing = await depEntity.get({ dependentComponentId, requiredComponentId }).go();
+    if (existing.data) {
+      throw new MyCustomError(`Dependency from "${dependentName}" to "${requiredName}" already exists`);
+    }
+  } else {
+    // Prisma: Check unique constraint
+    const existing = await prisma.dependency.findUnique({
+      where: {
+        dependentComponentId_requiredComponentId: { dependentComponentId, requiredComponentId },
+      },
+    });
+    if (existing) {
+      throw new MyCustomError(`Dependency from "${dependentName}" to "${requiredName}" already exists`);
+    }
+  }
+
   const dependencyId = randomUUID();
   const activityId = randomUUID();
 

@@ -126,7 +126,9 @@ const ComponentSchema = {
   indexes: {
     primary: { pk: { field: 'pk', composite: ['id'] as const, template: 'COMPONENT#${id}' }, sk: { field: 'sk', composite: [] as const, template: 'METADATA' } },
     byProject: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['projectId'] as const, template: 'PROJECT#${projectId}' }, sk: { field: 'gsi1sk', composite: ['id'] as const, template: 'COMPONENT#${id}' } },
-    // Note: For sprint queries, use byProject + filter by sprintId. Sparse GSI would require all items to have sprintId.
+    // Sparse GSI for sprint queries - only items with sprintId are indexed
+    // Used for sprint metrics and planning views
+    bySprint: { index: 'gsi2', pk: { field: 'gsi2pk', composite: ['sprintId'] as const, template: 'SPRINT#${sprintId}' }, sk: { field: 'gsi2sk', composite: ['id'] as const, template: 'COMPONENT#${id}' } },
   },
 };
 
