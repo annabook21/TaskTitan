@@ -2,8 +2,6 @@
 
 [![Build](https://github.com/annabook21/TaskTitan/actions/workflows/build.yml/badge.svg)](https://github.com/annabook21/TaskTitan/actions/workflows/build.yml)
 
-**Live: [https://tasktitan.live](https://tasktitan.live)**
-
 TaskTitan is an AI-powered project planning tool that helps development teams break down projects into manageable components, track decisions, visualize dependencies, and coordinate sprints — eliminating merge conflicts before they happen.
 
 ## Features
@@ -36,22 +34,33 @@ TaskTitan is an AI-powered project planning tool that helps development teams br
 
 ## Architecture
 
-TaskTitan is built on AWS Serverless architecture for high availability, scalability, and cost efficiency:
+TaskTitan FORGE v2 is built on a fully serverless AWS architecture — no VPC, NAT Gateway, or ALB required:
 
-![TaskTitan Architecture](./tasktitan_arch.drawio.svg)
+![TaskTitan Architecture](./tasktitan-architecture.drawio.svg)
 
 ### Key Technologies
 
 | Layer | Technology |
 |-------|------------|
 | Frontend | Next.js 15 App Router, React 19, Tailwind CSS 4 |
-| Backend | Next.js Server Actions, AWS Lambda |
-| Database | Aurora PostgreSQL Serverless v2 + Prisma ORM |
-| Auth | Amazon Cognito |
-| Real-time | AWS AppSync Events |
+| Compute | AWS App Runner (auto-scaling, built-in HTTPS) |
+| Database | Amazon DynamoDB (single-table design with ElectroDB) |
+| Async Jobs | AWS Lambda (ARM64, no VPC) |
+| Auth | Amazon Cognito (User Pool with self sign-up) |
+| Real-time | AWS AppSync Events (WebSocket) |
 | AI | Amazon Bedrock (Claude Sonnet 4.5) |
 | Infrastructure | AWS CDK (TypeScript) |
-| Observability | AWS Powertools (Logging + X-Ray Tracing), CloudWatch |
+| Observability | CloudWatch Dashboard, X-Ray Tracing |
+
+### Cost Estimate
+
+| Service | Monthly Cost |
+|---------|-------------|
+| App Runner (1 vCPU, 2GB) | ~$45-50 |
+| DynamoDB (on-demand) | ~$5-25 |
+| Lambda (async jobs) | ~$1-5 |
+| Other (Cognito, CloudWatch, etc.) | ~$5-10 |
+| **Total** | **~$55-90/month** |
 
 ## Prerequisites
 
@@ -61,22 +70,25 @@ TaskTitan is built on AWS Serverless architecture for high availability, scalabi
 
 ## Local Development
 
-1. **Start the database**:
+1. **Start DynamoDB Local**:
    ```bash
    docker compose up -d
    ```
 
-2. **Install dependencies and set up database**:
+2. **Install dependencies**:
    ```bash
    cd webapp
    npm install
-   npx prisma generate
-   npx prisma db push
    ```
 
-3. **Create `.env.local`**:
+3. **Create `.env.local`** (if not exists):
    ```bash
-   cp .env.local.example .env.local
+   # DynamoDB Local
+   DYNAMODB_TABLE_NAME=TaskTitan
+   DYNAMODB_ENDPOINT=http://localhost:8000
+   AWS_ACCESS_KEY_ID=local
+   AWS_SECRET_ACCESS_KEY=local
+   AWS_REGION=us-east-2
    ```
 
 4. **Start the development server**:
@@ -104,30 +116,17 @@ npx cdk bootstrap
 npx cdk deploy --all
 ```
 
-Initial deployment takes approximately 20 minutes. After deployment, you'll see output like:
+Initial deployment takes approximately 15 minutes. After deployment, you'll see output like:
 
 ```
-TaskTitanStack.FrontendDomainName = https://d1234567890.cloudfront.net
-TaskTitanStack.AuthUserPoolId = us-east-1_xxxxxx
-TaskTitanStack.AuthUserPoolClientId = xxxxxxxxxxxxxxxxxx
-```
-
-### Configuration Options
-
-Edit `cdk/bin/cdk.ts` to customize:
-
-```typescript
-const props: EnvironmentProps = {
-  account: process.env.CDK_DEFAULT_ACCOUNT!,
-  // Uncomment to use a custom domain (requires Route53 hosted zone)
-  // domainName: 'tasktitan.example.com',
-  useNatInstance: false, // false = NAT Gateway (production), true = NAT Instance (dev/cost savings)
-};
+TaskTitanForgeStack.FrontendDomainName = https://xxxxxxxxxx.us-east-2.awsapprunner.com
+TaskTitanForgeStack.CognitoUserPoolId = us-east-2_xxxxxx
+TaskTitanForgeStack.DynamoDBTableName = TaskTitanForgeStack-DynamoTable-xxxxxx
 ```
 
 ### AI Features
 
-AI features are powered by Amazon Bedrock with Claude Sonnet 4.5. No external API keys are needed — everything runs within AWS. Ensure your AWS account has Bedrock model access enabled for the Claude models.
+AI features are powered by Amazon Bedrock with Claude Sonnet 4.5. No external API keys are needed — everything runs within AWS. Ensure your AWS account has Bedrock model access enabled for the Claude models in us-east-2.
 
 ## Project Structure
 
@@ -136,19 +135,25 @@ AI features are powered by Amazon Bedrock with Claude Sonnet 4.5. No external AP
 │   ├── bin/cdk.ts          # Stack entry point
 │   ├── lib/
 │   │   ├── main-stack.ts   # Main stack orchestration
-│   │   └── constructs/     # CDK constructs (auth, database, webapp, etc.)
+│   │   └── constructs/     # CDK constructs
+│   │       ├── app-runner.ts   # App Runner service
+│   │       ├── dynamodb.ts     # DynamoDB table
+│   │       ├── async-job.ts    # Lambda async jobs
+│   │       ├── auth/           # Cognito authentication
+│   │       ├── event-bus/      # AppSync real-time
+│   │       └── monitoring.ts   # CloudWatch dashboard
 │   └── test/               # Infrastructure tests
 │
 └── webapp/                 # Next.js application
-    ├── prisma/             # Database schema
     ├── src/
     │   ├── app/            # Next.js App Router pages
     │   │   ├── projects/   # Project management
     │   │   ├── team/       # Team management
     │   │   ├── sprints/    # Sprint planning
-    │   │   └── import/     # Data import wizard
+    │   │   └── api/        # API routes
     │   ├── components/     # Shared React components
-    │   ├── lib/            # Utilities (auth, db, ai, events, jobs)
+    │   ├── lib/
+    │   │   ├── dynamodb/   # DynamoDB client & ElectroDB entities
     │   │   ├── ai/         # Bedrock client and generators
     │   │   └── demo/       # Demo mode (browser-only storage)
     │   └── jobs/           # Async job handlers
@@ -156,6 +161,8 @@ AI features are powered by Amazon Bedrock with Claude Sonnet 4.5. No external AP
 ```
 
 ## Data Model
+
+TaskTitan uses a single-table DynamoDB design with ElectroDB for type-safe access:
 
 ```
 User ──┬── Membership ──── Team ──┬── Project ──┬── Component ──┬── Assignment
