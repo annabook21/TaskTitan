@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { Layers, GitBranch, Users, FileText, Sparkles, Zap, Shield, Brain, Eye } from 'lucide-react';
 import SignInButton from './SignInButton';
-import SignUpButton from './SignUpButton';
 import DemoButton from './DemoButton';
 
 export default function SignInPage() {
@@ -178,21 +177,8 @@ export default function SignInPage() {
               </div>
             </div>
 
-            {/* Cognito Sign In Button with enhanced design */}
+            {/* Cognito Sign In/Up Button */}
             <SignInButton />
-
-            {/* Or divider */}
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-700/50"></div>
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="px-4 py-1 bg-slate-900/70 text-slate-500 rounded-full">or</span>
-              </div>
-            </div>
-
-            {/* Sign Up Button */}
-            <SignUpButton />
 
             {/* Or divider */}
             <div className="relative my-6">
@@ -221,14 +207,7 @@ export default function SignInPage() {
 
             {/* Info text with improved styling */}
             <div className="text-center">
-              <p className="text-sm text-slate-400">
-                Already have an account?{' '}
-                <span className="text-transparent bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text font-semibold">
-                  Sign in
-                </span>{' '}
-                to continue.
-              </p>
-              <p className="text-xs text-slate-500 mt-3">Free tier includes unlimited projects and AI features</p>
+              <p className="text-xs text-slate-500">Free tier includes unlimited projects and AI features</p>
             </div>
           </div>
 
