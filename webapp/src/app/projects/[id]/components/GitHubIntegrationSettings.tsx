@@ -5,7 +5,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { updateProjectGitHubSettings, updateGitHubTransitionConfig } from '@/app/projects/actions';
 import { toast } from 'sonner';
 import { Github, Key, Copy, ChevronDown, ChevronUp, Zap } from 'lucide-react';
-import type { ComponentStatus } from '@prisma/client';
+import type { ComponentStatus } from '@/lib/prisma-compat';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 type GitHubEvent = 'PR_OPENED' | 'PR_READY_FOR_REVIEW' | 'PR_APPROVED' | 'PR_MERGED' | 'PR_CLOSED';

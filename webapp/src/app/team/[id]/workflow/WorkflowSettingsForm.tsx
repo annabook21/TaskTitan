@@ -5,7 +5,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { updateWorkflowConfig } from './actions';
 import { toast } from 'sonner';
 import { Loader2, Save, Layers, Zap, TrendingUp, Calendar, LayoutTemplate, Type } from 'lucide-react';
-import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplateKey, getTemplateSettings } from '@/lib/workflow-templates';
 import { CYCLE_NAME_OPTIONS, BACKLOG_NAME_OPTIONS } from '@/lib/terminology';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';

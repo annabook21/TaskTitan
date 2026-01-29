@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Link from 'next/link';
 import MetricsClient from './MetricsClient';
-import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 
 export default function DemoMetricsPage() {
   const params = useParams();

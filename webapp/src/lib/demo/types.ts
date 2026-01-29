@@ -1,6 +1,6 @@
 // Demo mode types - mirrors Prisma schema for localStorage storage
 
-import type { ComponentStatus, ComponentType, Role, SprintStatus } from '@prisma/client';
+import type { ComponentStatus, ComponentType, Role, SprintStatus } from '@/lib/prisma-compat';
 
 export interface DemoUser {
   id: string;

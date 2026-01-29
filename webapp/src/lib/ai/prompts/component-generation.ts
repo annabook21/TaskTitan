@@ -10,7 +10,7 @@
  * - KANBAN: Flat work items with continuous flow. No sprints, no hierarchy.
  */
 
-import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 import type { TeamCapacityInfo } from '../types';
 
 /**

@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Link from 'next/link';
 import { ArrowLeft, Settings } from 'lucide-react';
 import WorkflowSettingsForm from './WorkflowSettingsForm';
-import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 
 export default function DemoWorkflowSettingsPage() {
   const params = useParams();

@@ -30,6 +30,24 @@ exports[`Snapshot test 1`] = `
         ],
       },
     },
+    "AppSyncGraphqlGraphQLApiId2F3F9645": {
+      "Description": "AppSync GraphQL API ID",
+      "Value": {
+        "Fn::GetAtt": [
+          "AppSyncGraphqlApi48248BEB",
+          "ApiId",
+        ],
+      },
+    },
+    "AppSyncGraphqlGraphQLApiUrlA5188E41": {
+      "Description": "AppSync GraphQL API URL (us-east-2)",
+      "Value": {
+        "Fn::GetAtt": [
+          "AppSyncGraphqlApi48248BEB",
+          "GraphQLUrl",
+        ],
+      },
+    },
     "AsyncJobDLQUrlDA38FD69": {
       "Description": "Dead Letter Queue URL for failed async jobs - monitor this queue for failures",
       "Value": {
@@ -127,6 +145,29 @@ exports[`Snapshot test 1`] = `
     "MonitoringDashboardUrl": {
       "Description": "CloudWatch Monitoring Dashboard URL",
       "Value": "https://us-east-2.console.aws.amazon.com/cloudwatch/home?region=us-east-2#dashboards:name=TaskTitan-Monitoring",
+    },
+    "StaticFrontendStaticFrontendBucketNameF21557FD": {
+      "Description": "S3 bucket for static frontend assets",
+      "Value": {
+        "Ref": "StaticFrontendBucket37767DD7",
+      },
+    },
+    "StaticFrontendStaticFrontendUrl05ACBE07": {
+      "Description": "CloudFront URL for static frontend (Phase 3 entry point)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://",
+            {
+              "Fn::GetAtt": [
+                "StaticFrontendDistribution1DBCD836",
+                "DomainName",
+              ],
+            },
+          ],
+        ],
+      },
     },
     "XRayServiceMapUrl": {
       "Description": "X-Ray Service Map for request tracing",
@@ -332,6 +373,486 @@ exports[`Snapshot test 1`] = `
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "AppSyncGraphqlApi48248BEB": {
+      "Properties": {
+        "AuthenticationType": "AMAZON_COGNITO_USER_POOLS",
+        "Name": "TaskTitanForgeStack-GraphQL",
+        "UserPoolConfig": {
+          "AwsRegion": "us-east-2",
+          "DefaultAction": "ALLOW",
+          "UserPoolId": {
+            "Ref": "AuthUserPool8115E87F",
+          },
+        },
+        "XrayEnabled": true,
+      },
+      "Type": "AWS::AppSync::GraphQLApi",
+    },
+    "AppSyncGraphqlApiBedrockLambda55C98CBB": {
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "LambdaConfig": {
+          "LambdaFunctionArn": {
+            "Fn::GetAtt": [
+              "AsyncJobHandler438266BD",
+              "Arn",
+            ],
+          },
+        },
+        "Name": "BedrockLambda",
+        "ServiceRoleArn": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApiBedrockLambdaServiceRoleF2161A4D",
+            "Arn",
+          ],
+        },
+        "Type": "AWS_LAMBDA",
+      },
+      "Type": "AWS::AppSync::DataSource",
+    },
+    "AppSyncGraphqlApiBedrockLambdaServiceRoleDefaultPolicy03FB90DA": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AsyncJobHandler438266BD",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AsyncJobHandler438266BD",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AppSyncGraphqlApiBedrockLambdaServiceRoleDefaultPolicy03FB90DA",
+        "Roles": [
+          {
+            "Ref": "AppSyncGraphqlApiBedrockLambdaServiceRoleF2161A4D",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AppSyncGraphqlApiBedrockLambdaServiceRoleF2161A4D": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "appsync.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "AppSyncGraphqlApiDynamoDBA02B9D11": {
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DynamoDBConfig": {
+          "AwsRegion": "us-east-2",
+          "TableName": {
+            "Ref": "DynamoTableE5532DA8",
+          },
+        },
+        "Name": "DynamoDB",
+        "ServiceRoleArn": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApiDynamoDBServiceRoleBD23EB0C",
+            "Arn",
+          ],
+        },
+        "Type": "AMAZON_DYNAMODB",
+      },
+      "Type": "AWS::AppSync::DataSource",
+    },
+    "AppSyncGraphqlApiDynamoDBServiceRoleBD23EB0C": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "appsync.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "AppSyncGraphqlApiDynamoDBServiceRoleDefaultPolicy3924B767": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:Query",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:DescribeTable",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DynamoTableE5532DA8",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DynamoTableE5532DA8",
+                          "Arn",
+                        ],
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DynamoTableE5532DA8",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DynamoTableE5532DA8",
+                          "Arn",
+                        ],
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AppSyncGraphqlApiDynamoDBServiceRoleDefaultPolicy3924B767",
+        "Roles": [
+          {
+            "Ref": "AppSyncGraphqlApiDynamoDBServiceRoleBD23EB0C",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AppSyncGraphqlApiSchemaC2E94F39": {
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Definition": "# Phase 2/3: AppSync GraphQL API (main API; CloudFront + S3 frontend, no App Runner)
+# Auth: Cognito User Pools. Data: DynamoDB (same table as ElectroDB) + Lambda (Bedrock).
+# Region: us-east-2.
+
+type Project {
+  id: ID!
+  name: String!
+  description: String
+  teamId: String!
+  ownerId: String!
+  createdAt: String
+  updatedAt: String
+}
+
+type Team {
+  id: ID!
+  name: String!
+  description: String
+  createdAt: String
+  updatedAt: String
+}
+
+type Query {
+  # Get a single project by ID (DynamoDB: pk=PROJECT#id, sk=METADATA)
+  getProject(id: ID!): Project
+  # Get a single team by ID (DynamoDB: pk=TEAM#id, sk=METADATA)
+  getTeam(id: ID!): Team
+  # List projects for a team (DynamoDB GSI2: gsi2pk=TEAM#teamId)
+  listProjectsByTeam(teamId: ID!): [Project!]!
+}
+
+input CreateProjectInput {
+  id: ID!
+  teamId: ID!
+  ownerId: ID!
+  name: String!
+  description: String
+}
+
+# AI generation: Lambda (Bedrock) invoked by AppSync; returns generated text.
+type Mutation {
+  generateComponentViaAI(projectId: ID!, prompt: String!): String
+  createProject(input: CreateProjectInput!): Project!
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+}
+",
+      },
+      "Type": "AWS::AppSync::GraphQLSchema",
+    },
+    "AppSyncGraphqlCreateProjectResolverAE2D7277": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const id = input.id;
+  const now = util.time.nowISO8601();
+  const item = {
+    pk: 'PROJECT#' + id,
+    sk: 'METADATA',
+    id,
+    name: input.name,
+    description: input.description || null,
+    teamId: input.teamId,
+    ownerId: input.ownerId,
+    createdAt: now,
+    updatedAt: now,
+    gsi1pk: 'OWNER#' + input.ownerId,
+    gsi1sk: 'PROJECT#' + id,
+    gsi2pk: 'TEAM#' + input.teamId,
+    gsi2sk: 'PROJECT#' + id
+  };
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({ pk: item.pk, sk: item.sk }),
+    attributeValues: util.dynamodb.toMapValues(item)
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  return { id: input.id, name: input.name, description: input.description || null, teamId: input.teamId, ownerId: input.ownerId, createdAt: now, updatedAt: now };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "createProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGenerateComponentViaAIResolver3545246F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "generateComponentViaAI",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetProjectResolverB43CD3DB": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + ctx.args.id,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetTeamResolver3FA83C15": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + ctx.args.id,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getTeam",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListProjectsByTeamResolver5F6E1F61": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  return {
+    operation: 'Query',
+    index: 'gsi2',
+    query: {
+      expression: 'gsi2pk = :pk AND begins_with(gsi2sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId,
+        ':sk': 'PROJECT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result.items || [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listProjectsByTeam",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
     },
     "AsyncJobDeadLetterQueueCA49DDA5": {
       "DeletionPolicy": "Delete",
@@ -623,36 +1144,6 @@ exports[`Snapshot test 1`] = `
       },
       "Type": "AWS::IAM::Role",
     },
-    "AsyncJobSampleJob3C1EBA2C": {
-      "Properties": {
-        "FlexibleTimeWindow": {
-          "Mode": "OFF",
-        },
-        "ScheduleExpression": "cron(0 0 1 * ? *)",
-        "ScheduleExpressionTimezone": "Etc/UTC",
-        "State": "ENABLED",
-        "Target": {
-          "Arn": {
-            "Fn::GetAtt": [
-              "AsyncJobHandler438266BD",
-              "Arn",
-            ],
-          },
-          "Input": "{"jobType":"SampleJob"}",
-          "RetryPolicy": {
-            "MaximumEventAgeInSeconds": 86400,
-            "MaximumRetryAttempts": 5,
-          },
-          "RoleArn": {
-            "Fn::GetAtt": [
-              "SchedulerRoleForTarget44ece2CFC6840F",
-              "Arn",
-            ],
-          },
-        },
-      },
-      "Type": "AWS::Scheduler::Schedule",
-    },
     "AuthBranding34BB87FD": {
       "Properties": {
         "ClientId": {
@@ -804,7 +1295,23 @@ exports[`Snapshot test 1`] = `
           ],
         },
         "AdminCreateUserConfig": {
-          "AllowAdminCreateUserOnly": false,
+          "AllowAdminCreateUserOnly": true,
+          "InviteMessageTemplate": {
+            "EmailMessage": "Hello,
+
+Your TaskTitan account has been created.
+
+Username: {username}
+Temporary Password: {####}
+
+Please sign in and you will be prompted to set a permanent password.
+
+This temporary password expires in 7 days.
+
+Welcome to intelligent project planning!
+- The TaskTitan Team",
+            "EmailSubject": "Welcome to TaskTitan - Your account is ready",
+          },
         },
         "AutoVerifiedAttributes": [
           "email",
@@ -1297,51 +1804,82 @@ exports.handler = async function (event, context) {
       },
       "Type": "AWS::IAM::Role",
     },
-    "SchedulerRoleForTarget44ece2CFC6840F": {
+    "StaticFrontendBucket37767DD7": {
+      "DeletionPolicy": "Delete",
       "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
             {
-              "Action": "sts:AssumeRole",
-              "Condition": {
-                "StringEquals": {
-                  "aws:SourceAccount": "123456789012",
-                  "aws:SourceArn": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":scheduler:us-east-2:123456789012:schedule-group/default",
-                      ],
-                    ],
-                  },
-                },
-              },
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "scheduler.amazonaws.com",
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
               },
             },
           ],
-          "Version": "2012-10-17",
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "ObjectWriter",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "Tags": [
+          {
+            "Key": "aws-cdk:auto-delete-objects",
+            "Value": "true",
+          },
+        ],
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "StaticFrontendBucketAutoDeleteObjectsCustomResourceC368FD3A": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "StaticFrontendBucketPolicy5DC81360",
+      ],
+      "Properties": {
+        "BucketName": {
+          "Ref": "StaticFrontendBucket37767DD7",
+        },
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F",
+            "Arn",
+          ],
         },
       },
-      "Type": "AWS::IAM::Role",
+      "Type": "Custom::S3AutoDeleteObjects",
+      "UpdateReplacePolicy": "Delete",
     },
-    "SchedulerRoleForTarget44ece2DefaultPolicyFDF3E159": {
+    "StaticFrontendBucketPolicy5DC81360": {
       "Properties": {
+        "Bucket": {
+          "Ref": "StaticFrontendBucket37767DD7",
+        },
         "PolicyDocument": {
           "Statement": [
             {
-              "Action": "lambda:InvokeFunction",
-              "Effect": "Allow",
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
               "Resource": [
                 {
                   "Fn::GetAtt": [
-                    "AsyncJobHandler438266BD",
+                    "StaticFrontendBucket37767DD7",
                     "Arn",
                   ],
                 },
@@ -1351,27 +1889,203 @@ exports.handler = async function (event, context) {
                     [
                       {
                         "Fn::GetAtt": [
-                          "AsyncJobHandler438266BD",
+                          "StaticFrontendBucket37767DD7",
                           "Arn",
                         ],
                       },
-                      ":*",
+                      "/*",
                     ],
                   ],
                 },
               ],
             },
+            {
+              "Action": [
+                "s3:PutBucketPolicy",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::GetAtt": [
+                    "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
+                    "Arn",
+                  ],
+                },
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "StaticFrontendBucket37767DD7",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "StaticFrontendBucket37767DD7",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "CanonicalUser": {
+                  "Fn::GetAtt": [
+                    "StaticFrontendOAI06335787",
+                    "S3CanonicalUserId",
+                  ],
+                },
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "StaticFrontendBucket37767DD7",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "StaticFrontendBucket37767DD7",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Principal": {
+                "CanonicalUser": {
+                  "Fn::GetAtt": [
+                    "StaticFrontendOAI06335787",
+                    "S3CanonicalUserId",
+                  ],
+                },
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StaticFrontendBucket37767DD7",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
-        "PolicyName": "SchedulerRoleForTarget44ece2DefaultPolicyFDF3E159",
-        "Roles": [
-          {
-            "Ref": "SchedulerRoleForTarget44ece2CFC6840F",
-          },
-        ],
       },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "StaticFrontendDistribution1DBCD836": {
+      "Properties": {
+        "DistributionConfig": {
+          "Comment": "TaskTitanForgeStack static frontend",
+          "CustomErrorResponses": [
+            {
+              "ErrorCachingMinTTL": 0,
+              "ErrorCode": 403,
+              "ResponseCode": 200,
+              "ResponsePagePath": "/index.html",
+            },
+            {
+              "ErrorCachingMinTTL": 0,
+              "ErrorCode": 404,
+              "ResponseCode": 200,
+              "ResponsePagePath": "/index.html",
+            },
+          ],
+          "DefaultCacheBehavior": {
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+              "OPTIONS",
+            ],
+            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "Compress": true,
+            "TargetOriginId": "TaskTitanForgeStackStaticFrontendDistributionOrigin11BFA011E",
+            "ViewerProtocolPolicy": "redirect-to-https",
+          },
+          "DefaultRootObject": "index.html",
+          "Enabled": true,
+          "HttpVersion": "http2and3",
+          "IPV6Enabled": true,
+          "Logging": {
+            "Bucket": {
+              "Fn::GetAtt": [
+                "AccessLogBucketDA470295",
+                "RegionalDomainName",
+              ],
+            },
+            "Prefix": "static-frontend/",
+          },
+          "Origins": [
+            {
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "StaticFrontendBucket37767DD7",
+                  "RegionalDomainName",
+                ],
+              },
+              "Id": "TaskTitanForgeStackStaticFrontendDistributionOrigin11BFA011E",
+              "S3OriginConfig": {
+                "OriginAccessIdentity": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "origin-access-identity/cloudfront/",
+                      {
+                        "Ref": "StaticFrontendOAI06335787",
+                      },
+                    ],
+                  ],
+                },
+              },
+            },
+          ],
+          "PriceClass": "PriceClass_100",
+        },
+      },
+      "Type": "AWS::CloudFront::Distribution",
+    },
+    "StaticFrontendOAI06335787": {
+      "Properties": {
+        "CloudFrontOriginAccessIdentityConfig": {
+          "Comment": "OAI for TaskTitanForgeStack static frontend",
+        },
+      },
+      "Type": "AWS::CloudFront::CloudFrontOriginAccessIdentity",
     },
     "WebappAutoScalingD01023F3": {
       "Properties": {
@@ -1478,6 +2192,16 @@ exports.handler = async function (event, context) {
                 "arn:aws:bedrock:us-*:123456789012:inference-profile/us.anthropic.claude-*",
                 "arn:aws:bedrock:*:123456789012:inference-profile/global.anthropic.claude-*",
               ],
+            },
+            {
+              "Action": "cognito-idp:AdminCreateUser",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuthUserPool8115E87F",
+                  "Arn",
+                ],
+              },
             },
             {
               "Action": "lambda:InvokeFunction",

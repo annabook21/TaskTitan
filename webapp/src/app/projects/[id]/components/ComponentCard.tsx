@@ -24,7 +24,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { ComponentStatus, ComponentType, User, SprintStatus } from '@prisma/client';
+import type { ComponentStatus, ComponentType, User, SprintStatus } from '@/lib/prisma-compat';
 import AssignmentPanel from './AssignmentPanel';
 import PreviewModal from './PreviewModal';
 import ComponentContextPanel from './ComponentContextPanel';

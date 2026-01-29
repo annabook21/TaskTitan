@@ -5,7 +5,7 @@ import { useAction } from 'next-safe-action/hooks';
 import { assignComponent, unassignComponent } from '@/app/projects/actions';
 import { UserPlus, X, Check, Loader2, User as UserIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import type { User } from '@prisma/client';
+import type { User } from '@/lib/prisma-compat';
 import { useDemoActionHandler, isDemoResult } from '@/hooks/use-demo-action';
 
 interface Props {

@@ -2,11 +2,13 @@ import { CfnOutput, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { AsyncJob } from './constructs/async-job';
+import { AppSyncGraphql } from './constructs/appsync-graphql';
 import { Auth } from './constructs/auth/';
 import { TaskTitanTable } from './constructs/dynamodb';
 import { AppRunnerService } from './constructs/app-runner';
 import { EventBus } from './constructs/event-bus/';
 import { Monitoring } from './constructs/monitoring';
+import { StaticFrontend } from './constructs/static-frontend';
 
 interface MainStackProps extends StackProps {
   // No special props needed - fully serverless with DynamoDB
@@ -49,7 +51,20 @@ export class MainStack extends Stack {
     // LOGIC TIER: Async job processing (serverless, no VPC needed)
     const asyncJob = new AsyncJob(this, 'AsyncJob', { dynamoTable, eventBus });
 
-    // PRESENTATION TIER: FORGE v2 - App Runner (fully serverless)
+    // Phase 2: AppSync GraphQL API (parallel to Next.js; Cognito + DynamoDB + Lambda/Bedrock)
+    const appSyncGraphql = new AppSyncGraphql(this, 'AppSyncGraphql', {
+      dynamoTable,
+      auth,
+      asyncJob,
+    });
+
+    // Phase 3: CloudFront + S3 static frontend (client architecture entry point)
+    // Deploy static build to the bucket; then remove App Runner and switch Cognito callbacks to this URL
+    const staticFrontend = new StaticFrontend(this, 'StaticFrontend', {
+      accessLogBucket,
+    });
+
+    // PRESENTATION TIER: FORGE v2 - App Runner (fully serverless) – remove when static build is live on CloudFront
     // App Runner provides:
     // - Zero cold starts (containers stay warm)
     // - Automatic scaling based on traffic

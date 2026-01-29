@@ -1,0 +1,49 @@
+# Phase 2/3: AppSync GraphQL API (main API; CloudFront + S3 frontend, no App Runner)
+# Auth: Cognito User Pools. Data: DynamoDB (same table as ElectroDB) + Lambda (Bedrock).
+# Region: us-east-2.
+
+type Project {
+  id: ID!
+  name: String!
+  description: String
+  teamId: String!
+  ownerId: String!
+  createdAt: String
+  updatedAt: String
+}
+
+type Team {
+  id: ID!
+  name: String!
+  description: String
+  createdAt: String
+  updatedAt: String
+}
+
+type Query {
+  # Get a single project by ID (DynamoDB: pk=PROJECT#id, sk=METADATA)
+  getProject(id: ID!): Project
+  # Get a single team by ID (DynamoDB: pk=TEAM#id, sk=METADATA)
+  getTeam(id: ID!): Team
+  # List projects for a team (DynamoDB GSI2: gsi2pk=TEAM#teamId)
+  listProjectsByTeam(teamId: ID!): [Project!]!
+}
+
+input CreateProjectInput {
+  id: ID!
+  teamId: ID!
+  ownerId: ID!
+  name: String!
+  description: String
+}
+
+# AI generation: Lambda (Bedrock) invoked by AppSync; returns generated text.
+type Mutation {
+  generateComponentViaAI(projectId: ID!, prompt: String!): String
+  createProject(input: CreateProjectInput!): Project!
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+}

@@ -64,7 +64,8 @@ export class Auth extends Construct {
         requireDigits: true,
         minLength: 8,
       },
-      selfSignUpEnabled: true,
+      // AppSec: Self-sign-up disabled; users are created via AdminCreateUser from /sign-up server action
+      selfSignUpEnabled: false,
       autoVerify: {
         email: true,
       },
@@ -83,6 +84,23 @@ export class Auth extends Construct {
         emailStyle: VerificationEmailStyle.CODE,
       },
       removalPolicy: RemovalPolicy.RETAIN, // Protect user data in production
+      // Admin-created user invitation email template
+      userInvitation: {
+        emailSubject: 'Welcome to TaskTitan - Your account is ready',
+        emailBody: `Hello,
+
+Your TaskTitan account has been created.
+
+Username: {username}
+Temporary Password: {####}
+
+Please sign in and you will be prompted to set a permanent password.
+
+This temporary password expires in 7 days.
+
+Welcome to intelligent project planning!
+- The TaskTitan Team`,
+      },
     });
 
     // Note: Advanced security mode (Threat Protection) requires Cognito Plus tier ($0.05/MAU)

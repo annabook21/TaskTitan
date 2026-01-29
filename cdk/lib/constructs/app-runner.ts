@@ -95,6 +95,14 @@ export class AppRunnerService extends Construct {
       }),
     );
 
+    // Grant Cognito AdminCreateUser permission for user registration
+    instanceRole.addToPrincipalPolicy(
+      new PolicyStatement({
+        actions: ['cognito-idp:AdminCreateUser'],
+        resources: [auth.userPool.userPoolArn],
+      }),
+    );
+
     // Grant async job invoke permission
     asyncJob.handler.grantInvoke(instanceRole);
 

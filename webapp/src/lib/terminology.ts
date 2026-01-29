@@ -5,7 +5,7 @@
  * Allows teams to use "Sprint", "Cycle", "Iteration", etc. based on their preference.
  */
 
-import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 
 export interface WorkflowTerminology {
   /** Singular form: "Sprint", "Cycle", "Iteration" */

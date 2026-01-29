@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/config.ts","./src/main.tsx","./src/api/appsync.ts","./src/components/layout.tsx","./src/pages/authcallbackpage.tsx","./src/pages/homepage.tsx","./src/pages/signinpage.tsx","./src/pages/teamdetailpage.tsx","./src/pages/teamlistpage.tsx"],"version":"5.6.3"}

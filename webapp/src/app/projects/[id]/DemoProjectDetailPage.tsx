@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { demoStore, DEMO_USER } from '@/lib/demo';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import type { Role, User } from '@prisma/client';
+import type { Role, User } from '@/lib/prisma-compat';
 import { ArrowLeft, Plus, Layers, GitBranch, Users, Clock, PlayCircle, PauseCircle, Zap } from 'lucide-react';
 import ComponentCard from './components/ComponentCard';
 import SmartComponentCreator from './components/SmartComponentCreator';

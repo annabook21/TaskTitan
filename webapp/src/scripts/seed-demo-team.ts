@@ -14,7 +14,7 @@
  * 3. Run: npx ts-node src/scripts/seed-demo-team.ts
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@/lib/prisma-compat';
 import { randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();

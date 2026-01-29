@@ -15,7 +15,7 @@ import {
   type AgingData,
 } from './actions';
 import { BarChart3, Clock, TrendingUp, Layers, Loader2, AlertTriangle, Activity } from 'lucide-react';
-import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 import { demoStore, isDemoMode } from '@/lib/demo';
 import { DEMO_STORE_UPDATE_EVENT } from '@/hooks/use-demo-action';
 

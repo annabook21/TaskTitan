@@ -16,7 +16,7 @@ import { extractJsonFromResponse } from '../utils/response-parsing';
 import { buildSystemPrompt, buildComponentGenerationPrompt } from '../prompts/component-generation';
 import { logger } from '@/lib/logger';
 import type { AIGenerationResult, TeamCapacityInfo } from '../types';
-import type { TeamWorkflowConfig } from '@prisma/client';
+import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 
 /**
  * Generates component suggestions for a project based on its description.

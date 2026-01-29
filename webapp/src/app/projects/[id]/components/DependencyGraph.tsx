@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { ComponentStatus } from '@prisma/client';
+import type { ComponentStatus } from '@/lib/prisma-compat';
 
 interface ComponentWithDeps {
   id: string;
