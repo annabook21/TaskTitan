@@ -1,14 +1,14 @@
 'use server';
 
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 
-// DynamoDB migration imports
-import { dualRead, dualWrite } from '@/lib/dynamodb/dual-write';
+// DynamoDB imports
+import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities, getService } from '@/lib/dynamodb/service';
+import { verifyComponentAccess } from '@/lib/dynamodb/auth-helpers';
 
 // Schema for linking a PR to a component
 const linkComponentToPRSchema = z.object({
@@ -39,80 +39,23 @@ export const linkComponentToPR = authActionClient
 
     const entities = getEntities();
 
-    // Verify user has access to the component's project (dualRead-aware)
-    const component = await dualRead(
-      'component',
-      async () => {
-        return prisma.component.findFirst({
-          where: {
-            id: componentId,
-            Project: {
-              Team: {
-                Membership: {
-                  some: { userId },
-                },
-              },
-            },
-          },
-          include: {
-            Project: {
-              select: { id: true },
-            },
-          },
-        });
-      },
-      async () => {
-        // DynamoDB: component.get -> verify membership via project.teamId
-        const compResult = await entities.component.get({ id: componentId }).go();
-        const comp = compResult.data;
-        if (!comp) return null;
-
-        const projResult = await entities.project.get({ id: comp.projectId }).go();
-        const proj = projResult.data;
-        if (!proj) return null;
-
-        // Membership primary key is (teamId, userId) so we can use a direct get().
-        const membershipResult = await entities.membership.get({ teamId: proj.teamId, userId }).go();
-        if (!membershipResult.data) return null;
-
-        // Shape-match Prisma include we use below
-        return {
-          id: comp.id,
-          name: comp.name,
-          projectId: comp.projectId,
-          Project: { id: comp.projectId },
-        } as unknown;
-      },
-      { context: { action: 'linkComponentToPR', componentId } }
-    );
-
-    if (!component) {
+    // Verify user has access to the component's project via DynamoDB
+    const access = await verifyComponentAccess(userId, componentId);
+    if (!access) {
       throw new MyCustomError('Component not found or access denied');
     }
 
+    const projectId = access.component.projectId;
+    const componentName = access.component.name;
     const activityId = randomUUID();
 
     // Update the component with PR info (dual-write)
     const result = await dualWrite(
       'component',
       'update',
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
-        return prisma.component.update({
-          where: { id: componentId },
-          data: {
-            githubPrUrl: prUrl,
-            githubPrNumber: prNumber,
-            githubPrTitle: prTitle || null,
-            githubPrStatus: prStatus || (prUrl ? 'open' : null),
-            githubPrUpdatedAt: prUrl ? new Date() : null,
-          },
-        });
-      },
-      async () => {
-        const updateData: Record<string, unknown> = {
-          githubRepoUrl: undefined,
-          githubWebhookSecret: undefined,
-        };
+        const updateData: Record<string, unknown> = {};
         updateData.githubPrUrl = prUrl || undefined;
         updateData.githubPrNumber = prNumber ?? undefined;
         updateData.githubPrTitle = prTitle || undefined;
@@ -130,22 +73,7 @@ export const linkComponentToPR = authActionClient
       await dualWrite(
         'activity',
         'create',
-        async () => {
-          return prisma.activity.create({
-            data: {
-              id: activityId,
-              type: 'GITHUB_PR_LINKED',
-              projectId: (component as any).Project.id,
-              userId,
-              metadata: {
-                componentId,
-                componentName: (component as any).name,
-                prUrl,
-                prNumber,
-              },
-            },
-          });
-        },
+        async () => null, // Prisma removed - DynamoDB only
         async () => {
           const service = getService();
           await service.transaction
@@ -154,9 +82,9 @@ export const linkComponentToPR = authActionClient
                 .create({
                   id: activityId,
                   type: 'GITHUB_PR_LINKED',
-                  projectId: (component as any).Project.id,
+                  projectId,
                   userId,
-                  metadata: { componentId, componentName: (component as any).name, prUrl, prNumber },
+                  metadata: { componentId, componentName, prUrl, prNumber },
                 })
                 .commit(),
             ])
@@ -167,7 +95,7 @@ export const linkComponentToPR = authActionClient
       );
     }
 
-    revalidatePath(`/projects/${(component as any).Project.id}`);
+    revalidatePath(`/projects/${projectId}`);
 
     return { component: result.data };
   });
@@ -191,16 +119,7 @@ export async function updateComponentPRStatus(
   return dualWrite(
     'component',
     'update',
-    async () => {
-      return prisma.component.update({
-        where: { id: componentId },
-        data: {
-          githubPrStatus: prStatus,
-          githubPrTitle: prTitle,
-          githubPrUpdatedAt: new Date(),
-        },
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const updated = await entities.component
         .update({ id: componentId })

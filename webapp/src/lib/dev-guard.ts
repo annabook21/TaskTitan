@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import { getEntities } from '@/lib/dynamodb/service';
 
 /**
  * Dev endpoint access guard
@@ -40,20 +40,9 @@ export async function requireDevAccess() {
   }
 
   // Verify user has OWNER role in at least one team
-  const ownerMemberships = await prisma.membership.findMany({
-    where: {
-      userId,
-      role: 'OWNER',
-    },
-    select: {
-      teamId: true,
-      Team: {
-        select: {
-          name: true,
-        },
-      },
-    },
-  });
+  const entities = getEntities();
+  const membershipsResult = await entities.membership.query.byUser({ userId }).go();
+  const ownerMemberships = membershipsResult.data.filter((m) => m.role === 'OWNER');
 
   if (ownerMemberships.length === 0) {
     return NextResponse.json(

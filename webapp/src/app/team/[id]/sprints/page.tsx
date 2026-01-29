@@ -1,4 +1,3 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -17,10 +16,14 @@ import {
   Zap,
 } from 'lucide-react';
 import DemoSprintsPage from './DemoSprintsPage';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 interface Props {
   params: Promise<{ id: string }>;
 }
+
+type SprintStatus = 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 
 const statusConfig = {
   PLANNING: {
@@ -55,45 +58,74 @@ export default async function SprintsPage({ params }: Props) {
     return <DemoSprintsPage />;
   }
 
-  const team = await prisma.team.findFirst({
-    where: {
-      id,
-      Membership: { some: { userId } },
-    },
-    include: {
-      Sprint: {
-        include: {
-          _count: { select: { Component: true } },
-          Component: {
-            select: { status: true, estimatedHours: true },
-          },
-        },
-        orderBy: { startDate: 'desc' },
-      },
-      Membership: {
-        where: { userId },
-        select: { role: true },
-      },
-      WorkflowConfig: true,
-    },
-  });
+  const entities = getEntities();
 
+  // Verify user has access to this team
+  const access = await verifyTeamMembership(userId, id);
+  if (!access) {
+    notFound();
+  }
+
+  // Get team details
+  const teamResult = await entities.team.get({ id }).go();
+  const team = teamResult.data;
   if (!team) {
     notFound();
   }
 
-  const currentUserRole = team.Membership[0]?.role;
+  // Get sprints, workflow config in parallel
+  const [sprintsResult, workflowConfigResult] = await Promise.all([
+    entities.sprint.query.byTeam({ teamId: id }).go(),
+    entities.teamWorkflowConfig.get({ teamId: id }).go(),
+  ]);
+
+  // Sort sprints by startDate desc
+  const sortedSprints = sprintsResult.data.sort(
+    (a, b) => new Date(b.startDate || 0).getTime() - new Date(a.startDate || 0).getTime()
+  );
+
+  // For each sprint, get component counts and details
+  // First get all projects for this team
+  const projectsResult = await entities.project.query.byTeam({ teamId: id }).go();
+  const projectIds = projectsResult.data.map((p) => p.id);
+
+  // Get all components for all projects
+  const componentResults = await Promise.all(
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+  );
+  const allComponents = componentResults.flatMap((r) => r.data);
+
+  // Build sprint data with component counts
+  const sprintsWithData = sortedSprints.map((sprint) => {
+    const sprintComponents = allComponents.filter((c) => c.sprintId === sprint.id);
+    return {
+      id: sprint.id,
+      name: sprint.name,
+      goal: (sprint as any).goal ?? null,
+      status: ((sprint as any).status || 'PLANNING') as SprintStatus,
+      startDate: new Date(sprint.startDate),
+      endDate: new Date(sprint.endDate),
+      capacity: (sprint as any).capacity ?? null,
+      _count: { Component: sprintComponents.length },
+      Component: sprintComponents.map((c) => ({
+        status: c.status,
+        estimatedHours: (c as any).estimatedHours ?? null,
+      })),
+    };
+  });
+
+  const currentUserRole = access.membership.role;
   const canManageSprints = currentUserRole === 'OWNER' || currentUserRole === 'ADMIN';
 
   // Get workflow terminology
-  const cycleName = team.WorkflowConfig?.cycleName || 'Sprint';
+  const cycleName = workflowConfigResult.data?.cycleName || 'Sprint';
   const cycleNameLower = cycleName.toLowerCase();
   const cycleNamePlural = `${cycleName}s`;
 
   // Separate sprints by status
-  const activeSprint = team.Sprint.find((s) => s.status === 'ACTIVE');
-  const planningSprints = team.Sprint.filter((s) => s.status === 'PLANNING');
-  const completedSprints = team.Sprint.filter((s) => s.status === 'COMPLETED');
+  const activeSprint = sprintsWithData.find((s) => s.status === 'ACTIVE');
+  const planningSprints = sprintsWithData.filter((s) => s.status === 'PLANNING');
+  const completedSprints = sprintsWithData.filter((s) => s.status === 'COMPLETED');
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -170,7 +202,7 @@ export default async function SprintsPage({ params }: Props) {
           )}
 
           {/* Empty State */}
-          {team.Sprint.length === 0 && (
+          {sprintsWithData.length === 0 && (
             <div className="component-card text-center py-16">
               <Zap className="w-16 h-16 text-slate-600 mx-auto mb-4" />
               <h3 className="text-xl font-medium text-slate-300 mb-2">No {cycleNameLower}s yet</h3>
@@ -197,7 +229,7 @@ interface SprintCardProps {
     id: string;
     name: string;
     goal: string | null;
-    status: 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+    status: SprintStatus;
     startDate: Date;
     endDate: Date;
     capacity: number | null;

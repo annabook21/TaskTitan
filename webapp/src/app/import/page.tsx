@@ -1,9 +1,9 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import { redirect } from 'next/navigation';
 import ImportWizard from './ImportWizard';
 import DemoImportPage from './DemoImportPage';
+import { getEntities } from '@/lib/dynamodb/service';
 
 interface Props {
   searchParams: Promise<{ teamId?: string }>;
@@ -19,19 +19,41 @@ export default async function ImportPage({ searchParams }: Props) {
     return <DemoImportPage />;
   }
 
-  // Get user's teams
-  const teams = await prisma.team.findMany({
-    where: {
-      Membership: { some: { userId } },
-    },
-    include: {
-      Project: { select: { id: true, name: true } },
-      Sprint: {
-        where: { status: { in: ['PLANNING', 'ACTIVE'] } },
-        select: { id: true, name: true },
-      },
-    },
-  });
+  const entities = getEntities();
+
+  // Get user's memberships
+  const membershipsResult = await entities.membership.query.byUser({ userId }).go();
+  const teamIds = membershipsResult.data.map((m) => m.teamId);
+
+  if (teamIds.length === 0) {
+    redirect('/team/new');
+  }
+
+  // Fetch teams with their projects and sprints
+  const teamsData = await Promise.all(
+    teamIds.map(async (teamId) => {
+      const [teamResult, projectsResult, sprintsResult] = await Promise.all([
+        entities.team.get({ id: teamId }).go(),
+        entities.project.query.byTeam({ teamId }).go(),
+        entities.sprint.query.byTeam({ teamId }).go(),
+      ]);
+
+      if (!teamResult.data) return null;
+
+      const activeOrPlanningSprints = sprintsResult.data.filter(
+        (s) => s.status === 'PLANNING' || s.status === 'ACTIVE'
+      );
+
+      return {
+        id: teamResult.data.id,
+        name: teamResult.data.name,
+        Project: projectsResult.data.map((p) => ({ id: p.id, name: p.name })),
+        Sprint: activeOrPlanningSprints.map((s) => ({ id: s.id, name: s.name })),
+      };
+    })
+  );
+
+  const teams = teamsData.filter((t): t is NonNullable<typeof t> => t !== null);
 
   if (teams.length === 0) {
     redirect('/team/new');

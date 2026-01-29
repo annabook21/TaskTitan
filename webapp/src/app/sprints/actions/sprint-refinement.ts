@@ -1,15 +1,14 @@
 'use server';
 
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { isAIConfigured } from '@/lib/ai';
 import { refineBulkPlan } from '@/lib/ai/generators/bulk-plan-refinement';
 import { randomUUID } from 'crypto';
 
-// DynamoDB migration imports
-import { dualRead, dualWrite } from '@/lib/dynamodb/dual-write';
+// DynamoDB imports
+import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities } from '@/lib/dynamodb/service';
 import { verifySprintAccess } from '@/lib/dynamodb/auth-helpers';
 
@@ -110,86 +109,46 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
   } else {
     const entities = getEntities();
 
-    // Production mode - get sprint from database (dualRead)
-    const sprint = await dualRead(
-      'sprint',
-      async () => {
-        return prisma.sprint.findFirst({
-          where: {
-            id: sprintId,
-            Team: { Membership: { some: { userId } } },
-          },
-          include: {
-            Component: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-                type: true,
-                estimatedHours: true,
-                priority: true,
-              },
-            },
-            Team: {
-              include: {
-                Project: {
-                  select: {
-                    id: true,
-                    name: true,
-                    description: true,
-                  },
-                },
-                WorkflowConfig: true,
-              },
-            },
-          },
-        });
-      },
-      async () => {
-        const access = await verifySprintAccess(userId, sprintId);
-        if (!access) return null;
-
-        // Get components currently assigned to sprint
-        const projects = await entities.project.query.byTeam({ teamId: access.sprint.teamId }).go();
-        const projectIds = projects.data.map((p) => p.id);
-        const componentResults = await Promise.all(
-          projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
-        );
-        const allComponents = componentResults.flatMap((r) => r.data);
-        const sprintComponents = allComponents
-          .filter((c) => c.sprintId === sprintId)
-          .map((c) => ({
-            id: c.id,
-            name: c.name,
-            description: (c as any).description ?? null,
-            type: (c as any).type,
-            estimatedHours: (c as any).estimatedHours ?? null,
-            priority: (c as any).priority ?? 0,
-          }));
-
-        const workflowConfig = await entities.teamWorkflowConfig.get({ teamId: access.sprint.teamId }).go();
-
-        return {
-          id: access.sprint.id,
-          teamId: access.sprint.teamId,
-          name: access.sprint.name,
-          goal: (access.sprint as any).goal ?? null,
-          startDate: (access.sprint as any).startDate,
-          endDate: (access.sprint as any).endDate,
-          capacity: (access.sprint as any).capacity ?? null,
-          Component: sprintComponents,
-          Team: {
-            Project: projects.data.map((p) => ({ id: p.id, name: p.name, description: (p as any).description ?? null })),
-            WorkflowConfig: workflowConfig.data ?? null,
-          },
-        } as unknown;
-      },
-      { context: { action: 'refineExistingSprint', sprintId } }
-    );
-
-    if (!sprint) {
+    // Production mode - get sprint from DynamoDB
+    const access = await verifySprintAccess(userId, sprintId);
+    if (!access) {
       throw new MyCustomError('Sprint not found or access denied');
     }
+
+    // Get components currently assigned to sprint
+    const projects = await entities.project.query.byTeam({ teamId: access.sprint.teamId }).go();
+    const projectIds = projects.data.map((p) => p.id);
+    const componentResults = await Promise.all(
+      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+    );
+    const allComponents = componentResults.flatMap((r) => r.data);
+    const sprintComponents = allComponents
+      .filter((c) => c.sprintId === sprintId)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        description: (c as any).description ?? null,
+        type: (c as any).type,
+        estimatedHours: (c as any).estimatedHours ?? null,
+        priority: (c as any).priority ?? 0,
+      }));
+
+    const workflowConfig = await entities.teamWorkflowConfig.get({ teamId: access.sprint.teamId }).go();
+
+    const sprint = {
+      id: access.sprint.id,
+      teamId: access.sprint.teamId,
+      name: access.sprint.name,
+      goal: (access.sprint as any).goal ?? null,
+      startDate: (access.sprint as any).startDate,
+      endDate: (access.sprint as any).endDate,
+      capacity: (access.sprint as any).capacity ?? null,
+      Component: sprintComponents,
+      Team: {
+        Project: projects.data.map((p) => ({ id: p.id, name: p.name, description: (p as any).description ?? null })),
+        WorkflowConfig: workflowConfig.data ?? null,
+      },
+    };
 
     components = sprint.Component.map((c) => ({
       name: c.name,
@@ -210,13 +169,13 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
       capacity: sprint.capacity || undefined,
     };
 
-    const workflowConfig = sprint.Team.WorkflowConfig;
+    const sprintWorkflowConfig = sprint.Team.WorkflowConfig;
     const projectContext = sprint.Team.Project[0] || { name: 'Unknown', description: '' };
 
     projectName = projectContext.name;
     projectDescription = projectContext.description || '';
-    workflowType = (workflowConfig?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM') || 'SCRUM';
-    cycleName = workflowConfig?.cycleName || 'Sprint';
+    workflowType = (sprintWorkflowConfig?.workflowTemplate as 'SCRUM' | 'KANBAN' | 'CUSTOM') || 'SCRUM';
+    cycleName = sprintWorkflowConfig?.cycleName || 'Sprint';
     teamId = sprint.teamId;
     componentIdMap = new Map(sprint.Component.map((c) => [c.name, c.id]));
   }
@@ -266,16 +225,7 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
     await dualWrite(
       'sprint',
       'update',
-      async () => {
-        return prisma.sprint.update({
-          where: { id: sprintId },
-          data: {
-            name: updatedSprint.name,
-            goal: updatedSprint.goal,
-            capacity: updatedSprint.capacity,
-          },
-        });
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const { sprint } = getEntities();
         const updated = await sprint
@@ -296,16 +246,7 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
       await dualWrite(
         'component',
         'update',
-        async () => {
-          return prisma.component.update({
-            where: { id: componentId },
-            data: {
-              description: updatedComp.description,
-              estimatedHours: updatedComp.estimatedHours,
-              priority: Math.round(updatedComp.priority * 10),
-            },
-          });
-        },
+        async () => null, // Prisma removed - DynamoDB only
         async () => {
           const updated = await entities.component
             .update({ id: componentId })

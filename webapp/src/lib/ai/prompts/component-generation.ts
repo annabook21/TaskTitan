@@ -88,12 +88,6 @@ Respond with ONLY valid JSON, no other text.`;
 }
 
 /**
- * Legacy system prompt for backward compatibility
- * @deprecated Use buildSystemPrompt(workflowConfig) instead
- */
-export const COMPONENT_GENERATION_SYSTEM_PROMPT = buildSystemPrompt(null);
-
-/**
  * Generates user prompt for component generation
  *
  * @param generateEpics - For Scrum: whether to create optional Epic groupings for backlog organization

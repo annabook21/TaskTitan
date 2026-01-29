@@ -1,12 +1,10 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { FolderKanban, Users, Upload, Plus, ArrowRight, Sparkles, Layers, Clock } from 'lucide-react';
 import DemoDashboard from './DemoDashboard';
 
-// DynamoDB migration imports
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+// DynamoDB imports
 import { getEntities } from '@/lib/dynamodb/service';
 
 // Type for team data used in the dashboard
@@ -32,12 +30,10 @@ export default async function Dashboard() {
     return <DemoDashboard />;
   }
 
-  const phase = getMigrationPhase('membership');
   let teams: DashboardTeam[];
 
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    // DynamoDB: Multiple round-trips with application-layer aggregation
-    const entities = getEntities();
+  // DynamoDB: Multiple round-trips with application-layer aggregation
+  const entities = getEntities();
 
     // Step 1: Get user's memberships (GSI1: userId)
     const membershipsResult = await entities.membership.query.byUser({ userId }).go();
@@ -90,32 +86,6 @@ export default async function Dashboard() {
       );
 
       teams = teamsWithData.filter((t): t is DashboardTeam => t !== null);
-    }
-  } else {
-    // Prisma: Nested includes with single query
-    const memberships = await prisma.membership.findMany({
-      where: { userId },
-      include: {
-        Team: {
-          include: {
-            Project: {
-              include: {
-                _count: {
-                  select: { Component: true },
-                },
-              },
-              orderBy: { updatedAt: 'desc' },
-              take: 5,
-            },
-            _count: {
-              select: { Membership: true },
-            },
-          },
-        },
-      },
-    });
-
-    teams = memberships.map((m) => m.Team);
   }
 
   const recentProjects = teams.flatMap((t) => t.Project).slice(0, 5);

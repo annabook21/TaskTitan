@@ -1,8 +1,9 @@
-import { prisma } from '@/lib/prisma';
 import { notFound } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import MetricsClient from './MetricsClient';
 import DemoMetricsPage from './DemoMetricsPage';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -18,24 +19,15 @@ export default async function MetricsPage({ params }: Props) {
     return <DemoMetricsPage />;
   }
 
-  // Check membership
-  const membership = await prisma.membership.findFirst({
-    where: { teamId, userId },
-    include: {
-      Team: {
-        include: {
-          WorkflowConfig: true,
-        },
-      },
-    },
-  });
-
-  if (!membership) {
+  // Check membership via DynamoDB
+  const access = await verifyTeamMembership(userId, teamId);
+  if (!access) {
     notFound();
   }
 
-  const team = membership.Team;
-  const workflowConfig = team.WorkflowConfig;
+  const entities = getEntities();
+  const workflowConfigResult = await entities.teamWorkflowConfig.get({ teamId }).go();
+  const workflowConfig = workflowConfigResult.data;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -48,7 +40,7 @@ export default async function MetricsPage({ params }: Props) {
         </p>
       </div>
 
-      <MetricsClient teamId={teamId} workflowConfig={workflowConfig} />
+      <MetricsClient teamId={teamId} workflowConfig={workflowConfig as any} />
     </div>
   );
 }

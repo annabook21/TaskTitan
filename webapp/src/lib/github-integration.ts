@@ -1,7 +1,19 @@
-import { prisma } from '@/lib/prisma';
+import { randomUUID } from 'crypto';
 import { logger } from '@/lib/logger';
 import { runJob } from '@/lib/jobs';
-import type { ComponentStatus, Component, Assignment, GitHubEvent } from '@prisma/client';
+import { getEntities } from '@/lib/dynamodb/service';
+
+// Type definitions (previously from @prisma/client)
+type ComponentStatus = 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
+type GitHubEvent = 'PR_OPENED' | 'PR_READY_FOR_REVIEW' | 'PR_APPROVED' | 'PR_MERGED' | 'PR_CLOSED';
+
+interface ComponentData {
+  id: string;
+  name: string;
+  status: string;
+  projectId: string;
+  assignments: { userId: string }[];
+}
 
 /**
  * Extract component IDs from PR title and body
@@ -33,18 +45,32 @@ export async function findComponentsForPR(
   projectId: string,
   componentIds: string[],
   prUrl: string,
-): Promise<(Component & { Assignment: Assignment[] })[]> {
-  return await prisma.component.findMany({
-    where: {
-      projectId,
-      OR: [{ id: { in: componentIds } }, { githubPrUrl: prUrl }],
-    },
-    include: {
-      Assignment: {
-        select: { userId: true, id: true, componentId: true, assignedAt: true },
-      },
-    },
-  });
+): Promise<ComponentData[]> {
+  const entities = getEntities();
+  
+  // Get all components for the project
+  const componentsResult = await entities.component.query.byProject({ projectId }).go();
+  
+  // Filter by componentIds or prUrl
+  const matchingComponents = componentsResult.data.filter(
+    (c) => componentIds.includes(c.id) || (c as any).githubPrUrl === prUrl
+  );
+  
+  // Fetch assignments for each component
+  const componentsWithAssignments = await Promise.all(
+    matchingComponents.map(async (c) => {
+      const assignmentsResult = await entities.assignment.query.primary({ componentId: c.id }).go();
+      return {
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        projectId: c.projectId,
+        assignments: assignmentsResult.data.map((a) => ({ userId: a.userId })),
+      };
+    })
+  );
+  
+  return componentsWithAssignments;
 }
 
 interface TransitionConfig {
@@ -144,6 +170,7 @@ function mapPRStateToStatus(pr: PullRequestPayload['pull_request']): 'open' | 'd
 export async function handlePullRequestEvent(payload: PullRequestPayload, project: ProjectWithSettings): Promise<void> {
   const pr = payload.pull_request;
   const event = mapPRActionToEvent(payload.action, pr);
+  const entities = getEntities();
 
   logger.info('Processing pull_request event', {
     extra: {
@@ -173,16 +200,13 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
   const prStatus = mapPRStateToStatus(pr);
   await Promise.all(
     components.map((component) =>
-      prisma.component.update({
-        where: { id: component.id },
-        data: {
-          githubPrUrl: pr.html_url,
-          githubPrNumber: pr.number,
-          githubPrTitle: pr.title,
-          githubPrStatus: prStatus,
-          githubPrUpdatedAt: new Date(),
-        },
-      }),
+      entities.component.update({ id: component.id }).set({
+        githubPrUrl: pr.html_url,
+        githubPrNumber: pr.number,
+        githubPrTitle: pr.title,
+        githubPrStatus: prStatus,
+        githubPrUpdatedAt: new Date().toISOString(),
+      }).go()
     ),
   );
 
@@ -275,7 +299,7 @@ export async function handlePullRequestReviewEvent(
  * Update component status and create activity/notifications
  */
 async function updateComponentStatus(
-  component: Component & { Assignment: Assignment[] },
+  component: ComponentData,
   targetStatus: ComponentStatus,
   projectOwnerId: string,
   metadata: {
@@ -289,6 +313,7 @@ async function updateComponentStatus(
     approvedBy?: string;
   },
 ): Promise<void> {
+  const entities = getEntities();
   const oldStatus = component.status;
 
   // Skip if already at target status
@@ -303,12 +328,9 @@ async function updateComponentStatus(
   }
 
   // Update component status
-  await prisma.component.update({
-    where: { id: component.id },
-    data: {
-      status: targetStatus,
-    },
-  });
+  await entities.component.update({ id: component.id }).set({
+    status: targetStatus,
+  }).go();
 
   // Map event to activity type
   const activityType =
@@ -319,37 +341,30 @@ async function updateComponentStatus(
         : 'GITHUB_PR_OPENED';
 
   // Create activity log
-  await prisma.activity.create({
-    data: {
-      type: activityType,
-      projectId: component.projectId,
-      userId: projectOwnerId,
-      metadata: {
-        componentName: component.name,
-        componentId: component.id,
-        oldStatus,
-        newStatus: targetStatus,
-        ...metadata,
-      },
+  await entities.activity.create({
+    id: randomUUID(),
+    type: activityType,
+    projectId: component.projectId,
+    userId: projectOwnerId,
+    metadata: {
+      componentName: component.name,
+      componentId: component.id,
+      oldStatus,
+      newStatus: targetStatus,
+      ...metadata,
     },
-  });
+  }).go();
 
   // Send notifications to assigned users
-  const assignedUserIds = component.Assignment.map((a) => a.userId);
+  const assignedUserIds = component.assignments.map((a) => a.userId);
   if (assignedUserIds.length > 0) {
     await Promise.all(
       assignedUserIds.map((userId) =>
         runJob({
           type: 'notify',
-          notificationType: 'component_status_changed',
           userId,
-          componentId: component.id,
-          metadata: {
-            triggeredBy: 'github',
-            event: metadata.event,
-            prUrl: metadata.prUrl,
-            prTitle: metadata.prTitle,
-          },
+          message: `Component "${component.name}" status changed to ${targetStatus} via GitHub (${metadata.event})`,
+          channel: 'in-app',
         }),
       ),
     );

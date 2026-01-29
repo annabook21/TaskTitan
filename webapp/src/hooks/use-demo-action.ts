@@ -449,50 +449,7 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
         config: demoStore.updateWorkflowConfig(input.teamId as string, input),
       };
 
-    // Sprint planning actions (demo heuristics)
-    case 'aiPlanSprint': {
-      const store = demoStore.getStore();
-      const sprint = store.sprints.find((s) => s.id === input.sprintId);
-      if (!sprint) {
-        return {
-          selectedComponentIds: [],
-          totalHours: 0,
-          reasoning: 'Sprint not found in demo data.',
-          warnings: ['Sprint not found.'],
-        };
-      }
-
-      const capacityHours = (input.capacityHours as number) || 40;
-      const backlogComponents = store.components
-        .filter((c) => c.sprintId === null && c.status !== 'COMPLETED')
-        .sort((a, b) => b.priority - a.priority);
-
-      let totalHours = 0;
-      const selectedComponentIds: string[] = [];
-      const warnings: string[] = [];
-
-      for (const component of backlogComponents) {
-        const estimate = component.estimatedHours || 4;
-        if (totalHours + estimate <= capacityHours) {
-          selectedComponentIds.push(component.id);
-          totalHours += estimate;
-        }
-      }
-
-      if (selectedComponentIds.length === 0) {
-        warnings.push('No backlog components fit within the selected capacity.');
-      }
-
-      return {
-        selectedComponentIds,
-        totalHours,
-        reasoning:
-          selectedComponentIds.length > 0
-            ? 'Selected highest-priority backlog components that fit the capacity.'
-            : 'No suitable components found based on capacity.',
-        warnings,
-      };
-    }
+    // Sprint plan application (updates demo store)
     case 'applySprintPlan': {
       const componentIds = (input.componentIds as string[]) || [];
       const sprintId = input.sprintId as string;
@@ -500,27 +457,6 @@ export function executeDemoAction(action: string, input: Record<string, unknown>
         demoStore.assignComponentToSprint(componentId, sprintId);
       });
       return { success: true, assignedCount: componentIds.length };
-    }
-    case 'aiSuggestSprint': {
-      const store = demoStore.getStore();
-      const teamId = input.teamId as string;
-      const backlogComponents = store.components
-        .filter((c) => c.sprintId === null && c.status !== 'COMPLETED')
-        .sort((a, b) => b.priority - a.priority);
-      const sprintNumber = store.sprints.filter((s) => s.teamId === teamId).length + 1;
-      const totalHours = backlogComponents.reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
-      return {
-        name: `Sprint ${sprintNumber}`,
-        goal:
-          backlogComponents.length > 0
-            ? `Focus on ${backlogComponents
-                .slice(0, 3)
-                .map((c) => c.name)
-                .join(', ')}`
-            : 'No backlog items available yet.',
-        recommendedCapacity: Math.max(40, Math.round(totalHours * 0.8)),
-        reasoning: 'Based on backlog size and estimated hours in demo data.',
-      };
     }
 
     // Wireframe preview actions

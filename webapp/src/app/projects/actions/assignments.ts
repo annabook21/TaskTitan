@@ -1,15 +1,13 @@
 'use server';
 
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 
-// DynamoDB migration imports
+// DynamoDB imports
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities, getService } from '@/lib/dynamodb/service';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 import { verifyComponentAccess, verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 /**
@@ -21,7 +19,7 @@ export const assignComponent = authActionClient
       // Use min(1) instead of cuid() to allow demo IDs like 'demo-component-001'
       componentId: z.string().min(1),
       assigneeId: z.string().min(1),
-    }),
+    })
   )
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, assigneeId } = parsedInput;
@@ -32,62 +30,20 @@ export const assignComponent = authActionClient
       return { _demo: true, _action: 'assignComponent', _input: { componentId, userId: assigneeId } };
     }
 
-    const phase = getMigrationPhase('assignment');
+    // Verify access via DynamoDB
+    const access = await verifyComponentAccess(userId, componentId);
+    if (!access) {
+      throw new MyCustomError('Component not found or access denied');
+    }
+    const projectId = access.component.projectId;
+    const teamId = access.project.teamId;
+    const componentName = access.component.name;
+    const projectName = access.project.name;
 
-    // Verify access + derive project/team context
-    let projectId: string;
-    let teamId: string;
-    let componentName: string;
-    let projectName: string | undefined;
-
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifyComponentAccess(userId, componentId);
-      if (!access) {
-        throw new MyCustomError('Component not found or access denied');
-      }
-      projectId = access.component.projectId;
-      teamId = access.project.teamId;
-      componentName = access.component.name;
-      projectName = access.project.name;
-
-      const assigneeAccess = await verifyTeamMembership(assigneeId, teamId);
-      if (!assigneeAccess) {
-        throw new MyCustomError('Assignee is not a member of this team');
-      }
-    } else {
-      const component = await prisma.component.findFirst({
-        where: {
-          id: componentId,
-          Project: {
-            Team: {
-              Membership: {
-                some: { userId },
-              },
-            },
-          },
-        },
-        include: { Project: true },
-      });
-
-      if (!component) {
-        throw new MyCustomError('Component not found or access denied');
-      }
-
-      projectId = component.projectId;
-      teamId = component.Project.teamId;
-      componentName = component.name;
-      projectName = component.Project.name;
-
-      const assigneeMembership = await prisma.membership.findFirst({
-        where: {
-          userId: assigneeId,
-          teamId,
-        },
-      });
-
-      if (!assigneeMembership) {
-        throw new MyCustomError('Assignee is not a member of this team');
-      }
+    // Verify assignee is a team member
+    const assigneeAccess = await verifyTeamMembership(assigneeId, teamId);
+    if (!assigneeAccess) {
+      throw new MyCustomError('Assignee is not a member of this team');
     }
 
     const assignmentId = randomUUID();
@@ -97,49 +53,12 @@ export const assignComponent = authActionClient
     const result = await dualWrite(
       'assignment',
       'create',
-      async () => {
-        const assignment = await prisma.assignment.create({
-          data: {
-            id: assignmentId,
-            componentId,
-            userId: assigneeId,
-          },
-        });
-
-        await prisma.activity.create({
-          data: {
-            id: activityId,
-            type: 'MEMBER_ASSIGNED',
-            projectId,
-            userId,
-            metadata: {
-              componentName,
-              assigneeId,
-            },
-          },
-        });
-
-        if (assigneeId !== userId) {
-          await prisma.notification.create({
-            data: {
-              id: notificationId,
-              userId: assigneeId,
-              type: 'TASK_ASSIGNED',
-              title: `You were assigned: ${componentName}`,
-              message: `You have been assigned to work on "${componentName}" in ${projectName ?? 'this project'}`,
-              componentId,
-              projectId,
-            },
-          });
-        }
-
-        return assignment;
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         // DynamoDB: transactionally create Assignment + Activity (+ Notification when needed)
         const service = getService();
 
-        // TypeScript-friendly: build writes in callback directly
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await service.transaction
           .write(({ assignment, activity, notification }) => {
             const ops: any[] = [
@@ -196,7 +115,7 @@ export const unassignComponent = authActionClient
       // Use min(1) instead of cuid() to allow demo IDs like 'demo-component-001'
       componentId: z.string().min(1),
       assigneeId: z.string().min(1),
-    }),
+    })
   )
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, assigneeId } = parsedInput;
@@ -207,67 +126,20 @@ export const unassignComponent = authActionClient
       return { _demo: true, _action: 'unassignComponent', _input: { componentId, userId: assigneeId } };
     }
 
-    const phase = getMigrationPhase('assignment');
-
-    let projectId: string;
-    let componentName: string;
-
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifyComponentAccess(userId, componentId);
-      if (!access) {
-        throw new MyCustomError('Component not found or access denied');
-      }
-      projectId = access.component.projectId;
-      componentName = access.component.name;
-    } else {
-      const component = await prisma.component.findFirst({
-        where: {
-          id: componentId,
-          Project: {
-            Team: {
-              Membership: {
-                some: { userId },
-              },
-            },
-          },
-        },
-      });
-
-      if (!component) {
-        throw new MyCustomError('Component not found or access denied');
-      }
-
-      projectId = component.projectId;
-      componentName = component.name;
+    // Verify access via DynamoDB
+    const access = await verifyComponentAccess(userId, componentId);
+    if (!access) {
+      throw new MyCustomError('Component not found or access denied');
     }
+    const projectId = access.component.projectId;
+    const componentName = access.component.name;
 
     const activityId = randomUUID();
 
     await dualWrite(
       'assignment',
       'delete',
-      async () => {
-        await prisma.assignment.delete({
-          where: {
-            componentId_userId: { componentId, userId: assigneeId },
-          },
-        });
-
-        await prisma.activity.create({
-          data: {
-            id: activityId,
-            type: 'MEMBER_UNASSIGNED',
-            projectId,
-            userId,
-            metadata: {
-              componentName,
-              assigneeId,
-            },
-          },
-        });
-
-        return { success: true };
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const service = getService();
 

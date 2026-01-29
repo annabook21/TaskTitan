@@ -1,14 +1,13 @@
 'use server';
 
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { refineComponentWithChat, isAIConfigured } from '@/lib/ai';
 import { randomUUID } from 'crypto';
 
-// DynamoDB migration imports
-import { dualRead, dualWrite } from '@/lib/dynamodb/dual-write';
+// DynamoDB imports
+import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities } from '@/lib/dynamodb/service';
 import { verifyComponentAccess, verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
 
@@ -87,70 +86,29 @@ export const refineExistingComponent = authActionClient
     } else {
       const entities = getEntities();
 
-      // Production mode - get component + project context (dualRead)
-      const component = await dualRead(
-        'component',
-        async () => {
-          return prisma.component.findFirst({
-            where: {
-              id: componentId,
-              Project: { Team: { Membership: { some: { userId } } } },
-            },
-            include: {
-              Project: {
-                include: {
-                  Component: {
-                    select: { name: true, type: true },
-                  },
-                },
-              },
-            },
-          });
-        },
-        async () => {
-          // DynamoDB: verify access + fetch project + list components by project
-          const access = await verifyComponentAccess(userId, componentId);
-          if (!access) return null;
-
-          const projectComponents = await entities.component.query.byProject({ projectId: access.component.projectId }).go();
-
-          return {
-            id: access.component.id,
-            name: access.component.name,
-            description: (access.component as any).description ?? '',
-            type: access.component.type as any,
-            estimatedHours: (access.component as any).estimatedHours ?? null,
-            priority: (access.component as any).priority ?? 0,
-            Project: {
-              id: access.project.id,
-              name: access.project.name,
-              description: (access.project as any).description ?? null,
-              Component: projectComponents.data.map((c) => ({ name: c.name, type: (c as any).type })),
-            },
-          } as unknown;
-        },
-        { context: { action: 'refineExistingComponent', componentId, projectId } }
-      );
-
-      if (!component) {
+      // Production mode - get component + project context from DynamoDB
+      const access = await verifyComponentAccess(userId, componentId);
+      if (!access) {
         throw new MyCustomError('Component not found or access denied');
       }
 
+      const projectComponents = await entities.component.query.byProject({ projectId: access.component.projectId }).go();
+
       currentComponent = {
-        name: component.name,
-        description: component.description || '',
-        type: component.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG',
-        estimatedHours: component.estimatedHours || 8,
-        priority: Math.floor(component.priority / 10), // Convert 0-100 to 1-10 scale
+        name: access.component.name,
+        description: (access.component as any).description || '',
+        type: access.component.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG',
+        estimatedHours: (access.component as any).estimatedHours || 8,
+        priority: Math.floor(((access.component as any).priority || 0) / 10), // Convert 0-100 to 1-10 scale
         suggestedDependencies: [],
         acceptanceCriteria: [],
-        reasoning: component.description || '',
+        reasoning: (access.component as any).description || '',
       };
-      projectName = component.Project.name;
-      projectDescription = component.Project.description || '';
-      existingComponents = component.Project.Component.map((c) => ({
+      projectName = access.project.name;
+      projectDescription = (access.project as any).description || '';
+      existingComponents = projectComponents.data.map((c) => ({
         name: c.name,
-        type: c.type,
+        type: (c as any).type,
       }));
     }
 
@@ -187,22 +145,11 @@ export const refineExistingComponent = authActionClient
     const entities = getEntities();
     const activityId = randomUUID();
 
-    // Production mode - apply changes to database (dual-write)
+    // Production mode - apply changes to database
     const updatedResult = await dualWrite(
       'component',
       'update',
-      async () => {
-        return prisma.component.update({
-          where: { id: componentId },
-          data: {
-            name: result.component.name,
-            description: result.component.description,
-            type: result.component.type,
-            estimatedHours: result.component.estimatedHours,
-            priority: Math.round(result.component.priority * 10), // Convert 1-10 back to 0-100
-          },
-        });
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const updated = await entities.component
           .update({ id: componentId })
@@ -223,22 +170,7 @@ export const refineExistingComponent = authActionClient
     await dualWrite(
       'activity',
       'create',
-      async () => {
-        return prisma.activity.create({
-          data: {
-            id: activityId,
-            type: 'COMPONENT_UPDATED',
-            projectId,
-            userId,
-            metadata: {
-              componentName: (updatedResult.data as any).name,
-              componentId,
-              aiRefined: true,
-              changes: result.explanation,
-            },
-          },
-        });
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const created = await entities.activity
           .create({

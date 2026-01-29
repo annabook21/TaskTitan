@@ -2,14 +2,13 @@
 
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities, getService } from '@/lib/dynamodb/service';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 import { batchDelete } from '@/lib/dynamodb/batch-ops';
 import { executeSaga } from '@/lib/dynamodb/transactions';
+import { verifyTeamMembership, verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
 
 // Schemas
 const createProjectSchema = z.object({
@@ -45,11 +44,8 @@ export const createProject = authActionClient.schema(createProjectSchema).action
   }
 
   // Verify user is a member of the team
-  const membership = await prisma.membership.findUnique({
-    where: { userId_teamId: { userId, teamId } },
-  });
-
-  if (!membership) {
+  const teamAccess = await verifyTeamMembership(userId, teamId);
+  if (!teamAccess) {
     throw new MyCustomError('You are not a member of this team');
   }
 
@@ -57,35 +53,11 @@ export const createProject = authActionClient.schema(createProjectSchema).action
   const activityId = randomUUID();
   const token = idempotencyKey ?? `createProject#${teamId}#${userId}#${projectId}#${activityId}`;
 
-  // Use dual-write pattern
+  // Use dual-write pattern (Prisma operation is now a no-op)
   const result = await dualWrite(
     'project',
     'create',
-    async () => {
-      // Prisma: Create project and activity in sequence
-      const project = await prisma.project.create({
-        data: {
-          id: projectId,
-          name,
-          description,
-          teamId,
-          ownerId: userId,
-        },
-      });
-
-      // Log activity
-      await prisma.activity.create({
-        data: {
-          id: activityId,
-          type: 'PROJECT_CREATED',
-          projectId: project.id,
-          userId,
-          metadata: { projectName: name },
-        },
-      });
-
-      return project;
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       // ElectroDB: Use Service transaction for atomic Project + Activity creation
       const service = getService();
@@ -137,15 +109,9 @@ export const updateProject = authActionClient.schema(updateProjectSchema).action
     return { _demo: true, _action: 'updateProject', _input: { projectId: id, name, description } };
   }
 
-  // Verify user has access to the project
-  const project = await prisma.project.findFirst({
-    where: {
-      id,
-      Team: { Membership: { some: { userId } } },
-    },
-  });
-
-  if (!project) {
+  // Verify user has access to the project via DynamoDB
+  const access = await verifyProjectAccess(userId, id);
+  if (!access) {
     throw new MyCustomError('Project not found or access denied');
   }
 
@@ -156,16 +122,11 @@ export const updateProject = authActionClient.schema(updateProjectSchema).action
   if (name) updateData.name = name;
   if (description !== undefined) updateData.description = description;
 
-  // Use dual-write for update
+  // Use dual-write for update (Prisma operation is now a no-op)
   const result = await dualWrite(
     'project',
     'update',
-    async () => {
-      return prisma.project.update({
-        where: { id },
-        data: updateData,
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       // ElectroDB update
       const updated = await entities.project.update({ id }).set(updateData).go();
@@ -193,36 +154,24 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
     return { _demo: true, _action: 'deleteProject', _input: { projectId: id } };
   }
 
-  // Verify user is owner (using String comparison to avoid type mismatch)
-  const project = await prisma.project.findFirst({
-    where: {
-      id,
-      Team: { Membership: { some: { userId } } },
-    },
-    select: { id: true, ownerId: true, name: true },
-  });
-
-  if (!project) {
+  // Verify user has access and is owner via DynamoDB
+  const access = await verifyProjectAccess(userId, id);
+  if (!access) {
     throw new MyCustomError('Project not found');
   }
 
-  if (String(project.ownerId) !== String(userId)) {
+  if (String(access.project.ownerId) !== String(userId)) {
     throw new MyCustomError('Only the project owner can delete it');
   }
 
   const entities = getEntities();
 
   try {
-    // Use dual-write for delete
+    // Use dual-write for delete (Prisma operation is now a no-op)
     await dualWrite(
       'project',
       'delete',
-      async () => {
-        // Prisma schema has onDelete: Cascade configured for all related models,
-        // so we just need to delete the project and related records are cleaned up automatically
-        await prisma.project.delete({ where: { id } });
-        return { success: true };
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         // DynamoDB: Manual cascade delete using saga pattern for safety
         // Order: children -> parent (activities, components, then project)

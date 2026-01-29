@@ -1,14 +1,11 @@
 services:
-  postgres:
-    image: "postgres:16"
+  dynamodb-local:
+    image: "amazon/dynamodb-local:latest"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
     ports:
-      - "5432:5432"
-    volumes:
-      - "postgres_data:/var/lib/postgresql/data"
+      - "8000:8000"
     restart: always
-    environment:
-      POSTGRES_PASSWORD: password
-      POSTGRES_USER: root
+
 volumes:
   mysql_data:
   postgres_data:

@@ -3,13 +3,11 @@
 import { authActionClient } from '@/lib/safe-action';
 import { z } from 'zod';
 import { summarizeComponentContext } from '@/lib/ai';
-import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 
-// DynamoDB migration imports
+// DynamoDB imports
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities } from '@/lib/dynamodb/service';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 import { verifyComponentAccess } from '@/lib/dynamodb/auth-helpers';
 
 /**
@@ -45,35 +43,12 @@ export const updateComponentContextAction = authActionClient
       };
     }
 
-    const phase = getMigrationPhase('component');
-    let projectId: string;
-
-    // Verify user has access to this component
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifyComponentAccess(userId, componentId);
-      if (!access) {
-        throw new Error('Component not found or access denied');
-      }
-      projectId = access.component.projectId;
-    } else {
-      const component = await prisma.component.findFirst({
-        where: {
-          id: componentId,
-          Project: {
-            Team: {
-              Membership: {
-                some: { userId },
-              },
-            },
-          },
-        },
-      });
-
-      if (!component) {
-        throw new Error('Component not found or access denied');
-      }
-      projectId = component.projectId;
+    // Verify user has access to this component via DynamoDB
+    const access = await verifyComponentAccess(userId, componentId);
+    if (!access) {
+      throw new Error('Component not found or access denied');
     }
+    const projectId = access.component.projectId;
 
     const entities = getEntities();
 
@@ -81,19 +56,7 @@ export const updateComponentContextAction = authActionClient
     const result = await dualWrite(
       'component',
       'update',
-      async () => {
-        return prisma.component.update({
-          where: { id: componentId },
-          data: {
-            contextDecision,
-            contextRationale,
-            contextAlternatives: contextAlternatives || null,
-            contextLinks: contextLinks || [],
-            contextUpdatedAt: new Date(),
-            contextUpdatedBy: userId,
-          },
-        });
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const nowIso = new Date().toISOString();
         const updated = await entities.component
@@ -135,61 +98,22 @@ export const generateContextSummaryAction = authActionClient
       return { _demo: true, _action: 'generateContextSummary', _input: { componentId } };
     }
 
-    const phase = getMigrationPhase('component');
     const entities = getEntities();
 
-    // Fetch component with access check
-    let componentData: {
-      id: string;
-      name: string;
-      type: string;
-      projectId: string;
-      contextDecision: string | null;
-      contextRationale: string | null;
-      contextAlternatives: string | null;
-    };
-
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifyComponentAccess(userId, componentId);
-      if (!access) {
-        throw new Error('Component not found or access denied');
-      }
-      componentData = {
-        id: access.component.id,
-        name: access.component.name,
-        type: access.component.type,
-        projectId: access.component.projectId,
-        contextDecision: access.component.contextDecision ?? null,
-        contextRationale: access.component.contextRationale ?? null,
-        contextAlternatives: access.component.contextAlternatives ?? null,
-      };
-    } else {
-      const component = await prisma.component.findFirst({
-        where: {
-          id: componentId,
-          Project: {
-            Team: {
-              Membership: {
-                some: { userId },
-              },
-            },
-          },
-        },
-      });
-
-      if (!component) {
-        throw new Error('Component not found or access denied');
-      }
-      componentData = {
-        id: component.id,
-        name: component.name,
-        type: component.type,
-        projectId: component.projectId,
-        contextDecision: component.contextDecision,
-        contextRationale: component.contextRationale,
-        contextAlternatives: component.contextAlternatives,
-      };
+    // Fetch component with access check via DynamoDB
+    const access = await verifyComponentAccess(userId, componentId);
+    if (!access) {
+      throw new Error('Component not found or access denied');
     }
+    const componentData = {
+      id: access.component.id,
+      name: access.component.name,
+      type: access.component.type,
+      projectId: access.component.projectId,
+      contextDecision: access.component.contextDecision ?? null,
+      contextRationale: access.component.contextRationale ?? null,
+      contextAlternatives: access.component.contextAlternatives ?? null,
+    };
 
     if (!componentData.contextDecision || !componentData.contextRationale) {
       throw new Error('Component must have decision and rationale before generating summary');
@@ -208,14 +132,7 @@ export const generateContextSummaryAction = authActionClient
     const result = await dualWrite(
       'component',
       'update',
-      async () => {
-        return prisma.component.update({
-          where: { id: componentId },
-          data: {
-            contextAiSummary: summary,
-          },
-        });
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const updated = await entities.component
           .update({ id: componentId })
@@ -253,35 +170,12 @@ export const clearComponentContextAction = authActionClient
       return { _demo: true, _action: 'clearComponentContext', _input: { componentId } };
     }
 
-    const phase = getMigrationPhase('component');
-    let projectId: string;
-
-    // Verify user has access
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifyComponentAccess(userId, componentId);
-      if (!access) {
-        throw new Error('Component not found or access denied');
-      }
-      projectId = access.component.projectId;
-    } else {
-      const component = await prisma.component.findFirst({
-        where: {
-          id: componentId,
-          Project: {
-            Team: {
-              Membership: {
-                some: { userId },
-              },
-            },
-          },
-        },
-      });
-
-      if (!component) {
-        throw new Error('Component not found or access denied');
-      }
-      projectId = component.projectId;
+    // Verify user has access via DynamoDB
+    const access = await verifyComponentAccess(userId, componentId);
+    if (!access) {
+      throw new Error('Component not found or access denied');
     }
+    const projectId = access.component.projectId;
 
     const entities = getEntities();
 
@@ -289,20 +183,7 @@ export const clearComponentContextAction = authActionClient
     const result = await dualWrite(
       'component',
       'update',
-      async () => {
-        return prisma.component.update({
-          where: { id: componentId },
-          data: {
-            contextDecision: null,
-            contextRationale: null,
-            contextAlternatives: null,
-            contextLinks: [],
-            contextAiSummary: null,
-            contextUpdatedAt: null,
-            contextUpdatedBy: null,
-          },
-        });
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         // DynamoDB: Remove context fields (set to undefined removes the attribute)
         const updated = await entities.component

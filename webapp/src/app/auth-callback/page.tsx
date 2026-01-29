@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession, UserNotCreatedError } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import { dualWrite } from '@/lib/dynamodb/dual-write';
+import { getEntities } from '@/lib/dynamodb/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,12 +16,28 @@ export default async function AuthCallbackPage() {
     if (e instanceof UserNotCreatedError) {
       const { userId, email } = e;
       console.log('Creating new user:', userId);
-      await prisma.user.create({
-        data: {
-          id: userId,
-          email: email,
+
+      const entities = getEntities();
+
+      // Create user in DynamoDB
+      await dualWrite(
+        'user',
+        'create',
+        async () => null, // Prisma removed - DynamoDB only
+        async () => {
+          const now = new Date().toISOString();
+          const result = await entities.user
+            .create({
+              id: userId,
+              email: email,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .go();
+          return result.data;
         },
-      });
+        { context: { action: 'auth-callback-createUser', userId, email } }
+      );
     } else {
       throw e;
     }

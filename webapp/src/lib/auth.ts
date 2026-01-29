@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { fetchAuthSession } from 'aws-amplify/auth/server';
 import { runWithAmplifyServerContext } from '@/lib/amplifyServerUtils';
-import { prisma } from '@/lib/prisma';
+import { getEntities } from '@/lib/dynamodb/service';
 import { DEMO_COOKIE_NAME, DEMO_USER } from '@/lib/demo/constants';
 
 export class UserNotCreatedError {
@@ -22,18 +22,39 @@ const LOCAL_DEV_USER = {
 };
 
 async function ensureLocalDevUser() {
+  const entities = getEntities();
+  
   // Create or get the local dev user
-  let user = await prisma.user.findUnique({
-    where: { id: LOCAL_DEV_USER.id },
-  });
-
-  if (!user) {
-    user = await prisma.user.create({
-      data: LOCAL_DEV_USER,
-    });
+  const userResult = await entities.user.get({ id: LOCAL_DEV_USER.id }).go();
+  
+  if (!userResult.data) {
+    const now = new Date().toISOString();
+    await entities.user.create({
+      id: LOCAL_DEV_USER.id,
+      email: LOCAL_DEV_USER.email,
+      name: LOCAL_DEV_USER.name,
+      createdAt: now,
+      updatedAt: now,
+    }).go();
+    
+    return {
+      id: LOCAL_DEV_USER.id,
+      email: LOCAL_DEV_USER.email,
+      name: LOCAL_DEV_USER.name,
+      avatarUrl: null,
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
+    };
   }
 
-  return user;
+  return {
+    id: userResult.data.id,
+    email: userResult.data.email,
+    name: userResult.data.name ?? null,
+    avatarUrl: userResult.data.avatarUrl ?? null,
+    createdAt: new Date(userResult.data.createdAt ?? Date.now()),
+    updatedAt: new Date(userResult.data.updatedAt ?? Date.now()),
+  };
 }
 
 export async function getSession() {
@@ -83,14 +104,22 @@ export async function getSession() {
   if (typeof email != 'string') {
     throw new Error(`invalid email ${userId}.`);
   }
-  const user = await prisma.user.findUnique({
-    where: {
-      id: userId,
-    },
-  });
-  if (user == null) {
+  
+  const entities = getEntities();
+  const userResult = await entities.user.get({ id: userId }).go();
+  
+  if (userResult.data == null) {
     throw new UserNotCreatedError(userId, email);
   }
+
+  const user = {
+    id: userResult.data.id,
+    email: userResult.data.email,
+    name: userResult.data.name ?? null,
+    avatarUrl: userResult.data.avatarUrl ?? null,
+    createdAt: new Date(userResult.data.createdAt ?? Date.now()),
+    updatedAt: new Date(userResult.data.updatedAt ?? Date.now()),
+  };
 
   return {
     userId: user.id,

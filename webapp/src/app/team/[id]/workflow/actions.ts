@@ -3,12 +3,10 @@
 import { randomUUID } from 'crypto';
 import { authActionClient } from '@/lib/safe-action';
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { MyCustomError } from '@/lib/safe-action';
 import { getEntities } from '@/lib/dynamodb/service';
-import { dualWrite, dualRead } from '@/lib/dynamodb/dual-write';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
+import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 // Zod schema for workflow configuration
 const workflowConfigSchema = z.object({
@@ -38,63 +36,34 @@ export const getWorkflowConfig = authActionClient
     const { userId } = ctx;
 
     // Check if user is a member of the team
-    const membership = await prisma.membership.findFirst({
-      where: { teamId, userId },
-    });
-
-    if (!membership) {
+    const access = await verifyTeamMembership(userId, teamId);
+    if (!access) {
       throw new MyCustomError('You are not a member of this team');
     }
 
-    const phase = getMigrationPhase('teamWorkflowConfig');
     const entities = getEntities();
+    const result = await entities.teamWorkflowConfig.get({ teamId }).go();
 
-    // Get or create workflow config using dual-read pattern
-    const config = await dualRead(
-      'teamWorkflowConfig',
-      async () => {
-        // Prisma read with create-if-not-exists
-        let prismaConfig = await prisma.teamWorkflowConfig.findUnique({
-          where: { teamId },
-        });
+    if (!result.data) {
+      // Create default config with sprints enabled
+      const newConfig = await entities.teamWorkflowConfig
+        .upsert({
+          id: randomUUID(),
+          teamId,
+          cycleEnabled: true,
+          cycleDurationWeeks: 2,
+          cycleStartDayOfWeek: 1,
+          workflowTemplate: 'SCRUM',
+          cycleName: 'Sprint',
+          backlogName: 'Backlog',
+          enforceEstimates: false,
+          autoArchiveCompleted: false,
+        })
+        .go();
+      return { config: newConfig.data };
+    }
 
-        if (!prismaConfig) {
-          prismaConfig = await prisma.teamWorkflowConfig.create({
-            data: {
-              teamId,
-              cycleEnabled: false,
-              enforceEstimates: false,
-              autoArchiveCompleted: false,
-            },
-          });
-        }
-
-        return prismaConfig;
-      },
-      async () => {
-        // ElectroDB read with upsert-if-not-exists
-        const result = await entities.teamWorkflowConfig.get({ teamId }).go();
-
-        if (!result.data) {
-          // Create default config
-          const newConfig = await entities.teamWorkflowConfig
-            .upsert({
-              id: randomUUID(),
-              teamId,
-              cycleEnabled: false,
-              enforceEstimates: false,
-              autoArchiveCompleted: false,
-            })
-            .go();
-          return newConfig.data;
-        }
-
-        return result.data;
-      },
-      { context: { action: 'getWorkflowConfig', teamId } }
-    );
-
-    return { config };
+    return { config: result.data };
   });
 
 /**
@@ -116,74 +85,42 @@ export const updateWorkflowConfig = authActionClient
     }
 
     // Check if user is owner or admin
-    const membership = await prisma.membership.findFirst({
-      where: {
-        teamId,
-        userId,
-        role: { in: ['OWNER', 'ADMIN'] },
-      },
-    });
-
-    if (!membership) {
+    const access = await verifyTeamMembership(userId, teamId);
+    if (!access || (access.membership.role !== 'OWNER' && access.membership.role !== 'ADMIN')) {
       throw new MyCustomError('You must be a team owner or admin to update workflow settings');
     }
 
     const entities = getEntities();
 
-    // Use dual-write with upsert pattern
-    const result = await dualWrite(
-      'teamWorkflowConfig',
-      'upsert',
-      async () => {
-        // Prisma upsert
-        return prisma.teamWorkflowConfig.upsert({
-          where: { teamId },
-          update: configData,
-          create: {
-            teamId,
-            ...configData,
-          },
-        });
-      },
-      async () => {
-        // ElectroDB upsert - uses create if not exists, update if exists
-        // First try to get existing config to preserve the id
-        const existing = await entities.teamWorkflowConfig.get({ teamId }).go();
+    // Get existing config to preserve the id
+    const existing = await entities.teamWorkflowConfig.get({ teamId }).go();
 
-        const upsertData = {
-          id: existing.data?.id || randomUUID(),
-          teamId,
-          cycleEnabled: configData.cycleEnabled,
-          enforceEstimates: configData.enforceEstimates,
-          autoArchiveCompleted: configData.autoArchiveCompleted,
-          // Convert nulls to undefined for ElectroDB
-          wipLimitPlanning: configData.wipLimitPlanning ?? undefined,
-          wipLimitInProgress: configData.wipLimitInProgress ?? undefined,
-          wipLimitBlocked: configData.wipLimitBlocked ?? undefined,
-          wipLimitReview: configData.wipLimitReview ?? undefined,
-          cycleDurationWeeks: configData.cycleDurationWeeks ?? undefined,
-          cycleStartDayOfWeek: configData.cycleStartDayOfWeek ?? undefined,
-          workflowTemplate: configData.workflowTemplate ?? undefined,
-          cycleName: configData.cycleName ?? undefined,
-          backlogName: configData.backlogName ?? undefined,
-        };
+    const upsertData = {
+      id: existing.data?.id || randomUUID(),
+      teamId,
+      cycleEnabled: configData.cycleEnabled,
+      enforceEstimates: configData.enforceEstimates,
+      autoArchiveCompleted: configData.autoArchiveCompleted,
+      // Convert nulls to undefined for ElectroDB
+      wipLimitPlanning: configData.wipLimitPlanning ?? undefined,
+      wipLimitInProgress: configData.wipLimitInProgress ?? undefined,
+      wipLimitBlocked: configData.wipLimitBlocked ?? undefined,
+      wipLimitReview: configData.wipLimitReview ?? undefined,
+      cycleDurationWeeks: configData.cycleDurationWeeks ?? undefined,
+      cycleStartDayOfWeek: configData.cycleStartDayOfWeek ?? undefined,
+      workflowTemplate: configData.workflowTemplate ?? undefined,
+      cycleName: configData.cycleName ?? undefined,
+      backlogName: configData.backlogName ?? undefined,
+    };
 
-        const result = await entities.teamWorkflowConfig.upsert(upsertData).go();
-        return result.data;
-      },
-      { context: { action: 'updateWorkflowConfig', teamId } }
-    );
+    const result = await entities.teamWorkflowConfig.upsert(upsertData).go();
 
     revalidatePath(`/team/${teamId}`);
     revalidatePath(`/team/${teamId}/workflow`);
 
     // Revalidate all project pages for this team
-    const projects = await prisma.project.findMany({
-      where: { teamId },
-      select: { id: true },
-    });
-
-    for (const project of projects) {
+    const projects = await entities.project.query.byTeam({ teamId }).go();
+    for (const project of projects.data) {
       revalidatePath(`/projects/${project.id}`);
     }
 
@@ -192,7 +129,6 @@ export const updateWorkflowConfig = authActionClient
 
 /**
  * Get the current cycle information for a team
- * This is a read-only calculation based on workflow config
  */
 export const getCurrentCycle = authActionClient
   .schema(z.object({ teamId: z.string().cuid() }))
@@ -201,30 +137,14 @@ export const getCurrentCycle = authActionClient
     const { userId } = ctx;
 
     // Check if user is a member of the team
-    const membership = await prisma.membership.findFirst({
-      where: { teamId, userId },
-    });
-
-    if (!membership) {
+    const access = await verifyTeamMembership(userId, teamId);
+    if (!access) {
       throw new MyCustomError('You are not a member of this team');
     }
 
     const entities = getEntities();
-
-    // Get workflow config using dual-read
-    const config = await dualRead(
-      'teamWorkflowConfig',
-      async () => {
-        return prisma.teamWorkflowConfig.findUnique({
-          where: { teamId },
-        });
-      },
-      async () => {
-        const result = await entities.teamWorkflowConfig.get({ teamId }).go();
-        return result.data;
-      },
-      { context: { action: 'getCurrentCycle', teamId } }
-    );
+    const result = await entities.teamWorkflowConfig.get({ teamId }).go();
+    const config = result.data;
 
     if (!config || !config.cycleEnabled || !config.cycleDurationWeeks || config.cycleStartDayOfWeek === null) {
       return { currentCycle: null };
@@ -234,26 +154,17 @@ export const getCurrentCycle = authActionClient
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Find the most recent cycle start date
-    const cycleStartDayOfWeek = config.cycleStartDayOfWeek;
-    const cycleDurationDays = config.cycleDurationWeeks * 7;
+    const cycleStartDayOfWeek = config.cycleStartDayOfWeek ?? 1; // Default to Monday
+    const cycleDurationDays = (config.cycleDurationWeeks ?? 2) * 7;
 
-    // Calculate the most recent cycle start date
     let cycleStartDate = new Date(today);
     const todayDayOfWeek = today.getDay();
-
-    // Go back to the most recent cycle start day
     const daysToSubtract = (todayDayOfWeek - cycleStartDayOfWeek + 7) % 7;
-
-    // Adjust to find the start of the current cycle period
     cycleStartDate.setDate(today.getDate() - daysToSubtract);
 
-    // Check if we need to go back further to align with cycle periods
-    // This ensures cycles are consistent (e.g., every 2 weeks starting from a reference date)
     const cycleEndDate = new Date(cycleStartDate);
     cycleEndDate.setDate(cycleStartDate.getDate() + cycleDurationDays);
 
-    // If today is past the cycle end date, move to the next cycle
     if (today >= cycleEndDate) {
       cycleStartDate = new Date(cycleEndDate);
       cycleEndDate.setDate(cycleEndDate.getDate() + cycleDurationDays);

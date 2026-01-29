@@ -1,4 +1,3 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -22,10 +21,14 @@ import InviteButton from './InviteButton';
 import SeedDemoButton from './SeedDemoButton';
 import DeleteTeamButton from './DeleteTeamButton';
 import DemoTeamDetailPage from './DemoTeamDetailPage';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 interface Props {
   params: Promise<{ id: string }>;
 }
+
+type TeamRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
 
 const roleIcons = {
   OWNER: Crown,
@@ -51,36 +54,63 @@ export default async function TeamDetailPage({ params }: Props) {
     return <DemoTeamDetailPage />;
   }
 
-  const team = await prisma.team.findFirst({
-    where: {
-      id,
-      Membership: { some: { userId } },
-    },
-    include: {
-      Membership: {
-        include: { User: true },
-        orderBy: { joinedAt: 'asc' },
-      },
-      Project: {
-        include: {
-          _count: { select: { Component: true } },
-        },
-        orderBy: { updatedAt: 'desc' },
-      },
-      WorkflowConfig: true,
-    },
-  });
+  const entities = getEntities();
 
+  // Verify user has access to this team
+  const access = await verifyTeamMembership(userId, id);
+  if (!access) {
+    notFound();
+  }
+
+  // Fetch team data
+  const teamResult = await entities.team.get({ id }).go();
+  const team = teamResult.data;
   if (!team) {
     notFound();
   }
 
+  // Fetch memberships, projects, and workflow config in parallel
+  const [membershipsResult, projectsResult, workflowConfigResult] = await Promise.all([
+    entities.membership.query.primary({ teamId: id }).go(),
+    entities.project.query.byTeam({ teamId: id }).go(),
+    entities.teamWorkflowConfig.get({ teamId: id }).go(),
+  ]);
+
+  // Sort memberships by joinedAt
+  const sortedMemberships = membershipsResult.data.sort(
+    (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+  );
+
+  // Fetch user details for each membership
+  const membershipsWithUsers = await Promise.all(
+    sortedMemberships.map(async (m) => {
+      const userResult = await entities.user.get({ id: m.userId }).go();
+      return {
+        ...m,
+        User: userResult.data || { id: m.userId, name: null, email: 'unknown@example.com' },
+      };
+    })
+  );
+
+  // Fetch component counts for each project
+  const projectsWithCounts = await Promise.all(
+    projectsResult.data
+      .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+      .map(async (p) => {
+        const componentsResult = await entities.component.query.byProject({ projectId: p.id }).go();
+        return {
+          ...p,
+          _count: { Component: componentsResult.data.length },
+        };
+      })
+  );
+
   // Get current user's role in this team
-  const currentUserMembership = team.Membership.find((m) => String(m.userId) === String(userId));
+  const currentUserMembership = membershipsWithUsers.find((m) => String(m.userId) === String(userId));
   const isOwnerOrAdmin = currentUserMembership?.role === 'OWNER' || currentUserMembership?.role === 'ADMIN';
 
   // Get workflow terminology
-  const workflowConfig = team.WorkflowConfig;
+  const workflowConfig = workflowConfigResult.data;
   const cycleEnabled = workflowConfig?.cycleEnabled ?? true;
   const cycleName = workflowConfig?.cycleName || 'Sprint';
   const cycleNamePlural = `${cycleName}s`;
@@ -112,11 +142,11 @@ export default async function TeamDetailPage({ params }: Props) {
                 <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <Users className="w-4 h-4" />
-                    {team.Membership.length} member{team.Membership.length !== 1 ? 's' : ''}
+                    {membershipsWithUsers.length} member{membershipsWithUsers.length !== 1 ? 's' : ''}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <FolderKanban className="w-4 h-4" />
-                    {team.Project.length} project{team.Project.length !== 1 ? 's' : ''}
+                    {projectsWithCounts.length} project{projectsWithCounts.length !== 1 ? 's' : ''}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Calendar className="w-4 h-4" />
@@ -168,7 +198,7 @@ export default async function TeamDetailPage({ params }: Props) {
                 Projects
               </h2>
 
-              {team.Project.length === 0 ? (
+              {projectsWithCounts.length === 0 ? (
                 <div className="component-card text-center py-12">
                   <FolderKanban className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-slate-300 mb-2">No projects yet</h3>
@@ -180,7 +210,7 @@ export default async function TeamDetailPage({ params }: Props) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {team.Project.map((project) => (
+                  {projectsWithCounts.map((project) => (
                     <Link key={project.id} href={`/projects/${project.id}`} className="component-card block group">
                       <div className="flex items-start justify-between">
                         <div>
@@ -214,9 +244,9 @@ export default async function TeamDetailPage({ params }: Props) {
 
               <div className="component-card">
                 <div className="space-y-4">
-                  {team.Membership.map((membership) => {
+                  {membershipsWithUsers.map((membership) => {
                     const member = membership.User;
-                    const role = membership.role;
+                    const role = (membership.role || 'MEMBER') as TeamRole;
                     const RoleIcon = roleIcons[role];
                     return (
                       <div key={member.id} className="flex items-center gap-3">

@@ -1,4 +1,3 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -6,6 +5,8 @@ import { notFound, redirect } from 'next/navigation';
 import { ArrowLeft, Zap } from 'lucide-react';
 import NewSprintForm from './NewSprintForm';
 import DemoNewSprintPage from './DemoNewSprintPage';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -21,44 +22,44 @@ export default async function NewSprintPage({ params }: Props) {
     return <DemoNewSprintPage />;
   }
 
-  const team = await prisma.team.findFirst({
-    where: {
-      id,
-      Membership: { some: { userId } },
-    },
-    include: {
-      Membership: {
-        where: { userId },
-        select: { role: true },
-      },
-      Sprint: {
-        where: { status: { in: ['PLANNING', 'ACTIVE'] } },
-        orderBy: { endDate: 'desc' },
-        take: 1,
-      },
-    },
-  });
+  const entities = getEntities();
 
-  if (!team) {
+  // Verify user has access to this team
+  const access = await verifyTeamMembership(userId, id);
+  if (!access) {
     notFound();
   }
 
-  const currentUserRole = team.Membership[0]?.role;
+  const currentUserRole = access.membership.role;
   if (currentUserRole !== 'OWNER' && currentUserRole !== 'ADMIN') {
     redirect(`/team/${id}/sprints`);
   }
 
+  // Get team details
+  const teamResult = await entities.team.get({ id }).go();
+  const team = teamResult.data;
+  if (!team) {
+    notFound();
+  }
+
+  // Get sprints to find the last one for date suggestions
+  const sprintsResult = await entities.sprint.query.byTeam({ teamId: id }).go();
+  const activeSprints = sprintsResult.data
+    .filter((s) => (s as any).status === 'PLANNING' || (s as any).status === 'ACTIVE')
+    .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime());
+
+  const lastSprint = activeSprints[0];
+
   // Suggest next sprint dates based on last sprint
-  const lastSprint = team.Sprint[0];
   const suggestedStartDate = lastSprint
-    ? new Date(lastSprint.endDate.getTime() + 24 * 60 * 60 * 1000) // Day after last sprint ends
+    ? new Date(new Date(lastSprint.endDate).getTime() + 24 * 60 * 60 * 1000) // Day after last sprint ends
     : new Date();
 
   // Default 2-week sprint
   const suggestedEndDate = new Date(suggestedStartDate.getTime() + 14 * 24 * 60 * 60 * 1000);
 
   // Generate suggested name
-  const sprintCount = await prisma.sprint.count({ where: { teamId: id } });
+  const sprintCount = sprintsResult.data.length;
   const suggestedName = `Sprint ${sprintCount + 1}`;
 
   return (

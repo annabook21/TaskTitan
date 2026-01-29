@@ -1,6 +1,6 @@
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
-import { prisma } from '@/lib/prisma';
+import { getEntities } from '@/lib/dynamodb/service';
 import { User, Mail, Calendar, FolderKanban, Users } from 'lucide-react';
 import Link from 'next/link';
 import DemoProfilePage from './DemoProfilePage';
@@ -14,20 +14,20 @@ export default async function ProfilePage() {
     return <DemoProfilePage />;
   }
 
-  // Get user stats
-  const memberships = await prisma.membership.findMany({
-    where: { userId: user.id },
-    include: {
-      Team: {
-        include: {
-          Project: true,
-        },
-      },
-    },
-  });
+  const entities = getEntities();
 
-  const teamsCount = memberships.length;
-  const projectsCount = memberships.reduce((acc, m) => acc + m.Team.Project.length, 0);
+  // Get user stats from DynamoDB
+  const membershipsResult = await entities.membership.query.byUser({ userId: user.id }).go();
+  const teamIds = membershipsResult.data.map((m) => m.teamId);
+
+  // Count projects across all teams
+  let projectsCount = 0;
+  for (const teamId of teamIds) {
+    const projectsResult = await entities.project.query.byTeam({ teamId }).go();
+    projectsCount += projectsResult.data.length;
+  }
+
+  const teamsCount = teamIds.length;
 
   return (
     <div className="min-h-screen flex flex-col">

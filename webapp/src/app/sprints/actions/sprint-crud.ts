@@ -1,15 +1,13 @@
 'use server';
 
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 
-// DynamoDB migration imports
+// DynamoDB imports
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities } from '@/lib/dynamodb/service';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 import { verifyComponentAccess, verifySprintAccess, verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 // Schemas - use min(1) instead of cuid() to allow demo IDs like 'demo-sprint-001'
@@ -53,60 +51,28 @@ export const createSprint = authActionClient.schema(createSprintSchema).action(a
     return { _demo: true, _action: 'createSprint', _input: { teamId, name, goal, startDate, endDate, capacity } };
   }
 
-  const phase = getMigrationPhase('sprint');
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyTeamMembership(userId, teamId);
-    if (!access) {
-      throw new Error('You must be a team member to create sprints');
-    }
-  } else {
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-    if (!membership) {
-      throw new Error('You must be a team member to create sprints');
-    }
+  // Verify team membership via DynamoDB
+  const access = await verifyTeamMembership(userId, teamId);
+  if (!access) {
+    throw new Error('You must be a team member to create sprints');
   }
 
   // Check for overlapping active sprints
-  // Date overlap logic: newStart < existingEnd AND newEnd > existingStart
   const newStartDate = new Date(startDate);
   const newEndDate = new Date(endDate);
 
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    // DynamoDB: Query all team sprints and check overlap in application code
-    const { sprint: sprintEntity } = getEntities();
-    const teamSprints = await sprintEntity.query.byTeam({ teamId }).go();
+  const { sprint: sprintEntity } = getEntities();
+  const teamSprints = await sprintEntity.query.byTeam({ teamId }).go();
 
-    const overlapping = teamSprints.data.find((s) => {
-      if (s.status !== 'PLANNING' && s.status !== 'ACTIVE') return false;
-      const existingStart = new Date(s.startDate);
-      const existingEnd = new Date(s.endDate);
-      // Overlap: newStart < existingEnd AND newEnd > existingStart
-      return newStartDate < existingEnd && newEndDate > existingStart;
-    });
+  const overlapping = teamSprints.data.find((s) => {
+    if (s.status !== 'PLANNING' && s.status !== 'ACTIVE') return false;
+    const existingStart = new Date(s.startDate);
+    const existingEnd = new Date(s.endDate);
+    return newStartDate < existingEnd && newEndDate > existingStart;
+  });
 
-    if (overlapping) {
-      throw new Error(`Sprint "${overlapping.name}" overlaps with these dates`);
-    }
-  } else {
-    // Prisma: Use SQL date range query
-    const overlapping = await prisma.sprint.findFirst({
-      where: {
-        teamId,
-        status: { in: ['PLANNING', 'ACTIVE'] },
-        OR: [
-          {
-            startDate: { lte: newEndDate },
-            endDate: { gte: newStartDate },
-          },
-        ],
-      },
-    });
-
-    if (overlapping) {
-      throw new Error(`Sprint "${overlapping.name}" overlaps with these dates`);
-    }
+  if (overlapping) {
+    throw new Error(`Sprint "${overlapping.name}" overlaps with these dates`);
   }
 
   const sprintId = randomUUID();
@@ -114,19 +80,7 @@ export const createSprint = authActionClient.schema(createSprintSchema).action(a
   const result = await dualWrite(
     'sprint',
     'create',
-    async () => {
-      return prisma.sprint.create({
-        data: {
-          id: sprintId,
-          teamId,
-          name,
-          goal,
-          startDate: new Date(startDate),
-          endDate: new Date(endDate),
-          capacity,
-        },
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const { sprint } = getEntities();
       const created = await sprint
@@ -164,51 +118,17 @@ export const updateSprint = authActionClient.schema(updateSprintSchema).action(a
     return { _demo: true, _action: 'updateSprint', _input: { sprintId: id, ...updates } };
   }
 
-  const phase = getMigrationPhase('sprint');
-
-  let teamId: string;
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifySprintAccess(userId, id);
-    if (!access) {
-      throw new Error('Sprint not found');
-    }
-    teamId = access.sprint.teamId;
-  } else {
-    const sprint = await prisma.sprint.findUnique({
-      where: { id },
-      include: { Team: true },
-    });
-
-    if (!sprint) {
-      throw new Error('Sprint not found');
-    }
-
-    teamId = sprint.teamId;
-
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-
-    if (!membership) {
-      throw new Error('You must be a team member to update sprints');
-    }
+  // Verify access via DynamoDB
+  const access = await verifySprintAccess(userId, id);
+  if (!access) {
+    throw new Error('Sprint not found');
   }
+  const teamId = access.sprint.teamId;
 
   const result = await dualWrite(
     'sprint',
     'update',
-    async () => {
-      return prisma.sprint.update({
-        where: { id },
-        data: {
-          ...(updates.name && { name: updates.name }),
-          ...(updates.goal !== undefined && { goal: updates.goal }),
-          ...(updates.startDate && { startDate: new Date(updates.startDate) }),
-          ...(updates.endDate && { endDate: new Date(updates.endDate) }),
-          ...(updates.capacity !== undefined && { capacity: updates.capacity }),
-        },
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const { sprint } = getEntities();
       const updateData: Record<string, unknown> = {};
@@ -242,73 +162,29 @@ export const updateSprintStatus = authActionClient.schema(sprintStatusSchema).ac
     return { _demo: true, _action: 'updateSprintStatus', _input: { sprintId: id, status } };
   }
 
-  const phase = getMigrationPhase('sprint');
-  let teamId: string;
-
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifySprintAccess(userId, id, ['OWNER', 'ADMIN']);
-    if (!access) {
-      throw new Error('Only team owners and admins can change sprint status');
-    }
-    teamId = access.sprint.teamId;
-  } else {
-    const sprint = await prisma.sprint.findUnique({
-      where: { id },
-    });
-
-    if (!sprint) {
-      throw new Error('Sprint not found');
-    }
-
-    teamId = sprint.teamId;
-
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-
-    if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
-      throw new Error('Only team owners and admins can change sprint status');
-    }
+  // Verify access via DynamoDB (admin/owner only)
+  const access = await verifySprintAccess(userId, id, ['OWNER', 'ADMIN']);
+  if (!access) {
+    throw new Error('Only team owners and admins can change sprint status');
   }
+  const teamId = access.sprint.teamId;
 
   // If starting a sprint, check no other active sprint exists
-  // This enforces unique constraint: only one ACTIVE sprint per team
   if (status === 'ACTIVE') {
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      // DynamoDB: Query team sprints and check for existing active
-      const { sprint: sprintEntity } = getEntities();
-      const teamSprints = await sprintEntity.query.byTeam({ teamId }).go();
+    const { sprint: sprintEntity } = getEntities();
+    const teamSprints = await sprintEntity.query.byTeam({ teamId }).go();
 
-      const activeSprint = teamSprints.data.find((s) => s.status === 'ACTIVE' && s.id !== id);
+    const activeSprint = teamSprints.data.find((s) => s.status === 'ACTIVE' && s.id !== id);
 
-      if (activeSprint) {
-        throw new Error(`Sprint "${activeSprint.name}" is already active. Complete it first.`);
-      }
-    } else {
-      // Prisma: Use SQL query
-      const activeSprint = await prisma.sprint.findFirst({
-        where: {
-          teamId,
-          status: 'ACTIVE',
-          id: { not: id },
-        },
-      });
-
-      if (activeSprint) {
-        throw new Error(`Sprint "${activeSprint.name}" is already active. Complete it first.`);
-      }
+    if (activeSprint) {
+      throw new Error(`Sprint "${activeSprint.name}" is already active. Complete it first.`);
     }
   }
 
   const result = await dualWrite(
     'sprint',
     'update',
-    async () => {
-      return prisma.sprint.update({
-        where: { id },
-        data: { status },
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const { sprint } = getEntities();
       const updated = await sprint.update({ id }).set({ status }).go({ response: 'all_new' });
@@ -337,75 +213,29 @@ export const assignComponentToSprint = authActionClient
       return { _demo: true, _action: 'assignComponentToSprint', _input: { componentId, sprintId } };
     }
 
-    const phase = getMigrationPhase('component');
-
-    let projectId: string;
-    let teamId: string;
-
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifyComponentAccess(userId, componentId);
-      if (!access) {
-        throw new Error('Component not found');
-      }
-      projectId = access.component.projectId;
-      teamId = access.project.teamId;
-    } else {
-      const component = await prisma.component.findUnique({
-        where: { id: componentId },
-        include: { Project: true },
-      });
-
-      if (!component) {
-        throw new Error('Component not found');
-      }
-
-      projectId = component.projectId;
-      teamId = component.Project.teamId;
-
-      const membership = await prisma.membership.findUnique({
-        where: { userId_teamId: { userId, teamId } },
-      });
-
-      if (!membership) {
-        throw new Error('You must be a team member to assign components to sprints');
-      }
+    // Verify component access via DynamoDB
+    const access = await verifyComponentAccess(userId, componentId);
+    if (!access) {
+      throw new Error('Component not found');
     }
+    const projectId = access.component.projectId;
+    const teamId = access.project.teamId;
 
     // If assigning to a sprint, verify it belongs to the same team
     if (sprintId) {
-      const sprintAccess =
-        getMigrationPhase('sprint') === 'dynamo_primary' || getMigrationPhase('sprint') === 'dynamo_only'
-          ? await verifySprintAccess(userId, sprintId)
-          : null;
-
-      if (sprintAccess) {
-        if (sprintAccess.sprint.teamId !== teamId) {
-          throw new Error('Sprint and component must belong to the same team');
-        }
-      } else {
-        const sprint = await prisma.sprint.findUnique({
-          where: { id: sprintId },
-        });
-
-        if (!sprint) {
-          throw new Error('Sprint not found');
-        }
-
-        if (sprint.teamId !== teamId) {
-          throw new Error('Sprint and component must belong to the same team');
-        }
+      const sprintAccess = await verifySprintAccess(userId, sprintId);
+      if (!sprintAccess) {
+        throw new Error('Sprint not found');
+      }
+      if (sprintAccess.sprint.teamId !== teamId) {
+        throw new Error('Sprint and component must belong to the same team');
       }
     }
 
     const result = await dualWrite(
       'component',
       'update',
-      async () => {
-        return prisma.component.update({
-          where: { id: componentId },
-          data: { sprintId },
-        });
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const { component } = getEntities();
         const updated = await component.update({ id: componentId }).set({ sprintId: sprintId ?? undefined }).go({
@@ -438,43 +268,17 @@ export const deleteSprint = authActionClient
       return { _demo: true, _action: 'deleteSprint', _input: { sprintId: id } };
     }
 
-    const phase = getMigrationPhase('sprint');
-    let teamId: string;
-
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifySprintAccess(userId, id, ['OWNER']);
-      if (!access) {
-        throw new Error('Only the team owner can delete sprints');
-      }
-      teamId = access.sprint.teamId;
-    } else {
-      const sprint = await prisma.sprint.findUnique({
-        where: { id },
-      });
-
-      if (!sprint) {
-        throw new Error('Sprint not found');
-      }
-
-      teamId = sprint.teamId;
-
-      const membership = await prisma.membership.findUnique({
-        where: { userId_teamId: { userId, teamId } },
-      });
-
-      if (!membership || membership.role !== 'OWNER') {
-        throw new Error('Only the team owner can delete sprints');
-      }
+    // Verify owner access via DynamoDB
+    const access = await verifySprintAccess(userId, id, ['OWNER']);
+    if (!access) {
+      throw new Error('Only the team owner can delete sprints');
     }
+    const teamId = access.sprint.teamId;
 
     await dualWrite(
       'sprint',
       'delete',
-      async () => {
-        // Components will have sprintId set to null via onDelete: SetNull
-        await prisma.sprint.delete({ where: { id } });
-        return { success: true };
-      },
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         const { sprint } = getEntities();
         await sprint.delete({ id }).go();
@@ -491,7 +295,6 @@ export const deleteSprint = authActionClient
 
 /**
  * Gets sprint metrics (burndown, velocity, etc.)
- * Uses dual-read pattern for migration support
  */
 export const getSprintMetrics = authActionClient
   .schema(z.object({ id: z.string().min(1) }))
@@ -499,103 +302,29 @@ export const getSprintMetrics = authActionClient
     const { id } = parsedInput;
     const { userId } = ctx;
 
-    const phase = getMigrationPhase('sprint');
+    const { sprint: sprintEntity, component: componentEntity } = getEntities();
 
-    // Data structures for metrics calculation
-    interface SprintData {
-      id: string;
-      name: string;
-      status: string;
-      startDate: Date;
-      endDate: Date;
-      capacity?: number | null;
-      teamId: string;
+    const sprintResult = await sprintEntity.get({ id }).go();
+    if (!sprintResult.data) {
+      throw new Error('Sprint not found');
     }
 
-    interface ComponentData {
-      status: string;
-      estimatedHours?: number | null;
+    const sprint = sprintResult.data;
+
+    // Verify membership
+    const access = await verifyTeamMembership(userId, sprint.teamId);
+    if (!access) {
+      throw new Error('You must be a team member to view sprint metrics');
     }
 
-    let sprintData: SprintData;
-    let components: ComponentData[];
+    // Query components assigned to this sprint
+    const componentsResult = await componentEntity.query.bySprint({ sprintId: id }).go();
+    const components = componentsResult.data.map((c) => ({
+      status: c.status,
+      estimatedHours: c.estimatedHours,
+    }));
 
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      // DynamoDB: Multiple queries for sprint and components
-      const { sprint: sprintEntity, component: componentEntity } = getEntities();
-
-      const sprintResult = await sprintEntity.get({ id }).go();
-      if (!sprintResult.data) {
-        throw new Error('Sprint not found');
-      }
-
-      const sprint = sprintResult.data;
-      sprintData = {
-        id: sprint.id,
-        name: sprint.name,
-        status: sprint.status,
-        startDate: new Date(sprint.startDate),
-        endDate: new Date(sprint.endDate),
-        capacity: sprint.capacity,
-        teamId: sprint.teamId,
-      };
-
-      // Verify membership
-      const access = await verifyTeamMembership(userId, sprint.teamId);
-      if (!access) {
-        throw new Error('You must be a team member to view sprint metrics');
-      }
-
-      // Query components assigned to this sprint using GSI
-      const componentsResult = await componentEntity.query.bySprint({ sprintId: id }).go();
-      components = componentsResult.data.map((c) => ({
-        status: c.status,
-        estimatedHours: c.estimatedHours,
-      }));
-    } else {
-      // Prisma: Single query with joins
-      const sprint = await prisma.sprint.findUnique({
-        where: { id },
-        include: {
-          Component: {
-            include: {
-              Assignment: true,
-            },
-          },
-          Team: true,
-        },
-      });
-
-      if (!sprint) {
-        throw new Error('Sprint not found');
-      }
-
-      // Verify user is member of team
-      const membership = await prisma.membership.findUnique({
-        where: { userId_teamId: { userId, teamId: sprint.teamId } },
-      });
-
-      if (!membership) {
-        throw new Error('You must be a team member to view sprint metrics');
-      }
-
-      sprintData = {
-        id: sprint.id,
-        name: sprint.name,
-        status: sprint.status,
-        startDate: sprint.startDate,
-        endDate: sprint.endDate,
-        capacity: sprint.capacity,
-        teamId: sprint.teamId,
-      };
-
-      components = sprint.Component.map((c) => ({
-        status: c.status,
-        estimatedHours: c.estimatedHours,
-      }));
-    }
-
-    // Calculate metrics from normalized data (same logic for both sources)
+    // Calculate metrics
     const totalComponents = components.length;
     const completedComponents = components.filter((c) => c.status === 'COMPLETED').length;
     const blockedComponents = components.filter((c) => c.status === 'BLOCKED').length;
@@ -606,19 +335,20 @@ export const getSprintMetrics = authActionClient
       .filter((c) => c.status === 'COMPLETED')
       .reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
 
-    const daysTotal = Math.ceil(
-      (sprintData.endDate.getTime() - sprintData.startDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const daysElapsed = Math.ceil((Date.now() - sprintData.startDate.getTime()) / (1000 * 60 * 60 * 24));
+    const sprintStartDate = new Date(sprint.startDate);
+    const sprintEndDate = new Date(sprint.endDate);
+
+    const daysTotal = Math.ceil((sprintEndDate.getTime() - sprintStartDate.getTime()) / (1000 * 60 * 60 * 24));
+    const daysElapsed = Math.ceil((Date.now() - sprintStartDate.getTime()) / (1000 * 60 * 60 * 24));
     const daysRemaining = Math.max(0, daysTotal - daysElapsed);
 
     return {
       sprint: {
-        id: sprintData.id,
-        name: sprintData.name,
-        status: sprintData.status,
-        startDate: sprintData.startDate,
-        endDate: sprintData.endDate,
+        id: sprint.id,
+        name: sprint.name,
+        status: sprint.status,
+        startDate: sprintStartDate,
+        endDate: sprintEndDate,
       },
       metrics: {
         totalComponents,
@@ -632,7 +362,7 @@ export const getSprintMetrics = authActionClient
         daysTotal,
         daysElapsed,
         daysRemaining,
-        capacityUsed: sprintData.capacity ? Math.round((totalEstimatedHours / sprintData.capacity) * 100) : null,
+        capacityUsed: sprint.capacity ? Math.round((totalEstimatedHours / sprint.capacity) * 100) : null,
       },
     };
   });

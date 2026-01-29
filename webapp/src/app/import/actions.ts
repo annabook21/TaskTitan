@@ -1,18 +1,19 @@
 'use server';
 
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { analyzeImportData, cleanupImportData, isAIConfigured } from '@/lib/ai';
-import type { ComponentType, ComponentStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
-// DynamoDB migration imports
+// DynamoDB imports
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities } from '@/lib/dynamodb/service';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 import { verifyTeamMembership, verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
+
+// Type definitions (previously from @prisma/client)
+type ComponentType = 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
+type ComponentStatus = 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
 
 const analyzeSchema = z.object({
   teamId: z.string().min(1),
@@ -47,56 +48,24 @@ export const analyzeImport = authActionClient.schema(analyzeSchema).action(async
     return generateSimpleMappings(headers, sampleRows);
   }
 
-  const phase = getMigrationPhase('membership');
   const entities = getEntities();
 
-  // Verify user is member of team (phase-aware)
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyTeamMembership(userId, teamId);
-    if (!access) {
-      throw new MyCustomError('You must be a team member to import data');
-    }
-  } else {
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-
-    if (!membership) {
-      throw new MyCustomError('You must be a team member to import data');
-    }
+  // Verify user is member of team via DynamoDB
+  const access = await verifyTeamMembership(userId, teamId);
+  if (!access) {
+    throw new MyCustomError('You must be a team member to import data');
   }
 
-  // Get existing projects and sprints for context (phase-aware)
-  let projectNames: string[];
-  let sprintNames: string[];
+  // Get existing projects and sprints for context
+  const [projectsResult, sprintsResult] = await Promise.all([
+    entities.project.query.byTeam({ teamId }).go(),
+    entities.sprint.query.byTeam({ teamId }).go(),
+  ]);
 
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    // DynamoDB path
-    const [projectsResult, sprintsResult] = await Promise.all([
-      entities.project.query.byTeam({ teamId }).go(),
-      entities.sprint.query.byTeam({ teamId }).go(),
-    ]);
-
-    projectNames = projectsResult.data.map((p) => p.name);
-    sprintNames = sprintsResult.data
-      .filter((s) => s.status === 'PLANNING' || s.status === 'ACTIVE')
-      .map((s) => s.name);
-  } else {
-    // Prisma path
-    const [projects, sprints] = await Promise.all([
-      prisma.project.findMany({
-        where: { teamId },
-        select: { name: true },
-      }),
-      prisma.sprint.findMany({
-        where: { teamId, status: { in: ['PLANNING', 'ACTIVE'] } },
-        select: { name: true },
-      }),
-    ]);
-
-    projectNames = projects.map((p) => p.name);
-    sprintNames = sprints.map((s) => s.name);
-  }
+  const projectNames = projectsResult.data.map((p) => p.name);
+  const sprintNames = sprintsResult.data
+    .filter((s) => s.status === 'PLANNING' || s.status === 'ACTIVE')
+    .map((s) => s.name);
 
   // Check if AI is configured
   if (!isAIConfigured()) {
@@ -207,22 +176,10 @@ export const cleanupData = authActionClient.schema(cleanupSchema).action(async (
     return simpleCleanup(rows, mappings);
   }
 
-  const phase = getMigrationPhase('membership');
-
-  // Verify user is member of team (phase-aware)
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyTeamMembership(userId, teamId);
-    if (!access) {
-      throw new MyCustomError('You must be a team member to clean data');
-    }
-  } else {
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-
-    if (!membership) {
-      throw new MyCustomError('You must be a team member to clean data');
-    }
+  // Verify user is member of team via DynamoDB
+  const access = await verifyTeamMembership(userId, teamId);
+  if (!access) {
+    throw new MyCustomError('You must be a team member to clean data');
   }
 
   // Check if AI is configured
@@ -335,23 +292,12 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     };
   }
 
-  const phase = getMigrationPhase('component');
   const entities = getEntities();
 
-  // Verify user is member of team (phase-aware)
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyTeamMembership(userId, teamId);
-    if (!access) {
-      throw new MyCustomError('You must be a team member to import data');
-    }
-  } else {
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-
-    if (!membership) {
-      throw new MyCustomError('You must be a team member to import data');
-    }
+  // Verify user is member of team via DynamoDB
+  const access = await verifyTeamMembership(userId, teamId);
+  if (!access) {
+    throw new MyCustomError('You must be a team member to import data');
   }
 
   // Create or get project
@@ -362,15 +308,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
     await dualWrite(
       'project',
       'create',
-      async () =>
-        prisma.project.create({
-          data: {
-            id: newProjectId,
-            name: projectName,
-            teamId,
-            ownerId: userId,
-          },
-        }),
+      async () => null, // Prisma removed - DynamoDB only
       async () => {
         await entities.project
           .create({
@@ -603,122 +541,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
   await dualWrite(
     'component',
     'create',
-    async () => {
-      // Prisma: Batch create components
-
-      // First: Create missing parents if needed
-      if (missingParents.size > 0 && createMissingParents) {
-        try {
-          await prisma.component.createMany({
-            data: Array.from(missingParents).map((name) => ({
-              id: nameToId.get(name)!,
-              name,
-              type: 'EPIC',
-              projectId: targetProjectId,
-              sprintId: autoAssignSprint || null,
-            })),
-            skipDuplicates: true,
-          });
-
-          missingParents.forEach((name) => {
-            createdItems.set(name, nameToId.get(name)!);
-            stats.created++;
-            stats.warnings.push(`Auto-created parent Epic: "${name}"`);
-          });
-        } catch (error) {
-          stats.errors.push(
-            `Failed to create missing parents: ${error instanceof Error ? error.message : 'Unknown error'}`
-          );
-        }
-      }
-
-      // Second: Create components without parents
-      if (componentsWithoutParents.length > 0) {
-        try {
-          await prisma.component.createMany({
-            data: componentsWithoutParents.map((c) => ({
-              id: c.id,
-              name: c.name,
-              description: c.description,
-              type: c.type,
-              status: c.status,
-              priority: c.priority,
-              owner: c.owner,
-              externalId: c.externalId,
-              tags: c.tags,
-              estimatedHours: c.estimatedHours,
-              dueDate: c.dueDate,
-              projectId: targetProjectId,
-              sprintId: autoAssignSprint || null,
-            })),
-            skipDuplicates: true,
-          });
-
-          componentsWithoutParents.forEach((c) => {
-            createdItems.set(c.name, c.id);
-          });
-
-          stats.created += componentsWithoutParents.length;
-        } catch (error) {
-          stats.errors.push(`Batch create failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      }
-
-      // Third: Create components with parents
-      if (componentsWithParents.length > 0) {
-        try {
-          await prisma.component.createMany({
-            data: componentsWithParents.map((c) => ({
-              id: c.id,
-              name: c.name,
-              description: c.description,
-              type: c.type,
-              status: c.status,
-              priority: c.priority,
-              owner: c.owner,
-              externalId: c.externalId,
-              tags: c.tags,
-              estimatedHours: c.estimatedHours,
-              dueDate: c.dueDate,
-              projectId: targetProjectId,
-              sprintId: autoAssignSprint || null,
-              parentId: nameToId.get(c.parentName!) || null,
-            })),
-            skipDuplicates: true,
-          });
-
-          componentsWithParents.forEach((c) => {
-            createdItems.set(c.name, c.id);
-          });
-
-          stats.created += componentsWithParents.length;
-        } catch (error) {
-          stats.errors.push(
-            `Batch create with parents failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-          );
-        }
-      }
-
-      // Fourth: Create dependencies
-      if (dependenciesToCreate.length > 0) {
-        try {
-          await prisma.dependency.createMany({
-            data: dependenciesToCreate.map((d) => ({
-              id: d.id,
-              dependentComponentId: d.dependentComponentId,
-              requiredComponentId: d.requiredComponentId,
-            })),
-            skipDuplicates: true,
-          });
-        } catch (error) {
-          stats.warnings.push(
-            `Some dependencies could not be created: ${error instanceof Error ? error.message : 'Unknown error'}`
-          );
-        }
-      }
-
-      return { count: stats.created };
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       // DynamoDB: Batch create with chunking
 

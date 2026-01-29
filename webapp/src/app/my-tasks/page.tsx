@@ -1,9 +1,9 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { CheckCircle2, Clock, AlertCircle, ListTodo, Calendar, ArrowRight } from 'lucide-react';
 import DemoMyTasksPage from './DemoMyTasksPage';
+import { getEntities } from '@/lib/dynamodb/service';
 
 export default async function MyTasksPage() {
   const session = await getSession();
@@ -14,83 +14,90 @@ export default async function MyTasksPage() {
     return <DemoMyTasksPage />;
   }
 
-  // Get all components assigned to the current user
-  const assignments = await prisma.assignment.findMany({
-    where: { userId },
-    include: {
-      Component: {
-        include: {
-          Project: {
-            select: {
-              id: true,
-              name: true,
-              Team: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-          Sprint: {
-            select: {
-              id: true,
-              name: true,
-              status: true,
-              startDate: true,
-              endDate: true,
-            },
-          },
-          StatusHistory: {
-            orderBy: { enteredAt: 'asc' },
-            select: {
-              status: true,
-              enteredAt: true,
-              exitedAt: true,
-            },
-          },
+  const entities = getEntities();
+
+  // Get all assignments for the current user from DynamoDB
+  const assignmentsResult = await entities.assignment.query.byUser({ userId }).go();
+  const assignments = assignmentsResult.data;
+
+  // Fetch component, project, team, sprint, and status history for each assignment
+  const tasks = await Promise.all(
+    assignments.map(async (a) => {
+      const [componentResult, statusHistoryResult] = await Promise.all([
+        entities.component.get({ id: a.componentId }).go(),
+        entities.componentStatusHistory.query.primary({ componentId: a.componentId }).go(),
+      ]);
+
+      const component = componentResult.data;
+      if (!component) return null;
+
+      const [projectResult, sprintResult] = await Promise.all([
+        entities.project.get({ id: component.projectId }).go(),
+        component.sprintId ? entities.sprint.get({ id: component.sprintId }).go() : Promise.resolve({ data: null }),
+      ]);
+
+      const project = projectResult.data;
+      if (!project) return null;
+
+      const teamResult = await entities.team.get({ id: project.teamId }).go();
+      const team = teamResult.data;
+
+      // Sort status history by enteredAt
+      const sortedHistory = statusHistoryResult.data.sort(
+        (a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime()
+      );
+
+      // Find current status entry (no exitedAt) or use last entry
+      const currentStatusEntry =
+        sortedHistory.find((h) => !h.exitedAt) || sortedHistory[sortedHistory.length - 1];
+
+      // Calculate how long in current status
+      const statusAge = currentStatusEntry
+        ? Math.floor((Date.now() - new Date(currentStatusEntry.enteredAt).getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+
+      return {
+        id: component.id,
+        name: component.name,
+        description: component.description ?? null,
+        type: component.type,
+        status: component.status,
+        priority: component.priority,
+        estimatedHours: component.estimatedHours ?? null,
+        actualHours: component.actualHours ?? null,
+        dueDate: component.dueDate ?? null,
+        statusAge,
+        project: {
+          id: project.id,
+          name: project.name,
+          Team: team ? { id: team.id, name: team.name } : { id: project.teamId, name: 'Unknown' },
         },
-      },
-    },
-    orderBy: { assignedAt: 'desc' },
-  });
+        sprint: sprintResult.data
+          ? {
+              id: sprintResult.data.id,
+              name: sprintResult.data.name,
+              status: sprintResult.data.status,
+              startDate: sprintResult.data.startDate,
+              endDate: sprintResult.data.endDate,
+            }
+          : null,
+        assignedAt: a.assignedAt,
+      };
+    })
+  );
 
-  const tasks = assignments.map((a) => {
-    const component = a.Component;
-
-    // Find current status entry
-    const currentStatusEntry =
-      component.StatusHistory.find((h) => !h.exitedAt) || component.StatusHistory[component.StatusHistory.length - 1];
-
-    // Calculate how long in current status
-    const statusAge = currentStatusEntry
-      ? Math.floor((Date.now() - new Date(currentStatusEntry.enteredAt).getTime()) / (1000 * 60 * 60 * 24))
-      : 0;
-
-    return {
-      id: component.id,
-      name: component.name,
-      description: component.description,
-      type: component.type,
-      status: component.status,
-      priority: component.priority,
-      estimatedHours: component.estimatedHours,
-      actualHours: component.actualHours,
-      dueDate: component.dueDate,
-      statusAge,
-      project: component.Project,
-      sprint: component.Sprint,
-      assignedAt: a.assignedAt,
-    };
-  });
+  // Filter out null tasks and sort by assignedAt descending
+  const validTasks = tasks
+    .filter((t): t is NonNullable<typeof t> => t !== null)
+    .sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime());
 
   // Group by status
   const tasksByStatus = {
-    IN_PROGRESS: tasks.filter((t) => t.status === 'IN_PROGRESS'),
-    PLANNING: tasks.filter((t) => t.status === 'PLANNING'),
-    BLOCKED: tasks.filter((t) => t.status === 'BLOCKED'),
-    REVIEW: tasks.filter((t) => t.status === 'REVIEW'),
-    COMPLETED: tasks.filter((t) => t.status === 'COMPLETED'),
+    IN_PROGRESS: validTasks.filter((t) => t.status === 'IN_PROGRESS'),
+    PLANNING: validTasks.filter((t) => t.status === 'PLANNING'),
+    BLOCKED: validTasks.filter((t) => t.status === 'BLOCKED'),
+    REVIEW: validTasks.filter((t) => t.status === 'REVIEW'),
+    COMPLETED: validTasks.filter((t) => t.status === 'COMPLETED'),
   };
 
   const statusConfig = {
@@ -115,7 +122,7 @@ export default async function MyTasksPage() {
 
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-            {Object.entries(tasksByStatus).map(([status, tasks]) => {
+            {Object.entries(tasksByStatus).map(([status, statusTasks]) => {
               const config = statusConfig[status as keyof typeof statusConfig];
               const Icon = config.icon;
               return (
@@ -124,14 +131,14 @@ export default async function MyTasksPage() {
                     <Icon className={`w-4 h-4 text-${config.color}-400`} />
                     <span className="text-sm text-slate-400">{config.label}</span>
                   </div>
-                  <div className={`text-2xl font-bold text-${config.color}-400`}>{tasks.length}</div>
+                  <div className={`text-2xl font-bold text-${config.color}-400`}>{statusTasks.length}</div>
                 </div>
               );
             })}
           </div>
 
           {/* No tasks message */}
-          {tasks.length === 0 && (
+          {validTasks.length === 0 && (
             <div className="component-card text-center py-16">
               <ListTodo className="w-16 h-16 text-slate-600 mx-auto mb-4" />
               <h2 className="text-xl font-medium text-slate-300 mb-2">No tasks assigned</h2>
@@ -140,7 +147,7 @@ export default async function MyTasksPage() {
           )}
 
           {/* Task Lists by Status */}
-          {tasks.length > 0 && (
+          {validTasks.length > 0 && (
             <div className="space-y-8">
               {Object.entries(tasksByStatus).map(([status, statusTasks]) => {
                 if (statusTasks.length === 0) return null;

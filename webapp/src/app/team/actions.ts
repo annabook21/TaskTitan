@@ -2,17 +2,15 @@
 
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
-import { prisma } from '@/lib/prisma';
 import { authActionClient } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { getTemplateSettings, type WorkflowTemplateKey } from '@/lib/workflow-templates';
 
-// DynamoDB migration imports
+// DynamoDB imports
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { verifyTeamMembership, isTeamOwner } from '@/lib/dynamodb/auth-helpers';
 import { batchDelete } from '@/lib/dynamodb/batch-ops';
 import { getEntities, getService } from '@/lib/dynamodb/service';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 
 const createTeamSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
@@ -57,7 +55,21 @@ export const createTeam = authActionClient.schema(createTeamSchema).action(async
   const templateKey: WorkflowTemplateKey = workflowTemplate ?? 'CUSTOM';
   const templateSettings = getTemplateSettings(templateKey);
 
-  // Generate IDs for DynamoDB (Prisma auto-generates, but we need consistent IDs for dual-write)
+  // Default workflow settings when CUSTOM template is used (no preset settings)
+  const defaultWorkflowSettings = {
+    cycleEnabled: true,
+    cycleDurationWeeks: 2,
+    cycleStartDayOfWeek: 1, // Monday
+    cycleName: 'Sprint',
+    backlogName: 'Backlog',
+    enforceEstimates: false,
+    autoArchiveCompleted: false,
+  };
+
+  // Use template settings if available, otherwise use defaults
+  const workflowSettings = templateSettings ?? defaultWorkflowSettings;
+
+  // Generate IDs
   const teamId = randomUUID();
   const membershipId = randomUUID();
   const workflowConfigId = randomUUID();
@@ -65,44 +77,7 @@ export const createTeam = authActionClient.schema(createTeamSchema).action(async
   const result = await dualWrite(
     'team',
     'create',
-    // Prisma operation - nested creates in one call
-    async () => {
-      return prisma.team.create({
-        data: {
-          id: teamId,
-          name,
-          description,
-          Membership: {
-            create: {
-              id: membershipId,
-              userId,
-              role: 'OWNER',
-            },
-          },
-          WorkflowConfig: {
-            create: {
-              id: workflowConfigId,
-              workflowTemplate: templateKey,
-              ...(templateSettings && {
-                cycleEnabled: templateSettings.cycleEnabled,
-                cycleDurationWeeks: templateSettings.cycleDurationWeeks,
-                cycleStartDayOfWeek: templateSettings.cycleStartDayOfWeek,
-                cycleName: templateSettings.cycleName,
-                backlogName: templateSettings.backlogName,
-                enforceEstimates: templateSettings.enforceEstimates,
-                wipLimitPlanning: templateSettings.wipLimitPlanning,
-                wipLimitInProgress: templateSettings.wipLimitInProgress,
-                wipLimitBlocked: templateSettings.wipLimitBlocked,
-                wipLimitReview: templateSettings.wipLimitReview,
-                autoArchiveCompleted: templateSettings.autoArchiveCompleted,
-              }),
-            },
-          },
-        },
-      });
-    },
-    // ElectroDB operation - use Service transaction for atomic multi-entity create
-    // Reference: https://electrodb.dev/en/mutations/transact-write/
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const service = getService();
 
@@ -115,19 +90,17 @@ export const createTeam = authActionClient.schema(createTeamSchema).action(async
               id: workflowConfigId,
               teamId,
               workflowTemplate: templateKey,
-              ...(templateSettings && {
-                cycleEnabled: templateSettings.cycleEnabled,
-                cycleDurationWeeks: templateSettings.cycleDurationWeeks ?? undefined,
-                cycleStartDayOfWeek: templateSettings.cycleStartDayOfWeek ?? undefined,
-                cycleName: templateSettings.cycleName ?? undefined,
-                backlogName: templateSettings.backlogName ?? undefined,
-                enforceEstimates: templateSettings.enforceEstimates,
-                wipLimitPlanning: templateSettings.wipLimitPlanning ?? undefined,
-                wipLimitInProgress: templateSettings.wipLimitInProgress ?? undefined,
-                wipLimitBlocked: templateSettings.wipLimitBlocked ?? undefined,
-                wipLimitReview: templateSettings.wipLimitReview ?? undefined,
-                autoArchiveCompleted: templateSettings.autoArchiveCompleted,
-              }),
+              cycleEnabled: workflowSettings.cycleEnabled,
+              cycleDurationWeeks: workflowSettings.cycleDurationWeeks ?? undefined,
+              cycleStartDayOfWeek: workflowSettings.cycleStartDayOfWeek ?? undefined,
+              cycleName: workflowSettings.cycleName ?? undefined,
+              backlogName: workflowSettings.backlogName ?? undefined,
+              enforceEstimates: workflowSettings.enforceEstimates,
+              wipLimitPlanning: templateSettings?.wipLimitPlanning ?? undefined,
+              wipLimitInProgress: templateSettings?.wipLimitInProgress ?? undefined,
+              wipLimitBlocked: templateSettings?.wipLimitBlocked ?? undefined,
+              wipLimitReview: templateSettings?.wipLimitReview ?? undefined,
+              autoArchiveCompleted: workflowSettings.autoArchiveCompleted,
             })
             .commit(),
         ])
@@ -152,34 +125,16 @@ export const updateTeam = authActionClient.schema(updateTeamSchema).action(async
     return { _demo: true, _action: 'updateTeam', _input: { teamId: id, name, description } };
   }
 
-  // Verify user is admin or owner
-  const phase = getMigrationPhase('team');
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyTeamMembership(userId, id, ['OWNER', 'ADMIN']);
-    if (!access) {
-      throw new Error('Only team owners and admins can update team settings');
-    }
-  } else {
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId: id } },
-    });
-    if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
-      throw new Error('Only team owners and admins can update team settings');
-    }
+  // Verify user is admin or owner via DynamoDB
+  const access = await verifyTeamMembership(userId, id, ['OWNER', 'ADMIN']);
+  if (!access) {
+    throw new Error('Only team owners and admins can update team settings');
   }
 
   const result = await dualWrite(
     'team',
     'update',
-    async () => {
-      return prisma.team.update({
-        where: { id },
-        data: {
-          ...(name && { name }),
-          ...(description !== undefined && { description }),
-        },
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const { team } = getEntities();
       const updateData: Record<string, unknown> = {};
@@ -206,80 +161,39 @@ export const inviteMember = authActionClient.schema(inviteMemberSchema).action(a
     return { _demo: true, _action: 'inviteMember', _input: { teamId, email, role, title } };
   }
 
-  const phase = getMigrationPhase('membership');
   const { user: userEntity, membership: membershipEntity } = getEntities();
 
-  // Verify inviter is admin or owner
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyTeamMembership(userId, teamId, ['OWNER', 'ADMIN']);
-    if (!access) {
-      throw new Error('Only team owners and admins can invite members');
-    }
-  } else {
-    const membership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-    if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
-      throw new Error('Only team owners and admins can invite members');
-    }
+  // Verify inviter is admin or owner via DynamoDB
+  const access = await verifyTeamMembership(userId, teamId, ['OWNER', 'ADMIN']);
+  if (!access) {
+    throw new Error('Only team owners and admins can invite members');
   }
 
-  // Find user by email
-  let targetUser: { id: string; email: string } | null = null;
-
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    // Query DynamoDB by email GSI - Reference: https://electrodb.dev/en/queries/query/
-    const result = await userEntity.query.byEmail({ email }).go();
-    targetUser = result.data[0] ?? null;
-  } else {
-    targetUser = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true, email: true },
-    });
-  }
+  // Find user by email via DynamoDB
+  const result = await userEntity.query.byEmail({ email }).go();
+  const targetUser = result.data[0] ?? null;
 
   if (!targetUser) {
     throw new Error('User not found. They need to sign up first.');
   }
 
-  // Check if already a member - use .get() since we have full composite key (teamId in PK, userId in SK)
-  // Reference: https://electrodb.dev/en/queries/find/
-  let existingMembership = null;
-
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const result = await membershipEntity.get({ teamId, userId: targetUser.id }).go();
-    existingMembership = result.data;
-  } else {
-    existingMembership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId: targetUser.id, teamId } },
-    });
-  }
-
-  if (existingMembership) {
+  // Check if already a member
+  const existingResult = await membershipEntity.get({ teamId, userId: targetUser.id }).go();
+  if (existingResult.data) {
     throw new Error('User is already a member of this team');
   }
 
   const membershipId = randomUUID();
 
-  const result = await dualWrite(
+  const writeResult = await dualWrite(
     'membership',
     'create',
-    async () => {
-      return prisma.membership.create({
-        data: {
-          id: membershipId,
-          userId: targetUser!.id,
-          teamId,
-          role,
-          title: title || null,
-        },
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const created = await membershipEntity
         .create({
           id: membershipId,
-          userId: targetUser!.id,
+          userId: targetUser.id,
           teamId,
           role,
           title: title || undefined,
@@ -291,57 +205,31 @@ export const inviteMember = authActionClient.schema(inviteMemberSchema).action(a
 
   revalidatePath(`/team/${teamId}`);
 
-  return { membership: result.data };
+  return { membership: writeResult.data };
 });
 
 export const updateMemberRole = authActionClient.schema(updateMemberRoleSchema).action(async ({ parsedInput, ctx }) => {
   const { teamId, userId: targetUserId, role } = parsedInput;
   const { userId } = ctx;
 
-  const phase = getMigrationPhase('membership');
   const { membership: membershipEntity } = getEntities();
 
-  // Verify current user is owner
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const isOwner = await isTeamOwner(userId, teamId);
-    if (!isOwner) {
-      throw new Error('Only the team owner can change member roles');
-    }
-  } else {
-    const currentMembership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId, teamId } },
-    });
-    if (!currentMembership || currentMembership.role !== 'OWNER') {
-      throw new Error('Only the team owner can change member roles');
-    }
+  // Verify current user is owner via DynamoDB
+  const isOwner = await isTeamOwner(userId, teamId);
+  if (!isOwner) {
+    throw new Error('Only the team owner can change member roles');
   }
 
-  // Check target user's role - use .get() with full composite key
-  let targetMembershipRole: string | null = null;
-
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const result = await membershipEntity.get({ teamId, userId: targetUserId }).go();
-    targetMembershipRole = result.data?.role ?? null;
-  } else {
-    const targetMembership = await prisma.membership.findUnique({
-      where: { userId_teamId: { userId: targetUserId, teamId } },
-    });
-    targetMembershipRole = targetMembership?.role ?? null;
-  }
-
-  if (targetMembershipRole === 'OWNER') {
+  // Check target user's role
+  const targetResult = await membershipEntity.get({ teamId, userId: targetUserId }).go();
+  if (targetResult.data?.role === 'OWNER') {
     throw new Error('Cannot change the role of the team owner');
   }
 
   const result = await dualWrite(
     'membership',
     'update',
-    async () => {
-      return prisma.membership.update({
-        where: { userId_teamId: { userId: targetUserId, teamId } },
-        data: { role },
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       const updated = await membershipEntity
         .update({ teamId, userId: targetUserId })
@@ -360,57 +248,25 @@ export const removeMember = authActionClient.schema(removeMemberSchema).action(a
   const { teamId, userId: targetUserId } = parsedInput;
   const { userId } = ctx;
 
-  const phase = getMigrationPhase('membership');
   const { membership: membershipEntity } = getEntities();
 
   // Check if removing self
   if (userId === targetUserId) {
-    // Allow leaving team unless owner - use .get() with full composite key
-    let userRole: string | null = null;
-
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const result = await membershipEntity.get({ teamId, userId }).go();
-      userRole = result.data?.role ?? null;
-    } else {
-      const membership = await prisma.membership.findUnique({
-        where: { userId_teamId: { userId, teamId } },
-      });
-      userRole = membership?.role ?? null;
-    }
-
-    if (userRole === 'OWNER') {
+    // Allow leaving team unless owner
+    const result = await membershipEntity.get({ teamId, userId }).go();
+    if (result.data?.role === 'OWNER') {
       throw new Error('Team owner cannot leave. Transfer ownership first.');
     }
   } else {
     // Verify current user is admin or owner
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const access = await verifyTeamMembership(userId, teamId, ['OWNER', 'ADMIN']);
-      if (!access) {
-        throw new Error('Only team owners and admins can remove members');
-      }
-    } else {
-      const currentMembership = await prisma.membership.findUnique({
-        where: { userId_teamId: { userId, teamId } },
-      });
-      if (!currentMembership || !['OWNER', 'ADMIN'].includes(currentMembership.role)) {
-        throw new Error('Only team owners and admins can remove members');
-      }
+    const access = await verifyTeamMembership(userId, teamId, ['OWNER', 'ADMIN']);
+    if (!access) {
+      throw new Error('Only team owners and admins can remove members');
     }
 
-    // Cannot remove owner - use .get() with full composite key
-    let targetRole: string | null = null;
-
-    if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-      const result = await membershipEntity.get({ teamId, userId: targetUserId }).go();
-      targetRole = result.data?.role ?? null;
-    } else {
-      const targetMembership = await prisma.membership.findUnique({
-        where: { userId_teamId: { userId: targetUserId, teamId } },
-      });
-      targetRole = targetMembership?.role ?? null;
-    }
-
-    if (targetRole === 'OWNER') {
+    // Cannot remove owner
+    const targetResult = await membershipEntity.get({ teamId, userId: targetUserId }).go();
+    if (targetResult.data?.role === 'OWNER') {
       throw new Error('Cannot remove the team owner');
     }
   }
@@ -418,12 +274,7 @@ export const removeMember = authActionClient.schema(removeMemberSchema).action(a
   await dualWrite(
     'membership',
     'delete',
-    async () => {
-      await prisma.membership.delete({
-        where: { userId_teamId: { userId: targetUserId, teamId } },
-      });
-      return { success: true };
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       await membershipEntity.delete({ teamId, userId: targetUserId }).go();
       return { success: true };
@@ -448,33 +299,16 @@ export const deleteTeam = authActionClient
         return { _demo: true, _action: 'deleteTeam', _input: { teamId: id } };
       }
 
-      const phase = getMigrationPhase('team');
-
-      // Verify user is owner
-      if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-        const isOwner = await isTeamOwner(userId, id);
-        if (!isOwner) {
-          throw new Error('Only the team owner can delete the team');
-        }
-      } else {
-        const membership = await prisma.membership.findUnique({
-          where: { userId_teamId: { userId, teamId: id } },
-        });
-        if (!membership || membership.role !== 'OWNER') {
-          throw new Error('Only the team owner can delete the team');
-        }
+      // Verify user is owner via DynamoDB
+      const isOwner = await isTeamOwner(userId, id);
+      if (!isOwner) {
+        throw new Error('Only the team owner can delete the team');
       }
 
       await dualWrite(
         'team',
         'delete',
-        // Prisma operation - cascades are set up in schema
-        async () => {
-          await prisma.team.delete({ where: { id } });
-          return { success: true };
-        },
-        // ElectroDB operation - must manually cascade (no automatic cascade)
-        // Reference: https://electrodb.dev/en/mutations/transact-write/
+        async () => null, // Prisma removed - DynamoDB only
         async () => {
           const {
             team,
@@ -510,15 +344,25 @@ export const deleteTeam = authActionClient
             const componentIds = allComponents.map((c) => c.id);
 
             // Get activities and component-related data in parallel
-            const [activityResults, assignmentResults, dependencyResults, historyResults, previewResults, githubConfigResults] =
-              await Promise.all([
-                Promise.all(projectIds.map((projectId) => activity.query.primary({ projectId }).go())),
-                Promise.all(componentIds.map((componentId) => assignment.query.primary({ componentId }).go())),
-                Promise.all(componentIds.map((componentId) => dependency.query.primary({ dependentComponentId: componentId }).go())),
-                Promise.all(componentIds.map((componentId) => componentStatusHistory.query.primary({ componentId }).go())),
-                Promise.all(componentIds.map((componentId) => componentPreview.query.primary({ componentId }).go())),
-                Promise.all(projectIds.map((projectId) => githubTransitionConfig.query.primary({ projectId }).go())),
-              ]);
+            const [
+              activityResults,
+              assignmentResults,
+              dependencyResults,
+              historyResults,
+              previewResults,
+              githubConfigResults,
+            ] = await Promise.all([
+              Promise.all(projectIds.map((projectId) => activity.query.primary({ projectId }).go())),
+              Promise.all(componentIds.map((componentId) => assignment.query.primary({ componentId }).go())),
+              Promise.all(
+                componentIds.map((componentId) => dependency.query.primary({ dependentComponentId: componentId }).go())
+              ),
+              Promise.all(
+                componentIds.map((componentId) => componentStatusHistory.query.primary({ componentId }).go())
+              ),
+              Promise.all(componentIds.map((componentId) => componentPreview.query.primary({ componentId }).go())),
+              Promise.all(projectIds.map((projectId) => githubTransitionConfig.query.primary({ projectId }).go())),
+            ]);
 
             const allActivities = activityResults.flatMap((r) => r.data);
             const allAssignments = assignmentResults.flatMap((r) => r.data);
@@ -528,8 +372,6 @@ export const deleteTeam = authActionClient
             const allGithubConfigs = githubConfigResults.flatMap((r) => r.data);
 
             // Delete in order: leaf nodes first, then parents
-            // Using batchDelete with automatic chunking (25 items per batch)
-            // Reference: DynamoDB BatchWriteItem limit
             if (allAssignments.length > 0) {
               await batchDelete(
                 allAssignments.map((a) => ({

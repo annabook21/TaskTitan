@@ -1,4 +1,3 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -6,6 +5,8 @@ import { notFound } from 'next/navigation';
 import { ArrowLeft, Settings } from 'lucide-react';
 import WorkflowSettingsForm from './WorkflowSettingsForm';
 import DemoWorkflowSettingsPage from './DemoWorkflowSettingsPage';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -21,22 +22,21 @@ export default async function WorkflowSettingsPage({ params }: Props) {
     return <DemoWorkflowSettingsPage />;
   }
 
-  // Check if user is owner or admin
-  const team = await prisma.team.findFirst({
-    where: {
-      id,
-      Membership: {
-        some: {
-          userId,
-          role: { in: ['OWNER', 'ADMIN'] },
-        },
-      },
-    },
-    include: {
-      WorkflowConfig: true,
-    },
-  });
+  const entities = getEntities();
 
+  // Verify user is owner or admin
+  const access = await verifyTeamMembership(userId, id);
+  if (!access || (access.membership.role !== 'OWNER' && access.membership.role !== 'ADMIN')) {
+    notFound();
+  }
+
+  // Get team and workflow config
+  const [teamResult, workflowConfigResult] = await Promise.all([
+    entities.team.get({ id }).go(),
+    entities.teamWorkflowConfig.get({ teamId: id }).go(),
+  ]);
+
+  const team = teamResult.data;
   if (!team) {
     notFound();
   }
@@ -68,7 +68,7 @@ export default async function WorkflowSettingsPage({ params }: Props) {
           </div>
 
           {/* Settings Form */}
-          <WorkflowSettingsForm teamId={team.id} config={team.WorkflowConfig} />
+          <WorkflowSettingsForm teamId={team.id} config={workflowConfigResult.data as any} />
         </div>
       </main>
     </div>

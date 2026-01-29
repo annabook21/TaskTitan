@@ -1,4 +1,3 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -13,7 +12,6 @@ import {
   PlayCircle,
   PauseCircle,
   Zap,
-  Users,
   FolderKanban,
   XCircle,
 } from 'lucide-react';
@@ -22,10 +20,14 @@ import SprintComponents from './SprintComponents';
 import AISprintPlanner from './AISprintPlanner';
 import SprintRefineButton from './SprintRefineButton';
 import DemoSprintDetailPage from './DemoSprintDetailPage';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifySprintAccess } from '@/lib/dynamodb/auth-helpers';
 
 interface Props {
   params: Promise<{ id: string; sprintId: string }>;
 }
+
+type SprintStatus = 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 
 const statusConfig = {
   PLANNING: {
@@ -60,61 +62,91 @@ export default async function SprintDetailPage({ params }: Props) {
     return <DemoSprintDetailPage />;
   }
 
-  const sprint = await prisma.sprint.findFirst({
-    where: {
-      id: sprintId,
-      teamId,
-      Team: {
-        Membership: { some: { userId } },
-      },
-    },
-    include: {
-      Team: {
-        include: {
-          Membership: {
-            where: { userId },
-            select: { role: true },
-          },
-        },
-      },
-      Component: {
-        include: {
-          Project: { select: { id: true, name: true } },
-          Assignment: {
-            include: { User: { select: { id: true, name: true, email: true } } },
-          },
-        },
-        orderBy: [{ status: 'asc' }, { priority: 'desc' }],
-      },
-    },
-  });
+  const entities = getEntities();
 
-  if (!sprint) {
+  // Verify user has access to this sprint
+  const access = await verifySprintAccess(userId, sprintId);
+  if (!access || access.sprint.teamId !== teamId) {
     notFound();
   }
 
-  const currentUserRole = sprint.Team.Membership[0]?.role;
+  const sprint = access.sprint;
+  const sprintStatus = ((sprint as any).status || 'PLANNING') as SprintStatus;
+
+  // Get projects for this team to fetch components
+  const projectsResult = await entities.project.query.byTeam({ teamId }).go();
+  const projectIds = projectsResult.data.map((p) => p.id);
+
+  // Fetch all components and filter for this sprint
+  const componentResults = await Promise.all(
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+  );
+  const allComponents = componentResults.flatMap((r) => r.data);
+  const sprintComponents = allComponents.filter((c) => c.sprintId === sprintId);
+
+  // Fetch assignments and users for each component
+  const componentsWithDetails = await Promise.all(
+    sprintComponents.map(async (comp) => {
+      const project = projectsResult.data.find((p) => p.id === comp.projectId);
+      const assignmentsResult = await entities.assignment.query.primary({ componentId: comp.id }).go();
+      
+      const assignmentsWithUsers = await Promise.all(
+        assignmentsResult.data.map(async (a) => {
+          const userResult = await entities.user.get({ id: a.userId }).go();
+          return {
+            User: {
+              id: a.userId,
+              name: userResult.data?.name ?? null,
+              email: userResult.data?.email ?? 'unknown@example.com',
+            },
+          };
+        })
+      );
+
+      return {
+        id: comp.id,
+        name: comp.name,
+        status: comp.status,
+        priority: (comp as any).priority ?? 0,
+        estimatedHours: (comp as any).estimatedHours ?? null,
+        description: (comp as any).description ?? null,
+        Project: project ? { id: project.id, name: project.name } : null,
+        Assignment: assignmentsWithUsers,
+      };
+    })
+  );
+
+  // Sort components by status then priority
+  const sortedComponents = componentsWithDetails.sort((a, b) => {
+    const statusOrder = ['IN_PROGRESS', 'BLOCKED', 'PLANNING', 'REVIEW', 'COMPLETED'];
+    const statusDiff = statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status);
+    if (statusDiff !== 0) return statusDiff;
+    return (b.priority || 0) - (a.priority || 0);
+  });
+
+  const currentUserRole = access.membership.role;
   const canManage = currentUserRole === 'OWNER' || currentUserRole === 'ADMIN';
 
-  const config = statusConfig[sprint.status];
+  const config = statusConfig[sprintStatus];
   const StatusIcon = config.icon;
 
   // Calculate metrics
-  const totalComponents = sprint.Component.length;
-  const completedComponents = sprint.Component.filter((c) => c.status === 'COMPLETED').length;
-  const blockedComponents = sprint.Component.filter((c) => c.status === 'BLOCKED').length;
-  const inProgressComponents = sprint.Component.filter((c) => c.status === 'IN_PROGRESS').length;
+  const totalComponents = sortedComponents.length;
+  const completedComponents = sortedComponents.filter((c) => c.status === 'COMPLETED').length;
+  const blockedComponents = sortedComponents.filter((c) => c.status === 'BLOCKED').length;
+  const inProgressComponents = sortedComponents.filter((c) => c.status === 'IN_PROGRESS').length;
 
-  const totalHours = sprint.Component.reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
-  const completedHours = sprint.Component.filter((c) => c.status === 'COMPLETED').reduce(
-    (sum, c) => sum + (c.estimatedHours || 0),
-    0,
-  );
+  const totalHours = sortedComponents.reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
+  const completedHours = sortedComponents
+    .filter((c) => c.status === 'COMPLETED')
+    .reduce((sum, c) => sum + (c.estimatedHours || 0), 0);
 
   const progress = totalComponents > 0 ? Math.round((completedComponents / totalComponents) * 100) : 0;
 
-  const daysTotal = Math.ceil((sprint.endDate.getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24));
-  const daysElapsed = Math.max(0, Math.ceil((Date.now() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24)));
+  const startDate = new Date(sprint.startDate);
+  const endDate = new Date(sprint.endDate);
+  const daysTotal = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+  const daysElapsed = Math.max(0, Math.ceil((Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
   const daysRemaining = Math.max(0, daysTotal - daysElapsed);
 
   return (
@@ -148,22 +180,22 @@ export default async function SprintDetailPage({ params }: Props) {
                     {config.label}
                   </span>
                 </div>
-                {sprint.goal && (
+                {(sprint as any).goal && (
                   <p className="text-slate-400 max-w-2xl flex items-start gap-2">
                     <Target className="w-4 h-4 mt-1 flex-shrink-0" />
-                    {sprint.goal}
+                    {(sprint as any).goal}
                   </p>
                 )}
                 <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <Calendar className="w-4 h-4" />
-                    {sprint.startDate.toLocaleDateString()} - {sprint.endDate.toLocaleDateString()}
+                    {startDate.toLocaleDateString()} - {endDate.toLocaleDateString()}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <FolderKanban className="w-4 h-4" />
                     {totalComponents} items
                   </span>
-                  {sprint.status === 'ACTIVE' && daysRemaining > 0 && (
+                  {sprintStatus === 'ACTIVE' && daysRemaining > 0 && (
                     <span className="flex items-center gap-1.5 text-amber-400">
                       <Clock className="w-4 h-4" />
                       {daysRemaining} days remaining
@@ -176,7 +208,7 @@ export default async function SprintDetailPage({ params }: Props) {
             {canManage && (
               <div className="flex items-center gap-3">
                 <SprintRefineButton sprintId={sprint.id} sprintName={sprint.name} teamId={teamId} />
-                <SprintControls sprint={sprint} teamId={teamId} />
+                <SprintControls sprint={{ ...sprint, status: sprintStatus } as any} teamId={teamId} />
               </div>
             )}
           </div>
@@ -216,14 +248,14 @@ export default async function SprintDetailPage({ params }: Props) {
           </div>
 
           {/* AI Sprint Planning - show for planning sprints */}
-          {canManage && sprint.status === 'PLANNING' && (
+          {canManage && sprintStatus === 'PLANNING' && (
             <div className="mb-8">
-              <AISprintPlanner sprintId={sprintId} defaultCapacity={sprint.capacity || 40} />
+              <AISprintPlanner sprintId={sprintId} defaultCapacity={(sprint as any).capacity || 40} />
             </div>
           )}
 
           {/* Components List */}
-          <SprintComponents components={sprint.Component} sprintId={sprintId} teamId={teamId} canManage={canManage} />
+          <SprintComponents components={sortedComponents as any} sprintId={sprintId} teamId={teamId} canManage={canManage} />
         </div>
       </main>
     </div>

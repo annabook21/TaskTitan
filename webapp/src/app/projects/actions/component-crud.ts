@@ -1,15 +1,13 @@
 'use server';
 
 import { z } from 'zod';
-import { prisma } from '@/lib/prisma';
 import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 
-// DynamoDB migration imports
+// DynamoDB imports
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities, getService } from '@/lib/dynamodb/service';
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 import { verifyComponentAccess, verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
 
 type ComponentStatus = 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
@@ -51,26 +49,13 @@ export const createComponent = authActionClient.schema(createComponentSchema).ac
     };
   }
 
-  // Verify access using primary store (phase-aware)
-  const phase = getMigrationPhase('component');
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyProjectAccess(userId, projectId);
-    if (!access) {
-      throw new MyCustomError('Project not found or access denied');
-    }
-  } else {
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        Team: { Membership: { some: { userId } } },
-      },
-    });
-    if (!project) {
-      throw new MyCustomError('Project not found or access denied');
-    }
+  // Verify access via DynamoDB
+  const access = await verifyProjectAccess(userId, projectId);
+  if (!access) {
+    throw new MyCustomError('Project not found or access denied');
   }
 
-  // Generate IDs for dual-write consistency (Prisma otherwise auto-generates)
+  // Generate IDs
   const componentId = randomUUID();
   const statusHistoryId = randomUUID();
   const activityId = randomUUID();
@@ -78,41 +63,7 @@ export const createComponent = authActionClient.schema(createComponentSchema).ac
   const result = await dualWrite(
     'component',
     'create',
-    async () => {
-      // Prisma: create component + initial status history + activity
-      const component = await prisma.component.create({
-        data: {
-          id: componentId,
-          name,
-          description,
-          projectId,
-          priority: priority ?? 0,
-          estimatedHours,
-          dueDate: dueDate ? new Date(dueDate) : null,
-        },
-      });
-
-      await prisma.componentStatusHistory.create({
-        data: {
-          id: statusHistoryId,
-          componentId: component.id,
-          status: component.status, // PLANNING by default
-          enteredAt: new Date(),
-        },
-      });
-
-      await prisma.activity.create({
-        data: {
-          id: activityId,
-          type: 'COMPONENT_CREATED',
-          projectId,
-          userId,
-          metadata: { componentName: name, componentId: component.id },
-        },
-      });
-
-      return component;
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       // DynamoDB: transactionally create Component + StatusHistory + Activity
       const service = getService();
@@ -191,125 +142,20 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
     };
   }
 
-  const phase = getMigrationPhase('component');
-
-  // Verify access and collect necessary context
-  let projectId: string;
-  let oldStatus: ComponentStatus;
-
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    const access = await verifyComponentAccess(userId, id);
-    if (!access) {
-      throw new MyCustomError('Component not found or access denied');
-    }
-    projectId = access.component.projectId;
-    oldStatus = access.component.status as ComponentStatus;
-  } else {
-    const component = await prisma.component.findFirst({
-      where: {
-        id,
-        Project: { Team: { Membership: { some: { userId } } } },
-      },
-      include: {
-        Project: true,
-        Assignment: {
-          select: {
-            userId: true,
-          },
-        },
-      },
-    });
-
-    if (!component) {
-      throw new MyCustomError('Component not found or access denied');
-    }
-
-    projectId = component.projectId;
-    oldStatus = component.status as ComponentStatus;
+  // Verify access via DynamoDB
+  const access = await verifyComponentAccess(userId, id);
+  if (!access) {
+    throw new MyCustomError('Component not found or access denied');
   }
+  const projectId = access.component.projectId;
+  const oldStatus = access.component.status as ComponentStatus;
 
   const entities = getEntities();
 
   const result = await dualWrite(
     'component',
     'update',
-    async () => {
-      // Prisma: keep existing strong guarantees for exitedAt-based metrics
-      return prisma.$transaction(async (tx) => {
-        const updatedComponent = await tx.component.update({
-          where: { id },
-          data: {
-            ...(name && { name }),
-            ...(description !== undefined && { description }),
-            ...(status && { status }),
-            ...(priority !== undefined && { priority }),
-            ...(estimatedHours !== undefined && { estimatedHours }),
-            ...(actualHours !== undefined && { actualHours }),
-            ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
-          },
-        });
-
-        if (status && status !== oldStatus) {
-          const now = new Date();
-
-          await tx.componentStatusHistory.updateMany({
-            where: {
-              componentId: id,
-              status: oldStatus,
-              exitedAt: null,
-            },
-            data: {
-              exitedAt: now,
-            },
-          });
-
-          await tx.componentStatusHistory.create({
-            data: {
-              id: randomUUID(),
-              componentId: id,
-              status,
-              enteredAt: now,
-            },
-          });
-
-          await tx.activity.create({
-            data: {
-              id: randomUUID(),
-              type: 'COMPONENT_STATUS_CHANGED',
-              projectId,
-              userId,
-              metadata: {
-                componentName: updatedComponent.name,
-                componentId: id,
-                oldStatus,
-                newStatus: status,
-              },
-            },
-          });
-
-          const assignees = await tx.assignment.findMany({
-            where: { componentId: id },
-            select: { userId: true },
-          });
-          const assigneeIds = assignees.map((a) => a.userId).filter((uid) => uid !== userId);
-          if (assigneeIds.length > 0) {
-            await tx.notification.createMany({
-              data: assigneeIds.map((assigneeId) => ({
-                id: randomUUID(),
-                userId: assigneeId,
-                type: 'TASK_STATUS_CHANGED',
-                title: `Status changed: ${updatedComponent.name}`,
-                message: `Changed from ${oldStatus} to ${status}`,
-                componentId: id,
-                projectId,
-              })),
-            });
-          }
-        }
-
-        return updatedComponent;
-      });
-    },
+    async () => null, // Prisma removed - DynamoDB only
     async () => {
       // DynamoDB: Atomic status change with transaction
       // Best practice: Use transaction for component + history + activity + notifications

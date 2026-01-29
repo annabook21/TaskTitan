@@ -1,12 +1,8 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { Users, Plus, FolderKanban, Crown, Shield, User as UserIcon, Eye, ArrowRight } from 'lucide-react';
 import DemoTeamListPage from './DemoTeamListPage';
-
-// DynamoDB migration imports
-import { getMigrationPhase } from '@/lib/dynamodb/feature-flags';
 import { getEntities } from '@/lib/dynamodb/service';
 
 const roleIcons = {
@@ -55,12 +51,9 @@ export default async function TeamPage() {
     return <DemoTeamListPage />;
   }
 
-  const phase = getMigrationPhase('membership');
+  // DynamoDB: Multiple round-trips with application-layer aggregation
+  const entities = getEntities();
   let memberships: TeamMembershipData[];
-
-  if (phase === 'dynamo_primary' || phase === 'dynamo_only') {
-    // DynamoDB: Multiple round-trips with application-layer aggregation
-    const entities = getEntities();
 
     // Step 1: Get user's memberships (GSI1: userId)
     const membershipsResult = await entities.membership.query.byUser({ userId }).go();
@@ -125,48 +118,6 @@ export default async function TeamPage() {
         })
       ).then((results) => results.filter((r): r is TeamMembershipData => r !== null));
     }
-  } else {
-    // Prisma: Nested includes with single query
-    const prismaResults = await prisma.membership.findMany({
-      where: { userId },
-      select: {
-        role: true,
-        joinedAt: true,
-        Team: {
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            Membership: {
-              take: 6,
-              orderBy: { joinedAt: 'asc' },
-              select: {
-                User: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                  },
-                },
-              },
-            },
-            _count: {
-              select: {
-                Membership: true,
-                Project: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { joinedAt: 'desc' },
-    });
-
-    memberships = prismaResults.map((m) => ({
-      role: m.role as TeamRole,
-      Team: m.Team,
-    }));
-  }
 
   return (
     <div className="min-h-screen flex flex-col">

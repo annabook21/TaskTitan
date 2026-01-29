@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
 import { handlePullRequestEvent, handlePullRequestReviewEvent } from '@/lib/github-integration';
+import { getEntities } from '@/lib/dynamodb/service';
 
 /**
  * Verify GitHub webhook signature using HMAC SHA-256
@@ -59,18 +59,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing repository URL' }, { status: 400 });
     }
 
-    const project = await prisma.project.findFirst({
-      where: { githubRepoUrl: repoUrl },
-      select: {
-        id: true,
-        ownerId: true,
-        githubWebhookSecret: true,
-        githubPrTargetStatus: true,
-        GitHubTransitionConfig: {
-          where: { enabled: true },
-        },
-      },
-    });
+    // Query DynamoDB for project with matching GitHub repo URL
+    const entities = getEntities();
+
+    // Scan all projects and filter by githubRepoUrl
+    // Note: This is a scan operation - for high-volume webhooks, consider adding a GSI
+    const projectResult = await entities.project.scan.go();
+    const project = projectResult.data.find((p) => p.githubRepoUrl === repoUrl);
 
     if (!project || !project.githubWebhookSecret) {
       logger.info('Project not found or webhook not configured', {
@@ -91,19 +86,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
 
-    // 5. Handle events based on type
+    // 5. Fetch transition configs for this project
+    const transitionConfigResult = await entities.githubTransitionConfig.query
+      .primary({ projectId: project.id })
+      .go();
+    const enabledConfigs = transitionConfigResult.data.filter((c) => c.enabled);
+
+    // 6. Handle events based on type
     if (event === 'pull_request') {
       await handlePullRequestEvent(webhookPayload, {
         id: project.id,
         ownerId: project.ownerId,
-        githubPrTargetStatus: project.githubPrTargetStatus,
-        transitionConfigs: project.GitHubTransitionConfig,
+        githubPrTargetStatus: project.githubPrTargetStatus ?? null,
+        transitionConfigs: enabledConfigs,
       });
     } else if (event === 'pull_request_review') {
       await handlePullRequestReviewEvent(webhookPayload, {
         id: project.id,
         ownerId: project.ownerId,
-        transitionConfigs: project.GitHubTransitionConfig,
+        transitionConfigs: enabledConfigs,
       });
     } else {
       logger.info('Ignoring unsupported event', {

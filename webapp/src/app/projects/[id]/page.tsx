@@ -1,4 +1,3 @@
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -10,7 +9,6 @@ import {
   GitBranch,
   Users,
   Clock,
-  MoreVertical,
   Sparkles,
   Zap,
   PlayCircle,
@@ -25,6 +23,8 @@ import DeleteProjectButton from './DeleteProjectButton';
 import GitHubIntegrationSettings from './components/GitHubIntegrationSettings';
 import SprintTimeline from './components/SprintTimeline';
 import DemoProjectDetailPage from './DemoProjectDetailPage';
+import { getEntities } from '@/lib/dynamodb/service';
+import { verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -40,145 +40,210 @@ export default async function ProjectDetailPage({ params }: Props) {
     return <DemoProjectDetailPage />;
   }
 
-  const project = await prisma.project.findFirst({
-    where: {
-      id,
-      Team: { Membership: { some: { userId } } },
-    },
-    include: {
-      Team: {
-        include: {
-          Membership: {
-            include: { User: true },
-          },
-          Sprint: {
-            where: { status: { in: ['PLANNING', 'ACTIVE'] } },
-            orderBy: { startDate: 'asc' },
-            // Only load essential sprint fields
-            select: {
-              id: true,
-              name: true,
-              goal: true,
-              startDate: true,
-              endDate: true,
-              status: true,
-              capacity: true,
-            },
-          },
-          WorkflowConfig: true,
-        },
-      },
-      User: true,
-      Component: {
-        // Limit to 200 components (reasonable upper bound for UI performance)
-        // Projects with 200+ components should use filtering/pagination
-        take: 200,
-        include: {
-          Assignment: {
-            include: { User: true },
-          },
-          // Only load essential sprint fields
-          Sprint: {
-            select: {
-              id: true,
-              name: true,
-              status: true,
-              startDate: true,
-              endDate: true,
-            },
-          },
-          Dependency_Dependency_dependentComponentIdToComponent: {
-            // Only load essential dependency fields
-            select: {
-              id: true,
-              Component_Dependency_requiredComponentIdToComponent: {
-                select: {
-                  id: true,
-                  name: true,
-                  status: true,
-                  type: true,
-                },
-              },
-            },
-          },
-          Dependency_Dependency_requiredComponentIdToComponent: {
-            // Only load essential dependency fields
-            select: {
-              id: true,
-              Component_Dependency_dependentComponentIdToComponent: {
-                select: {
-                  id: true,
-                  name: true,
-                  status: true,
-                  type: true,
-                },
-              },
-            },
-          },
-          Preview: {
-            take: 1,
-            orderBy: { createdAt: 'desc' },
-            select: { id: true, htmlContent: true },
-          },
-          // Load status history for aging and cycle time calculation (Kanban feature)
-          StatusHistory: {
-            orderBy: { enteredAt: 'asc' },
-            select: {
-              status: true,
-              enteredAt: true,
-              exitedAt: true,
-            },
-          },
-        },
-        orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
-      },
-      Activity: {
-        take: 10,
-        orderBy: { createdAt: 'desc' },
-        include: { User: true },
-      },
-    },
-  });
+  const entities = getEntities();
+
+  // Fetch project from DynamoDB
+  const projectResult = await entities.project.get({ id }).go();
+  const project = projectResult.data;
 
   if (!project) {
     notFound();
   }
 
-  // Map components for easier use
-  const components = project.Component.map((c) => {
-    // Find current status entry (no exit time)
-    const currentStatusEntry = c.StatusHistory.find((h) => !h.exitedAt) || c.StatusHistory[c.StatusHistory.length - 1];
+  // Fetch team to verify user has access
+  const teamResult = await entities.team.get({ id: project.teamId }).go();
+  const team = teamResult.data;
 
-    // Calculate cycle time for completed items (IN_PROGRESS -> COMPLETED)
-    let cycleTimeDays: number | null = null;
-    if (c.status === 'COMPLETED') {
-      const inProgressEntry = c.StatusHistory.find((h) => h.status === 'IN_PROGRESS');
-      const completedEntry = c.StatusHistory.find((h) => h.status === 'COMPLETED');
-      if (inProgressEntry && completedEntry) {
-        const cycleTimeMs = completedEntry.enteredAt.getTime() - inProgressEntry.enteredAt.getTime();
-        cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10; // One decimal place
+  if (!team) {
+    notFound();
+  }
+
+  // Check user membership via auth-helper
+  const access = await verifyProjectAccess(userId, id);
+  if (!access) {
+    notFound();
+  }
+  const membership = access.membership;
+
+  // Fetch all related data in parallel
+  const [
+    membershipsResult,
+    sprintsResult,
+    workflowConfigResult,
+    componentsResult,
+    activitiesResult,
+    ownerResult,
+  ] = await Promise.all([
+    entities.membership.query.primary({ teamId: team.id }).go(),
+    entities.sprint.query.byTeam({ teamId: team.id }).go(),
+    entities.teamWorkflowConfig.get({ teamId: team.id }).go(),
+    entities.component.query.byProject({ projectId: id }).go(),
+    entities.activity.query.primary({ projectId: id }).go(),
+    entities.user.get({ id: project.ownerId }).go(),
+  ]);
+
+  // Fetch users for all memberships
+  const memberUsers = await Promise.all(
+    membershipsResult.data.map(async (m) => {
+      const userResult = await entities.user.get({ id: m.userId }).go();
+      return { membership: m, user: userResult.data };
+    })
+  );
+
+  // Active sprints - convert date strings to Date objects
+  const availableSprints = sprintsResult.data
+    .filter((s) => s.status === 'PLANNING' || s.status === 'ACTIVE')
+    .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
+    .map((s) => ({
+      ...s,
+      startDate: new Date(s.startDate),
+      endDate: new Date(s.endDate),
+    }));
+
+  // Fetch component-related data
+  const componentsWithRelations = await Promise.all(
+    componentsResult.data.slice(0, 200).map(async (c) => {
+      const [
+        assignmentsResult,
+        dependsOnResult,
+        dependedOnByResult,
+        statusHistoryResult,
+        previewResult,
+        sprintResult,
+      ] = await Promise.all([
+        entities.assignment.query.primary({ componentId: c.id }).go(),
+        entities.dependency.query.primary({ dependentComponentId: c.id }).go(),
+        entities.dependency.query.byRequired({ requiredComponentId: c.id }).go(),
+        entities.componentStatusHistory.query.primary({ componentId: c.id }).go(),
+        entities.componentPreview.query.primary({ componentId: c.id }).go(),
+        c.sprintId ? entities.sprint.get({ id: c.sprintId }).go() : Promise.resolve({ data: null }),
+      ]);
+
+      // Fetch assigned users
+      const assignments = await Promise.all(
+        assignmentsResult.data.map(async (a) => {
+          const userResult = await entities.user.get({ id: a.userId }).go();
+          return { ...a, user: userResult.data, User: userResult.data };
+        })
+      );
+
+      // Fetch dependency component info
+      const dependsOn = await Promise.all(
+        dependsOnResult.data.map(async (d) => {
+          const compResult = await entities.component.get({ id: d.requiredComponentId }).go();
+          return {
+            requiredComponent: compResult.data
+              ? { id: compResult.data.id, name: compResult.data.name, status: compResult.data.status, type: compResult.data.type }
+              : { id: d.requiredComponentId, name: 'Unknown', status: 'PLANNING', type: 'TASK' },
+          };
+        })
+      );
+
+      const dependedOnBy = await Promise.all(
+        dependedOnByResult.data.map(async (d) => {
+          const compResult = await entities.component.get({ id: d.dependentComponentId }).go();
+          return {
+            dependentComponent: compResult.data
+              ? { id: compResult.data.id, name: compResult.data.name, status: compResult.data.status, type: compResult.data.type }
+              : { id: d.dependentComponentId, name: 'Unknown', status: 'PLANNING', type: 'TASK' },
+          };
+        })
+      );
+
+      // Sort status history
+      const sortedHistory = statusHistoryResult.data.sort(
+        (a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime()
+      );
+
+      const currentStatusEntry = sortedHistory.find((h) => !h.exitedAt) || sortedHistory[sortedHistory.length - 1];
+
+      // Calculate cycle time for completed items
+      let cycleTimeDays: number | null = null;
+      if (c.status === 'COMPLETED') {
+        const inProgressEntry = sortedHistory.find((h) => h.status === 'IN_PROGRESS');
+        const completedEntry = sortedHistory.find((h) => h.status === 'COMPLETED');
+        if (inProgressEntry && completedEntry) {
+          const cycleTimeMs = new Date(completedEntry.enteredAt).getTime() - new Date(inProgressEntry.enteredAt).getTime();
+          cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10;
+        }
       }
-    }
 
-    return {
-      ...c,
-      sprint: c.Sprint,
-      assignments: c.Assignment.map((a) => ({ ...a, user: a.User })),
-      dependsOn: c.Dependency_Dependency_dependentComponentIdToComponent.map((d) => ({
-        requiredComponent: d.Component_Dependency_requiredComponentIdToComponent,
-      })),
-      dependedOnBy: c.Dependency_Dependency_requiredComponentIdToComponent.map((d) => ({
-        dependentComponent: d.Component_Dependency_dependentComponentIdToComponent,
-      })),
-      // For aging indicator
-      statusEnteredAt: currentStatusEntry?.enteredAt || c.createdAt,
-      // For completed items - show how long it took
-      cycleTimeDays,
-    };
+      // Get latest preview
+      const sortedPreviews = previewResult.data.sort(
+        (a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+      );
+      const latestPreview = sortedPreviews[0];
+
+      return {
+        ...c,
+        // Normalize undefined to null/defaults for optional fields
+        priority: c.priority ?? 0,
+        estimatedHours: c.estimatedHours ?? null,
+        actualHours: c.actualHours ?? null,
+        description: c.description ?? null,
+        parentId: c.parentId ?? null,
+        dueDate: c.dueDate ? new Date(c.dueDate) : null,
+        owner: c.owner ?? null,
+        externalId: c.externalId ?? null,
+        // Map DynamoDB context fields to expected names
+        contextSummary: c.contextAiSummary ?? null,
+        contextDetail: c.contextRationale ?? null,
+        contextFiles: c.contextLinks ?? null,
+        contextDecision: c.contextDecision ?? null,
+        contextAlternatives: c.contextAlternatives ?? null,
+        contextUpdatedAt: c.contextUpdatedAt ?? null,
+        contextUpdatedBy: c.contextUpdatedBy ?? null,
+        githubPrUrl: c.githubPrUrl ?? null,
+        githubPrNumber: c.githubPrNumber ?? null,
+        githubPrTitle: c.githubPrTitle ?? null,
+        githubPrStatus: c.githubPrStatus ?? null,
+        githubPrUpdatedAt: c.githubPrUpdatedAt ?? null,
+        createdAt: new Date(c.createdAt ?? Date.now()),
+        updatedAt: new Date(c.updatedAt ?? Date.now()),
+        sprint: sprintResult.data ? { ...sprintResult.data, startDate: new Date(sprintResult.data.startDate), endDate: new Date(sprintResult.data.endDate) } : null,
+        Sprint: sprintResult.data ? { ...sprintResult.data, startDate: new Date(sprintResult.data.startDate), endDate: new Date(sprintResult.data.endDate) } : null,
+        sprintId: c.sprintId ?? null,
+        assignments,
+        Assignment: assignments,
+        dependsOn,
+        Dependency_Dependency_dependentComponentIdToComponent: dependsOn.map((d) => ({
+          Component_Dependency_requiredComponentIdToComponent: d.requiredComponent,
+        })),
+        dependedOnBy,
+        Dependency_Dependency_requiredComponentIdToComponent: dependedOnBy.map((d) => ({
+          Component_Dependency_dependentComponentIdToComponent: d.dependentComponent,
+        })),
+        Preview: latestPreview ? [{ id: latestPreview.id, htmlContent: latestPreview.htmlContent }] : [],
+        StatusHistory: sortedHistory,
+        statusEnteredAt: currentStatusEntry?.enteredAt ? new Date(currentStatusEntry.enteredAt) : new Date(c.createdAt ?? Date.now()),
+        cycleTimeDays,
+      };
+    })
+  );
+
+  // Sort components by priority desc, createdAt asc
+  const components = componentsWithRelations.sort((a, b) => {
+    const priorityDiff = (b.priority ?? 0) - (a.priority ?? 0);
+    if (priorityDiff !== 0) return priorityDiff;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
 
-  // Get available sprints for this team
-  const availableSprints = project.Team.Sprint || [];
+  // Fetch activity users
+  const sortedActivities = activitiesResult.data
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+    .slice(0, 10);
+
+  const activities = await Promise.all(
+    sortedActivities.map(async (a) => {
+      const userResult = await entities.user.get({ id: a.userId }).go();
+      return {
+        ...a,
+        createdAt: new Date(a.createdAt ?? Date.now()),
+        user: userResult.data || { id: a.userId, email: 'unknown', name: null },
+        User: userResult.data || { id: a.userId, email: 'unknown', name: null },
+      };
+    })
+  );
 
   // Group components by status
   const componentsByStatus = {
@@ -197,22 +262,40 @@ export default async function ProjectDetailPage({ params }: Props) {
     COMPLETED: { label: 'Completed', color: 'emerald' },
   };
 
-  const team = project.Team;
-  const teamMembers = team.Membership.map((m) => m.User);
-  const activities = project.Activity.map((a) => ({ ...a, user: a.User }));
-  const workflowConfig = team.WorkflowConfig;
+  const teamMembers = memberUsers
+    .filter((m) => m.user)
+    .map((m) => m.user!);
+
+  const teamWithMembership = {
+    ...team,
+    Membership: memberUsers.map((m) => ({
+      userId: m.membership.userId,
+      role: m.membership.role,
+      User: m.user || { id: m.membership.userId, email: 'unknown', name: null },
+    })),
+  };
+
+  const workflowConfig = workflowConfigResult.data;
   const cycleEnabled = workflowConfig?.cycleEnabled ?? true;
   const cycleName = workflowConfig?.cycleName || 'Sprint';
   const cycleNamePlural = `${cycleName}s`;
-  const isKanban = !cycleEnabled; // Teams without cycles are Kanban/continuous flow
+  const isKanban = !cycleEnabled;
 
   // Get WIP limits for each status
   const wipLimits = {
-    PLANNING: workflowConfig?.wipLimitPlanning,
-    IN_PROGRESS: workflowConfig?.wipLimitInProgress,
-    BLOCKED: workflowConfig?.wipLimitBlocked,
-    REVIEW: workflowConfig?.wipLimitReview,
-    COMPLETED: null, // No WIP limit for completed
+    PLANNING: workflowConfig?.wipLimitPlanning ?? undefined,
+    IN_PROGRESS: workflowConfig?.wipLimitInProgress ?? undefined,
+    BLOCKED: workflowConfig?.wipLimitBlocked ?? undefined,
+    REVIEW: workflowConfig?.wipLimitReview ?? undefined,
+    COMPLETED: null,
+  };
+
+  const projectData = {
+    ...project,
+    updatedAt: new Date(project.updatedAt ?? Date.now()),
+    githubRepoUrl: project.githubRepoUrl ?? null,
+    githubWebhookSecret: project.githubWebhookSecret ?? null,
+    githubPrTargetStatus: project.githubPrTargetStatus ?? null,
   };
 
   return (
@@ -234,10 +317,10 @@ export default async function ProjectDetailPage({ params }: Props) {
           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 mb-8">
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-bold">{project.name}</h1>
+                <h1 className="text-3xl font-bold">{projectData.name}</h1>
                 <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">{team.name}</span>
               </div>
-              {project.description && <p className="text-slate-400 max-w-2xl">{project.description}</p>}
+              {projectData.description && <p className="text-slate-400 max-w-2xl">{projectData.description}</p>}
               <div className="flex items-center gap-4 mt-4 text-sm text-slate-500">
                 <span className="flex items-center gap-1.5">
                   <Layers className="w-4 h-4" />
@@ -245,23 +328,23 @@ export default async function ProjectDetailPage({ params }: Props) {
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Users className="w-4 h-4" />
-                  {team.Membership.length} team members
+                  {teamWithMembership.Membership.length} team members
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Clock className="w-4 h-4" />
-                  Updated {new Date(project.updatedAt).toLocaleDateString()}
+                  Updated {projectData.updatedAt.toLocaleDateString()}
                 </span>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
               <AIGeneratePanelWrapper
-                projectId={project.id}
-                hasDescription={!!project.description && project.description.length >= 20}
+                projectId={projectData.id}
+                hasDescription={!!projectData.description && projectData.description.length >= 20}
                 cycleEnabled={cycleEnabled}
                 cycleName={cycleName}
               />
-              <SmartComponentCreator projectId={project.id} />
+              <SmartComponentCreator projectId={projectData.id} />
             </div>
           </div>
 
@@ -282,7 +365,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                     Break down your project into components. Each component represents a distinct piece of functionality
                     that can be developed independently.
                   </p>
-                  <SmartComponentCreator projectId={project.id} />
+                  <SmartComponentCreator projectId={projectData.id} />
                 </div>
               ) : (
                 <div className="space-y-8">
@@ -298,7 +381,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                             status: d.requiredComponent.status,
                           },
                         })),
-                      }))}
+                      })) as any}
                     />
                   )}
 
@@ -360,9 +443,9 @@ export default async function ProjectDetailPage({ params }: Props) {
                               {statusComponents.map((component) => (
                                 <ComponentCard
                                   key={component.id}
-                                  component={component}
-                                  teamMembers={teamMembers}
-                                  availableSprints={availableSprints}
+                                  component={component as any}
+                                  teamMembers={teamMembers as any}
+                                  availableSprints={availableSprints as any}
                                   showAging={isKanban}
                                 />
                               ))}
@@ -457,13 +540,13 @@ export default async function ProjectDetailPage({ params }: Props) {
                   Team Members
                 </h3>
                 <div className="space-y-3">
-                  {team.Membership.map(({ User: user, role }) => (
-                    <div key={user.id} className="flex items-center gap-3">
+                  {teamWithMembership.Membership.map(({ User: memberUser, role }) => (
+                    <div key={memberUser.id} className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-sm font-medium">
-                        {user.name?.[0] || user.email[0].toUpperCase()}
+                        {memberUser.name?.[0] || memberUser.email[0].toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-slate-200 truncate">{user.name || user.email}</div>
+                        <div className="text-sm font-medium text-slate-200 truncate">{memberUser.name || memberUser.email}</div>
                         <div className="text-xs text-slate-500">{role.toLowerCase()}</div>
                       </div>
                     </div>
@@ -488,7 +571,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                           <span className="text-slate-500">{activity.type.replace(/_/g, ' ').toLowerCase()}</span>
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">
-                          {new Date(activity.createdAt).toLocaleString()}
+                          {activity.createdAt.toLocaleString()}
                         </div>
                       </div>
                     ))}
@@ -497,27 +580,27 @@ export default async function ProjectDetailPage({ params }: Props) {
               </div>
 
               {/* GitHub Integration - only for owner or admin */}
-              {team.Membership.some((m) => m.userId === userId && (m.role === 'OWNER' || m.role === 'ADMIN')) && (
+              {teamWithMembership.Membership.some((m) => m.User.id === userId && (m.role === 'OWNER' || m.role === 'ADMIN')) && (
                 <GitHubIntegrationSettings
-                  projectId={project.id}
+                  projectId={projectData.id}
                   currentSettings={{
-                    githubRepoUrl: project.githubRepoUrl,
-                    githubWebhookSecret: project.githubWebhookSecret,
-                    githubPrTargetStatus: project.githubPrTargetStatus,
+                    githubRepoUrl: projectData.githubRepoUrl,
+                    githubWebhookSecret: projectData.githubWebhookSecret,
+                    githubPrTargetStatus: projectData.githubPrTargetStatus,
                   }}
                 />
               )}
 
               {/* Danger Zone - only for owner */}
-              {String(project.ownerId) === String(userId) ? (
+              {String(projectData.ownerId) === String(userId) ? (
                 <div className="component-card border-red-500/30">
                   <h3 className="text-sm font-medium text-red-400 mb-3">Danger Zone</h3>
-                  <DeleteProjectButton projectId={project.id} projectName={project.name} />
+                  <DeleteProjectButton projectId={projectData.id} projectName={projectData.name} />
                 </div>
               ) : (
                 <div className="component-card border-slate-700">
                   <p className="text-xs text-slate-500">
-                    Owner: {project.ownerId} | You: {userId}
+                    Owner: {projectData.ownerId} | You: {userId}
                   </p>
                 </div>
               )}

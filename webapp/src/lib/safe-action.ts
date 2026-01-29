@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { getEntities } from '@/lib/dynamodb/service';
 import { runWithAmplifyServerContext } from '@/lib/amplifyServerUtils';
 import { getCurrentUser } from 'aws-amplify/auth/server';
 import { createSafeActionClient, DEFAULT_SERVER_ERROR_MESSAGE } from 'next-safe-action';
@@ -50,18 +50,23 @@ export const authActionClient = actionClient.use(async ({ next }) => {
 
   // Local development mode - use mock user
   if (IS_LOCAL_DEV) {
+    const entities = getEntities();
+    
     // Ensure local dev user exists
-    let user = await prisma.user.findUnique({
-      where: { id: LOCAL_DEV_USER.id },
-    });
+    const userResult = await entities.user.get({ id: LOCAL_DEV_USER.id }).go();
 
-    if (!user) {
-      user = await prisma.user.create({
-        data: LOCAL_DEV_USER,
-      });
+    if (!userResult.data) {
+      const now = new Date().toISOString();
+      await entities.user.create({
+        id: LOCAL_DEV_USER.id,
+        email: LOCAL_DEV_USER.email,
+        name: LOCAL_DEV_USER.name,
+        createdAt: now,
+        updatedAt: now,
+      }).go();
     }
 
-    return next({ ctx: { userId: user.id, isDemo: false } });
+    return next({ ctx: { userId: LOCAL_DEV_USER.id, isDemo: false } });
   }
 
   // Production mode - use Cognito
@@ -74,15 +79,12 @@ export const authActionClient = actionClient.use(async ({ next }) => {
     throw new MyCustomError('Session is not valid!');
   }
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: currentUser.userId,
-    },
-  });
+  const entities = getEntities();
+  const userResult = await entities.user.get({ id: currentUser.userId }).go();
 
-  if (user == null) {
+  if (userResult.data == null) {
     throw new MyCustomError('User not found');
   }
 
-  return next({ ctx: { userId: user.id, isDemo: false } });
+  return next({ ctx: { userId: userResult.data.id, isDemo: false } });
 });
