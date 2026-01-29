@@ -52,18 +52,32 @@ export const authActionClient = actionClient.use(async ({ next }) => {
   if (IS_LOCAL_DEV) {
     const entities = getEntities();
     
-    // Ensure local dev user exists
-    const userResult = await entities.user.get({ id: LOCAL_DEV_USER.id }).go();
-
-    if (!userResult.data) {
-      const now = new Date().toISOString();
-      await entities.user.create({
-        id: LOCAL_DEV_USER.id,
-        email: LOCAL_DEV_USER.email,
-        name: LOCAL_DEV_USER.name,
-        createdAt: now,
-        updatedAt: now,
-      }).go();
+    // Ensure local dev user exists using conditional create to avoid TOCTOU race condition
+    // Instead of check-then-create, we try to create with a condition that fails if exists
+    const now = new Date().toISOString();
+    try {
+      await entities.user
+        .create({
+          id: LOCAL_DEV_USER.id,
+          email: LOCAL_DEV_USER.email,
+          name: LOCAL_DEV_USER.name,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .go({
+          // Only create if the item doesn't already exist (pk doesn't exist)
+          condition: {
+            field: 'pk',
+            exists: false,
+          },
+        });
+    } catch (error) {
+      // ConditionalCheckFailedException means user already exists - that's fine
+      const errorName = (error as { code?: string })?.code;
+      if (errorName !== 'ConditionalCheckFailedException') {
+        // Only throw if it's a different error
+        throw error;
+      }
     }
 
     return next({ ctx: { userId: LOCAL_DEV_USER.id, isDemo: false } });

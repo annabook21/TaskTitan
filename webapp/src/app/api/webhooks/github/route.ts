@@ -59,13 +59,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing repository URL' }, { status: 400 });
     }
 
-    // Query DynamoDB for project with matching GitHub repo URL
+    // Query DynamoDB for project with matching GitHub repo URL using GSI
     const entities = getEntities();
 
-    // Scan all projects and filter by githubRepoUrl
-    // Note: This is a scan operation - for high-volume webhooks, consider adding a GSI
-    const projectResult = await entities.project.scan.go();
-    const project = projectResult.data.find((p) => p.githubRepoUrl === repoUrl);
+    // Use byGitHubRepo GSI for O(1) lookup instead of O(N) scan
+    const projectResult = await entities.project.query.byGitHubRepo({ githubRepoUrl: repoUrl }).go();
+    const project = projectResult.data[0]; // GSI query returns array, take first match
 
     if (!project || !project.githubWebhookSecret) {
       logger.info('Project not found or webhook not configured', {

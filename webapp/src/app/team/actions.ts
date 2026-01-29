@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { getTemplateSettings, type WorkflowTemplateKey } from '@/lib/workflow-templates';
 
@@ -128,7 +128,7 @@ export const updateTeam = authActionClient.schema(updateTeamSchema).action(async
   // Verify user is admin or owner via DynamoDB
   const access = await verifyTeamMembership(userId, id, ['OWNER', 'ADMIN']);
   if (!access) {
-    throw new Error('Only team owners and admins can update team settings');
+    throw new MyCustomError('Only team owners and admins can update team settings');
   }
 
   const result = await dualWrite(
@@ -166,7 +166,7 @@ export const inviteMember = authActionClient.schema(inviteMemberSchema).action(a
   // Verify inviter is admin or owner via DynamoDB
   const access = await verifyTeamMembership(userId, teamId, ['OWNER', 'ADMIN']);
   if (!access) {
-    throw new Error('Only team owners and admins can invite members');
+    throw new MyCustomError('Only team owners and admins can invite members');
   }
 
   // Find user by email via DynamoDB
@@ -174,13 +174,13 @@ export const inviteMember = authActionClient.schema(inviteMemberSchema).action(a
   const targetUser = result.data[0] ?? null;
 
   if (!targetUser) {
-    throw new Error('User not found. They need to sign up first.');
+    throw new MyCustomError('User not found. They need to sign up first.');
   }
 
   // Check if already a member
   const existingResult = await membershipEntity.get({ teamId, userId: targetUser.id }).go();
   if (existingResult.data) {
-    throw new Error('User is already a member of this team');
+    throw new MyCustomError('User is already a member of this team');
   }
 
   const membershipId = randomUUID();
@@ -217,13 +217,13 @@ export const updateMemberRole = authActionClient.schema(updateMemberRoleSchema).
   // Verify current user is owner via DynamoDB
   const isOwner = await isTeamOwner(userId, teamId);
   if (!isOwner) {
-    throw new Error('Only the team owner can change member roles');
+    throw new MyCustomError('Only the team owner can change member roles');
   }
 
   // Check target user's role
   const targetResult = await membershipEntity.get({ teamId, userId: targetUserId }).go();
   if (targetResult.data?.role === 'OWNER') {
-    throw new Error('Cannot change the role of the team owner');
+    throw new MyCustomError('Cannot change the role of the team owner');
   }
 
   const result = await dualWrite(
@@ -255,19 +255,19 @@ export const removeMember = authActionClient.schema(removeMemberSchema).action(a
     // Allow leaving team unless owner
     const result = await membershipEntity.get({ teamId, userId }).go();
     if (result.data?.role === 'OWNER') {
-      throw new Error('Team owner cannot leave. Transfer ownership first.');
+      throw new MyCustomError('Team owner cannot leave. Transfer ownership first.');
     }
   } else {
     // Verify current user is admin or owner
     const access = await verifyTeamMembership(userId, teamId, ['OWNER', 'ADMIN']);
     if (!access) {
-      throw new Error('Only team owners and admins can remove members');
+      throw new MyCustomError('Only team owners and admins can remove members');
     }
 
     // Cannot remove owner
     const targetResult = await membershipEntity.get({ teamId, userId: targetUserId }).go();
     if (targetResult.data?.role === 'OWNER') {
-      throw new Error('Cannot remove the team owner');
+      throw new MyCustomError('Cannot remove the team owner');
     }
   }
 
@@ -302,7 +302,7 @@ export const deleteTeam = authActionClient
       // Verify user is owner via DynamoDB
       const isOwner = await isTeamOwner(userId, id);
       if (!isOwner) {
-        throw new Error('Only the team owner can delete the team');
+        throw new MyCustomError('Only the team owner can delete the team');
       }
 
       await dualWrite(
@@ -486,6 +486,6 @@ export const deleteTeam = authActionClient
         throw error;
       }
       console.error('Error deleting team:', error);
-      throw new Error('Failed to delete team. Please ensure all related data can be deleted.');
+      throw new MyCustomError('Failed to delete team. Please ensure all related data can be deleted.');
     }
   });

@@ -1,7 +1,7 @@
 'use server';
 
 import { z } from 'zod';
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { revalidatePath } from 'next/cache';
 import { planSprint as aiPlanSprint, suggestSprintDetails } from '@/lib/ai';
 
@@ -37,7 +37,7 @@ export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).ac
   // Verify access to sprint via DynamoDB
   const sprintAccess = await verifySprintAccess(userId, sprintId);
   if (!sprintAccess) {
-    throw new Error('Sprint not found or access denied');
+    throw new MyCustomError('Sprint not found or access denied');
   }
 
   const sprint = {
@@ -138,7 +138,7 @@ export const applySprintPlan = authActionClient.schema(applySprintPlanSchema).ac
   // Verify access to sprint via DynamoDB
   const sprintAccess = await verifySprintAccess(userId, sprintId);
   if (!sprintAccess) {
-    throw new Error('Sprint not found or access denied');
+    throw new MyCustomError('Sprint not found or access denied');
   }
 
   const teamId = sprintAccess.sprint.teamId;
@@ -178,7 +178,7 @@ export const aiSuggestSprint = authActionClient.schema(suggestSprintSchema).acti
   // Verify user is member of team via DynamoDB
   const teamAccess = await verifyTeamMembership(userId, teamId);
   if (!teamAccess) {
-    throw new Error('Team not found or you are not a member');
+    throw new MyCustomError('Team not found or you are not a member');
   }
 
   // Fetch sprints for count

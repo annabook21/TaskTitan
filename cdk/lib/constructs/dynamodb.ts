@@ -44,6 +44,9 @@ import { Construct } from 'constructs';
  * - Sprint components: gsi2pk=SPRINT#<sprintId>, gsi2sk=COMPONENT#<componentId>
  * - Components by status: gsi2pk=PROJECT#<id>#STATUS#<status>, gsi2sk=COMPONENT#<componentId>
  * - Component parent lookup: gsi2pk=PARENT#<parentId>, gsi2sk=COMPONENT#<componentId>
+ *
+ * GSI3 (gsi3pk, gsi3sk): GitHub integration lookups (sparse index)
+ * - Project by GitHub repo URL: gsi3pk=GITHUB_REPO#<repoUrl>, gsi3sk=PROJECT#<projectId>
  */
 
 export interface TaskTitanTableProps {
@@ -126,6 +129,16 @@ export class TaskTitanTable extends Construct {
       indexName: 'gsi2',
       partitionKey: { name: 'gsi2pk', type: AttributeType.STRING },
       sortKey: { name: 'gsi2sk', type: AttributeType.STRING },
+      projectionType: ProjectionType.ALL,
+    });
+
+    // GSI3: GitHub repo URL lookup for webhook handling
+    // Sparse index - only items with githubRepoUrl are indexed
+    // Eliminates O(N) scan for webhook lookup, providing O(1) access
+    this.table.addGlobalSecondaryIndex({
+      indexName: 'gsi3',
+      partitionKey: { name: 'gsi3pk', type: AttributeType.STRING },
+      sortKey: { name: 'gsi3sk', type: AttributeType.STRING },
       projectionType: ProjectionType.ALL,
     });
 

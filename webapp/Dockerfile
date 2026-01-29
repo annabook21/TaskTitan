@@ -3,10 +3,8 @@ WORKDIR /build
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY ./ ./
-# Set dummy DATABASE_URL for prisma generate (runtime URL comes from ECS environment/secrets)
-ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
-RUN npx prisma generate
-COPY prisma ./
+
+# FORGE v2: No Prisma - using DynamoDB/ElectroDB only
 
 ARG SKIP_TS_BUILD=""
 ARG ALLOWED_ORIGIN_HOST=""

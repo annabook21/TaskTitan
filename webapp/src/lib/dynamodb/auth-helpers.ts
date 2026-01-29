@@ -282,6 +282,7 @@ export async function getUserTeamIds(userId: string): Promise<string[]> {
 
 /**
  * Get all project IDs a user has access to
+ * Uses Promise.allSettled to handle partial failures gracefully
  */
 export async function getUserProjectIds(userId: string): Promise<string[]> {
   const { project } = getEntities();
@@ -293,14 +294,19 @@ export async function getUserProjectIds(userId: string): Promise<string[]> {
     return [];
   }
 
-  // Query projects for each team
+  // Query projects for each team - use allSettled to continue if some fail
   const projectPromises = teamIds.map((teamId) => project.query.byTeam({ teamId }).go());
 
-  const results = await Promise.all(projectPromises);
+  const results = await Promise.allSettled(projectPromises);
   const projectIds: string[] = [];
 
   for (const result of results) {
-    projectIds.push(...result.data.map((p) => p.id));
+    if (result.status === 'fulfilled') {
+      projectIds.push(...result.value.data.map((p) => p.id));
+    } else {
+      // Log failure but continue with other teams
+      logger.warn('Failed to fetch projects for team', { userId, error: result.reason });
+    }
   }
 
   return projectIds;
@@ -322,17 +328,20 @@ export async function batchVerifyComponentAccess(
     return results;
   }
 
-  // Get all components
-  const componentResults = await Promise.all(componentIds.map((id) => component.get({ id }).go()));
+  // Get all components - use allSettled to handle partial failures gracefully
+  const componentResults = await Promise.allSettled(componentIds.map((id) => component.get({ id }).go()));
 
   // Group by project
   const projectComponentMap = new Map<string, ComponentItem[]>();
   for (let i = 0; i < componentResults.length; i++) {
-    const comp = componentResults[i].data;
-    if (comp) {
+    const result = componentResults[i];
+    if (result.status === 'fulfilled' && result.value.data) {
+      const comp = result.value.data;
       const existing = projectComponentMap.get(comp.projectId) || [];
       existing.push(comp);
       projectComponentMap.set(comp.projectId, existing);
+    } else if (result.status === 'rejected') {
+      logger.warn('Failed to fetch component', { componentId: componentIds[i], error: result.reason });
     }
   }
 

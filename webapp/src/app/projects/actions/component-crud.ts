@@ -9,6 +9,8 @@ import { randomUUID } from 'crypto';
 import { dualWrite } from '@/lib/dynamodb/dual-write';
 import { getEntities, getService } from '@/lib/dynamodb/service';
 import { verifyComponentAccess, verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
+import { batchDelete } from '@/lib/dynamodb/batch-ops';
+import { executeSaga } from '@/lib/dynamodb/transactions';
 
 type ComponentStatus = 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
 
@@ -31,6 +33,10 @@ const updateComponentSchema = z.object({
   estimatedHours: z.number().min(0).max(1000).optional(),
   actualHours: z.number().min(0).max(1000).optional(),
   dueDate: z.string().optional(),
+});
+
+const deleteComponentSchema = z.object({
+  id: z.string().min(1),
 });
 
 /**
@@ -359,4 +365,168 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
   revalidatePath(`/projects/${projectId}`);
 
   return { component: result.data };
+});
+
+/**
+ * Deletes a component and all related data
+ * Uses saga pattern for cascade deletion of:
+ * - Assignments
+ * - Dependencies (both directions to prevent orphans)
+ * - Status history
+ * - Previews
+ * - The component itself
+ */
+export const deleteComponent = authActionClient.schema(deleteComponentSchema).action(async ({ parsedInput, ctx }) => {
+  const { id } = parsedInput;
+  const { userId, isDemo } = ctx;
+
+  // Demo mode - return marker for client-side handling
+  if (isDemo) {
+    return { _demo: true, _action: 'deleteComponent', _input: { componentId: id } };
+  }
+
+  // Verify access via DynamoDB
+  const access = await verifyComponentAccess(userId, id);
+  if (!access) {
+    throw new MyCustomError('Component not found or access denied');
+  }
+
+  const projectId = access.component.projectId;
+  const componentName = access.component.name;
+  const entities = getEntities();
+
+  try {
+    await dualWrite(
+      'component',
+      'delete',
+      async () => null, // Prisma removed - DynamoDB only
+      async () => {
+        // DynamoDB: Manual cascade delete using saga pattern
+        // Order: related data first, then component
+
+        await executeSaga([
+          {
+            name: 'Delete assignments',
+            execute: async () => {
+              const assignments = await entities.assignment.query.primary({ componentId: id }).go();
+              if (assignments.data.length > 0) {
+                await batchDelete(
+                  assignments.data.map((a) => ({
+                    pk: `COMPONENT#${id}`,
+                    sk: `ASSIGNEE#${a.userId}`,
+                  }))
+                );
+              }
+              return assignments.data.length;
+            },
+            compensate: async () => {
+              // Log for manual recovery if needed
+            },
+          },
+          {
+            name: 'Delete dependencies (both directions)',
+            execute: async () => {
+              // 1. Dependencies where this component DEPENDS ON others
+              const dependsOnResult = await entities.dependency.query.primary({ dependentComponentId: id }).go();
+              if (dependsOnResult.data.length > 0) {
+                await batchDelete(
+                  dependsOnResult.data.map((d) => ({
+                    pk: `COMPONENT#${id}`,
+                    sk: `DEPENDS_ON#${d.requiredComponentId}`,
+                  }))
+                );
+              }
+
+              // 2. Dependencies where OTHER components depend ON this one (prevents orphans)
+              const requiredByResult = await entities.dependency.query.byRequired({ requiredComponentId: id }).go();
+              if (requiredByResult.data.length > 0) {
+                await batchDelete(
+                  requiredByResult.data.map((d) => ({
+                    pk: `COMPONENT#${d.dependentComponentId}`,
+                    sk: `DEPENDS_ON#${id}`,
+                  }))
+                );
+              }
+
+              return dependsOnResult.data.length + requiredByResult.data.length;
+            },
+            compensate: async () => {},
+          },
+          {
+            name: 'Delete status history',
+            execute: async () => {
+              const history = await entities.componentStatusHistory.query.primary({ componentId: id }).go();
+              if (history.data.length > 0) {
+                await batchDelete(
+                  history.data.map((h) => ({
+                    pk: `COMPONENT#${id}`,
+                    sk: `STATUS_HISTORY#${h.enteredAt}#${h.id}`,
+                  }))
+                );
+              }
+              return history.data.length;
+            },
+            compensate: async () => {},
+          },
+          {
+            name: 'Delete previews',
+            execute: async () => {
+              const previews = await entities.componentPreview.query.primary({ componentId: id }).go();
+              if (previews.data.length > 0) {
+                await batchDelete(
+                  previews.data.map((p) => ({
+                    pk: `COMPONENT#${id}`,
+                    sk: `PREVIEW#${p.createdAt}#${p.id}`,
+                  }))
+                );
+              }
+              return previews.data.length;
+            },
+            compensate: async () => {},
+          },
+          {
+            name: 'Delete component and log activity',
+            execute: async () => {
+              const service = getService();
+              const activityId = randomUUID();
+
+              await service.transaction
+                .write(({ component, activity }) => [
+                  component.delete({ id }).commit(),
+                  activity
+                    .create({
+                      id: activityId,
+                      type: 'COMPONENT_UPDATED', // Using existing type since COMPONENT_DELETED may not exist
+                      projectId,
+                      userId,
+                      metadata: {
+                        componentName,
+                        componentId: id,
+                        action: 'deleted',
+                      },
+                    })
+                    .commit(),
+                ])
+                .go();
+
+              return 1;
+            },
+            compensate: async () => {
+              // Cannot easily restore - would need original data
+            },
+          },
+        ]);
+
+        return { success: true };
+      },
+      { context: { action: 'deleteComponent', componentId: id, projectId } }
+    );
+  } catch (error) {
+    console.error('Failed to delete component:', error);
+    throw new MyCustomError('Failed to delete component. Please try again.');
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+
+  return { success: true };
 });

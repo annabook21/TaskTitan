@@ -128,8 +128,8 @@ export const updateProject = authActionClient.schema(updateProjectSchema).action
     'update',
     async () => null, // Prisma removed - DynamoDB only
     async () => {
-      // ElectroDB update
-      const updated = await entities.project.update({ id }).set(updateData).go();
+      // ElectroDB update - use response: 'all_new' to return complete updated item
+      const updated = await entities.project.update({ id }).set(updateData).go({ response: 'all_new' });
       return updated.data;
     },
     { context: { action: 'updateProject', projectId: id } }
@@ -212,13 +212,26 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                   );
                 }
 
-                // Delete dependencies where this component is the dependent (primary uses dependentComponentId)
-                const dependencies = await entities.dependency.query.primary({ dependentComponentId: comp.id }).go();
-                if (dependencies.data.length > 0) {
+                // Delete dependencies in BOTH directions to prevent orphans:
+                // 1. Dependencies where this component DEPENDS ON others (primary index)
+                const dependsOnResult = await entities.dependency.query.primary({ dependentComponentId: comp.id }).go();
+                if (dependsOnResult.data.length > 0) {
                   await batchDelete(
-                    dependencies.data.map((d) => ({
+                    dependsOnResult.data.map((d) => ({
                       pk: `COMPONENT#${comp.id}`,
                       sk: `DEPENDS_ON#${d.requiredComponentId}`,
+                    }))
+                  );
+                }
+
+                // 2. Dependencies where OTHER components depend ON this one (byRequired GSI)
+                // This prevents orphan dependency records pointing to deleted components
+                const requiredByResult = await entities.dependency.query.byRequired({ requiredComponentId: comp.id }).go();
+                if (requiredByResult.data.length > 0) {
+                  await batchDelete(
+                    requiredByResult.data.map((d) => ({
+                      pk: `COMPONENT#${d.dependentComponentId}`,
+                      sk: `DEPENDS_ON#${comp.id}`,
                     }))
                   );
                 }
@@ -246,12 +259,12 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                 }
               }
 
-              // Delete all components
+              // Delete all components (using correct PK template: COMPONENT#${id})
               if (components.data.length > 0) {
                 await batchDelete(
                   components.data.map((c) => ({
-                    pk: `PROJECT#${id}`,
-                    sk: `COMPONENT#${c.id}`,
+                    pk: `COMPONENT#${c.id}`,
+                    sk: 'METADATA',
                   }))
                 );
               }

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { logger } from '@/lib/logger';
 import { runJob } from '@/lib/jobs';
-import { getEntities } from '@/lib/dynamodb/service';
+import { getEntities, getService } from '@/lib/dynamodb/service';
 
 // Type definitions (previously from @prisma/client)
 type ComponentStatus = 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
@@ -51,9 +51,9 @@ export async function findComponentsForPR(
   // Get all components for the project
   const componentsResult = await entities.component.query.byProject({ projectId }).go();
   
-  // Filter by componentIds or prUrl
+  // Filter by componentIds or prUrl (githubPrUrl is an optional field on Component)
   const matchingComponents = componentsResult.data.filter(
-    (c) => componentIds.includes(c.id) || (c as any).githubPrUrl === prUrl
+    (c) => componentIds.includes(c.id) || c.githubPrUrl === prUrl
   );
   
   // Fetch assignments for each component
@@ -215,15 +215,30 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
     const targetStatus = getTargetStatusForEvent(event, project.transitionConfigs, project.githubPrTargetStatus);
 
     if (targetStatus) {
-      for (const component of components) {
-        await updateComponentStatus(component, targetStatus, project.ownerId, {
-          event,
-          prUrl: pr.html_url,
-          prTitle: pr.title,
-          prNumber: pr.number,
-          triggeredBy: pr.user.login,
-          mergedBy: pr.merged_by?.login,
-          mergedAt: pr.merged_at,
+      // Process component status updates in parallel with error handling
+      const results = await Promise.allSettled(
+        components.map((component) =>
+          updateComponentStatus(component, targetStatus, project.ownerId, {
+            event,
+            prUrl: pr.html_url,
+            prTitle: pr.title,
+            prNumber: pr.number,
+            triggeredBy: pr.user.login,
+            mergedBy: pr.merged_by?.login,
+            mergedAt: pr.merged_at,
+          })
+        )
+      );
+
+      // Log any failures but don't fail the entire webhook
+      const failures = results.filter((r) => r.status === 'rejected');
+      if (failures.length > 0) {
+        logger.warn('Some component status updates failed', {
+          extra: {
+            failureCount: failures.length,
+            totalComponents: components.length,
+            errors: failures.map((f) => (f as PromiseRejectedResult).reason?.message),
+          },
         });
       }
     }
@@ -275,13 +290,28 @@ export async function handlePullRequestReviewEvent(
   const targetStatus = getTargetStatusForEvent('PR_APPROVED', project.transitionConfigs, null);
 
   if (targetStatus) {
-    for (const component of components) {
-      await updateComponentStatus(component, targetStatus, project.ownerId, {
-        event: 'PR_APPROVED',
-        prUrl: pr.html_url,
-        prTitle: pr.title,
-        prNumber: pr.number,
-        approvedBy: payload.review.user.login,
+    // Process component status updates in parallel with error handling
+    const results = await Promise.allSettled(
+      components.map((component) =>
+        updateComponentStatus(component, targetStatus, project.ownerId, {
+          event: 'PR_APPROVED',
+          prUrl: pr.html_url,
+          prTitle: pr.title,
+          prNumber: pr.number,
+          approvedBy: payload.review.user.login,
+        })
+      )
+    );
+
+    // Log any failures but don't fail the entire webhook
+    const failures = results.filter((r) => r.status === 'rejected');
+    if (failures.length > 0) {
+      logger.warn('Some component status updates failed on PR approval', {
+        extra: {
+          failureCount: failures.length,
+          totalComponents: components.length,
+          errors: failures.map((f) => (f as PromiseRejectedResult).reason?.message),
+        },
       });
     }
   }
@@ -297,6 +327,9 @@ export async function handlePullRequestReviewEvent(
 
 /**
  * Update component status and create activity/notifications
+ * 
+ * IMPORTANT: This function now properly creates ComponentStatusHistory entries
+ * to maintain accurate cycle time metrics and aging indicators.
  */
 async function updateComponentStatus(
   component: ComponentData,
@@ -327,10 +360,15 @@ async function updateComponentStatus(
     return;
   }
 
-  // Update component status
-  await entities.component.update({ id: component.id }).set({
-    status: targetStatus,
-  }).go();
+  const nowIso = new Date().toISOString();
+  const newHistoryId = randomUUID();
+  const activityId = randomUUID();
+
+  // Query existing open status history entry to close it
+  const historyResult = await entities.componentStatusHistory.query
+    .primary({ componentId: component.id })
+    .go();
+  const openEntry = historyResult.data.find((h) => !h.exitedAt);
 
   // Map event to activity type
   const activityType =
@@ -338,27 +376,77 @@ async function updateComponentStatus(
       ? 'GITHUB_PR_MERGED'
       : metadata.event === 'PR_CLOSED'
         ? 'GITHUB_PR_CLOSED'
-        : 'GITHUB_PR_OPENED';
+        : metadata.event === 'PR_APPROVED'
+          ? 'COMPONENT_STATUS_CHANGED'  // Use generic type for PR_APPROVED
+          : 'GITHUB_PR_OPENED';
 
-  // Create activity log
-  await entities.activity.create({
-    id: randomUUID(),
-    type: activityType,
-    projectId: component.projectId,
-    userId: projectOwnerId,
-    metadata: {
-      componentName: component.name,
-      componentId: component.id,
-      oldStatus,
-      newStatus: targetStatus,
-      ...metadata,
-    },
-  }).go();
+  // Use transaction for atomicity - ensures status, history, and activity are consistent
+  const service = getService();
+  await service.transaction
+    .write(({ component: compEntity, componentStatusHistory, activity }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ops: any[] = [];
 
-  // Send notifications to assigned users
+      // 1. Update component status
+      ops.push(
+        compEntity.update({ id: component.id }).set({ status: targetStatus }).commit()
+      );
+
+      // 2. Close previous status history entry (if exists)
+      if (openEntry) {
+        ops.push(
+          componentStatusHistory
+            .update({
+              componentId: component.id,
+              enteredAt: openEntry.enteredAt,
+              id: openEntry.id,
+            })
+            .set({ exitedAt: nowIso })
+            .commit()
+        );
+      }
+
+      // 3. Create new status history entry (CRITICAL for cycle time metrics)
+      ops.push(
+        componentStatusHistory
+          .create({
+            id: newHistoryId,
+            componentId: component.id,
+            status: targetStatus,
+            enteredAt: nowIso,
+            exitedAt: undefined,
+          })
+          .commit()
+      );
+
+      // 4. Create activity log
+      ops.push(
+        activity
+          .create({
+            id: activityId,
+            type: activityType,
+            projectId: component.projectId,
+            userId: projectOwnerId,
+            metadata: {
+              componentName: component.name,
+              componentId: component.id,
+              oldStatus,
+              newStatus: targetStatus,
+              ...metadata,
+            },
+          })
+          .commit()
+      );
+
+      return ops;
+    })
+    .go();
+
+  // Send notifications to assigned users (non-critical, best-effort)
   const assignedUserIds = component.assignments.map((a) => a.userId);
   if (assignedUserIds.length > 0) {
-    await Promise.all(
+    // Use Promise.allSettled to not fail if some notifications fail
+    await Promise.allSettled(
       assignedUserIds.map((userId) =>
         runJob({
           type: 'notify',
@@ -379,6 +467,7 @@ async function updateComponentStatus(
       newStatus: targetStatus,
       prUrl: metadata.prUrl,
       assignedUsersNotified: assignedUserIds.length,
+      statusHistoryCreated: true,
     },
   });
 }

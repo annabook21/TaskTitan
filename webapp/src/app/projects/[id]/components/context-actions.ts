@@ -1,6 +1,6 @@
 'use server';
 
-import { authActionClient } from '@/lib/safe-action';
+import { authActionClient, MyCustomError } from '@/lib/safe-action';
 import { z } from 'zod';
 import { summarizeComponentContext } from '@/lib/ai';
 import { revalidatePath } from 'next/cache';
@@ -46,7 +46,7 @@ export const updateComponentContextAction = authActionClient
     // Verify user has access to this component via DynamoDB
     const access = await verifyComponentAccess(userId, componentId);
     if (!access) {
-      throw new Error('Component not found or access denied');
+      throw new MyCustomError('Component not found or access denied');
     }
     const projectId = access.component.projectId;
 
@@ -103,7 +103,7 @@ export const generateContextSummaryAction = authActionClient
     // Fetch component with access check via DynamoDB
     const access = await verifyComponentAccess(userId, componentId);
     if (!access) {
-      throw new Error('Component not found or access denied');
+      throw new MyCustomError('Component not found or access denied');
     }
     const componentData = {
       id: access.component.id,
@@ -116,7 +116,7 @@ export const generateContextSummaryAction = authActionClient
     };
 
     if (!componentData.contextDecision || !componentData.contextRationale) {
-      throw new Error('Component must have decision and rationale before generating summary');
+      throw new MyCustomError('Component must have decision and rationale before generating summary');
     }
 
     // Generate AI summary
@@ -173,7 +173,7 @@ export const clearComponentContextAction = authActionClient
     // Verify user has access via DynamoDB
     const access = await verifyComponentAccess(userId, componentId);
     if (!access) {
-      throw new Error('Component not found or access denied');
+      throw new MyCustomError('Component not found or access denied');
     }
     const projectId = access.component.projectId;
 

@@ -86,6 +86,8 @@ const ProjectSchema = {
     primary: { pk: { field: 'pk', composite: ['id'], template: 'PROJECT#${id}' }, sk: { field: 'sk', composite: [], template: 'METADATA' } },
     byOwner: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['ownerId'], template: 'OWNER#${ownerId}' }, sk: { field: 'gsi1sk', composite: ['id'], template: 'PROJECT#${id}' } },
     byTeam: { index: 'gsi2', pk: { field: 'gsi2pk', composite: ['teamId'], template: 'TEAM#${teamId}' }, sk: { field: 'gsi2sk', composite: ['id'], template: 'PROJECT#${id}' } },
+    // GSI for efficient GitHub webhook lookup - sparse index (only items with githubRepoUrl)
+    byGitHubRepo: { index: 'gsi3', pk: { field: 'gsi3pk', composite: ['githubRepoUrl'], template: 'GITHUB_REPO#${githubRepoUrl}' }, sk: { field: 'gsi3sk', composite: ['id'], template: 'PROJECT#${id}' } },
   },
 } as const;
 
