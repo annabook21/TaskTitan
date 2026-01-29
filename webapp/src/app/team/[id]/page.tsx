@@ -23,6 +23,7 @@ import DeleteTeamButton from './DeleteTeamButton';
 import DemoTeamDetailPage from './DemoTeamDetailPage';
 import { getEntities } from '@/lib/dynamodb/service';
 import { verifyTeamMembership } from '@/lib/dynamodb/auth-helpers';
+import { batchFetchUsers, getComponentCountsByProjectIds } from '@/lib/dynamodb/batch-queries';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -81,29 +82,28 @@ export default async function TeamDetailPage({ params }: Props) {
     (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
   );
 
-  // Fetch user details for each membership
-  const membershipsWithUsers = await Promise.all(
-    sortedMemberships.map(async (m) => {
-      const userResult = await entities.user.get({ id: m.userId }).go();
-      return {
-        ...m,
-        User: userResult.data || { id: m.userId, name: null, email: 'unknown@example.com' },
-      };
-    })
-  );
+  // Batch fetch user details for all memberships
+  const memberUserIds = sortedMemberships.map((m) => m.userId);
+  const usersMap = await batchFetchUsers(memberUserIds);
+  const membershipsWithUsers = sortedMemberships.map((m) => ({
+    ...m,
+    User: usersMap.get(m.userId) ?? { id: m.userId, name: null, email: 'unknown@example.com' },
+  }));
 
-  // Fetch component counts for each project
-  const projectsWithCounts = await Promise.all(
-    projectsResult.data
-      .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
-      .map(async (p) => {
-        const componentsResult = await entities.component.query.byProject({ projectId: p.id }).go();
-        return {
-          ...p,
-          _count: { Component: componentsResult.data.length },
-        };
-      })
+  // Batch fetch component counts for all projects
+  const sortedProjects = projectsResult.data.sort(
+    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
   );
+  const projectIds = sortedProjects.map((p) => p.id);
+  const countsMap = await getComponentCountsByProjectIds(projectIds);
+
+  const projectsWithCounts = sortedProjects.map((p) => {
+    const { count } = countsMap.get(p.id) ?? { count: 0 };
+    return {
+      ...p,
+      _count: { Component: count },
+    };
+  });
 
   // Get current user's role in this team
   const currentUserMembership = membershipsWithUsers.find((m) => String(m.userId) === String(userId));

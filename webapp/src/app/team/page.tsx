@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Users, Plus, FolderKanban, Crown, Shield, User as UserIcon, Eye, ArrowRight } from 'lucide-react';
 import DemoTeamListPage from './DemoTeamListPage';
 import { getEntities } from '@/lib/dynamodb/service';
+import { batchFetchTeams, batchFetchUsers } from '@/lib/dynamodb/batch-queries';
 
 const roleIcons = {
   OWNER: Crown,
@@ -51,73 +52,81 @@ export default async function TeamPage() {
     return <DemoTeamListPage />;
   }
 
-  // DynamoDB: Multiple round-trips with application-layer aggregation
+  // DynamoDB: Batch queries to reduce N+1
   const entities = getEntities();
   let memberships: TeamMembershipData[];
 
-    // Step 1: Get user's memberships (GSI1: userId)
-    const membershipsResult = await entities.membership.query.byUser({ userId }).go();
+  // Step 1: Get user's memberships (GSI1: userId)
+  const membershipsResult = await entities.membership.query.byUser({ userId }).go();
 
-    if (membershipsResult.data.length === 0) {
-      memberships = [];
-    } else {
-      // Sort by joinedAt desc
-      const sortedMemberships = membershipsResult.data.sort(
-        (a, b) => new Date(b.joinedAt || 0).getTime() - new Date(a.joinedAt || 0).getTime()
-      );
+  if (membershipsResult.data.length === 0) {
+    memberships = [];
+  } else {
+    // Sort by joinedAt desc
+    const sortedMemberships = membershipsResult.data.sort(
+      (a, b) => new Date(b.joinedAt || 0).getTime() - new Date(a.joinedAt || 0).getTime()
+    );
 
-      // Step 2: For each membership, fetch team data in parallel
-      memberships = await Promise.all(
-        sortedMemberships.map(async (membership) => {
-          const teamId = membership.teamId;
+    const teamIds = sortedMemberships.map((m) => m.teamId);
+    // Step 2: Batch fetch teams
+    const teamMap = await batchFetchTeams(teamIds);
 
-          // Parallel: team details, team memberships, and project count
-          const [teamResult, teamMembershipsResult, projectsResult] = await Promise.all([
-            entities.team.get({ id: teamId }).go(),
-            entities.membership.query.primary({ teamId }).go(),
-            entities.project.query.byTeam({ teamId }).go(),
-          ]);
+    // Step 3: For each membership, fetch team memberships and project count
+    const teamDataResults = await Promise.all(
+      sortedMemberships.map(async (membership) => {
+        const team = teamMap.get(membership.teamId);
+        if (!team) return null;
 
-          const team = teamResult.data;
-          if (!team) {
-            return null;
-          }
+        const [teamMembershipsResult, projectsResult] = await Promise.all([
+          entities.membership.query.primary({ teamId: team.id }).go(),
+          entities.project.query.byTeam({ teamId: team.id }).go(),
+        ]);
 
-          // Sort team memberships by joinedAt and take first 6
-          const sortedTeamMembers = teamMembershipsResult.data
-            .sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime())
-            .slice(0, 6);
+        const sortedTeamMembers = teamMembershipsResult.data
+          .sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime())
+          .slice(0, 6);
 
-          // Fetch user details for each team member
-          const teamMembersWithUsers = await Promise.all(
-            sortedTeamMembers.map(async (m) => {
-              const userResult = await entities.user.get({ id: m.userId }).go();
-              return {
-                User: {
-                  id: m.userId,
-                  name: userResult.data?.name ?? null,
-                  email: userResult.data?.email ?? 'unknown@example.com',
-                },
-              };
-            })
-          );
+        return {
+          membership,
+          team,
+          sortedTeamMembers,
+          membershipsCount: teamMembershipsResult.data.length,
+          projectsCount: projectsResult.data.length,
+        };
+      })
+    );
 
-          return {
-            role: (membership.role as TeamRole) || 'MEMBER',
-            Team: {
-              id: team.id,
-              name: team.name,
-              description: team.description ?? null,
-              Membership: teamMembersWithUsers,
-              _count: {
-                Membership: teamMembershipsResult.data.length,
-                Project: projectsResult.data.length,
+    // Step 4: Collect all member user IDs and batch fetch users
+    const allMemberUserIds = teamDataResults
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .flatMap((r) => r.sortedTeamMembers.map((m) => m.userId));
+    const usersMap = await batchFetchUsers([...new Set(allMemberUserIds)]);
+
+    memberships = teamDataResults
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .map(({ membership, team, sortedTeamMembers, membershipsCount, projectsCount }) => ({
+        role: (membership.role as TeamRole) || 'MEMBER',
+        Team: {
+          id: team.id,
+          name: team.name,
+          description: team.description ?? null,
+          Membership: sortedTeamMembers.map((m) => {
+            const u = usersMap.get(m.userId);
+            return {
+              User: {
+                id: m.userId,
+                name: u?.name ?? null,
+                email: u?.email ?? 'unknown@example.com',
               },
-            },
-          };
-        })
-      ).then((results) => results.filter((r): r is TeamMembershipData => r !== null));
-    }
+            };
+          }),
+          _count: {
+            Membership: membershipsCount,
+            Project: projectsCount,
+          },
+        },
+      }));
+  }
 
   return (
     <div className="min-h-screen flex flex-col">

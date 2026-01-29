@@ -22,6 +22,7 @@ import SprintRefineButton from './SprintRefineButton';
 import DemoSprintDetailPage from './DemoSprintDetailPage';
 import { getEntities } from '@/lib/dynamodb/service';
 import { verifySprintAccess } from '@/lib/dynamodb/auth-helpers';
+import { batchFetchAssignmentsByComponents, batchFetchUsers } from '@/lib/dynamodb/batch-queries';
 
 interface Props {
   params: Promise<{ id: string; sprintId: string }>;
@@ -84,37 +85,36 @@ export default async function SprintDetailPage({ params }: Props) {
   const allComponents = componentResults.flatMap((r) => r.data);
   const sprintComponents = allComponents.filter((c) => c.sprintId === sprintId);
 
-  // Fetch assignments and users for each component
-  const componentsWithDetails = await Promise.all(
-    sprintComponents.map(async (comp) => {
-      const project = projectsResult.data.find((p) => p.id === comp.projectId);
-      const assignmentsResult = await entities.assignment.query.primary({ componentId: comp.id }).go();
-      
-      const assignmentsWithUsers = await Promise.all(
-        assignmentsResult.data.map(async (a) => {
-          const userResult = await entities.user.get({ id: a.userId }).go();
-          return {
-            User: {
-              id: a.userId,
-              name: userResult.data?.name ?? null,
-              email: userResult.data?.email ?? 'unknown@example.com',
-            },
-          };
-        })
-      );
+  // Batch fetch assignments for all sprint components, then batch fetch users
+  const componentIds = sprintComponents.map((c) => c.id);
+  const assignmentsMap = await batchFetchAssignmentsByComponents(componentIds);
+  const allAssignmentUserIds = Array.from(assignmentsMap.values()).flatMap((arr) => arr.map((a) => a.userId));
+  const usersMap = await batchFetchUsers([...new Set(allAssignmentUserIds)]);
 
-      return {
-        id: comp.id,
-        name: comp.name,
-        status: comp.status,
-        priority: (comp as any).priority ?? 0,
-        estimatedHours: (comp as any).estimatedHours ?? null,
-        description: (comp as any).description ?? null,
-        Project: project ? { id: project.id, name: project.name } : null,
-        Assignment: assignmentsWithUsers,
-      };
-    })
-  );
+  const projectMap = new Map(projectsResult.data.map((p) => [p.id, p]));
+
+  const componentsWithDetails = sprintComponents.map((comp) => {
+    const project = projectMap.get(comp.projectId);
+    const assignments = assignmentsMap.get(comp.id) ?? [];
+    const assignmentsWithUsers = assignments.map((a) => ({
+      User: {
+        id: a.userId,
+        name: usersMap.get(a.userId)?.name ?? null,
+        email: usersMap.get(a.userId)?.email ?? 'unknown@example.com',
+      },
+    }));
+
+    return {
+      id: comp.id,
+      name: comp.name,
+      status: comp.status,
+      priority: (comp as any).priority ?? 0,
+      estimatedHours: (comp as any).estimatedHours ?? null,
+      description: (comp as any).description ?? null,
+      Project: project ? { id: project.id, name: project.name } : null,
+      Assignment: assignmentsWithUsers,
+    };
+  });
 
   // Sort components by status then priority
   const sortedComponents = componentsWithDetails.sort((a, b) => {

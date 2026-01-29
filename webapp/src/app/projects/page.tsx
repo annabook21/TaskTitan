@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Plus, FolderKanban, Layers, Clock, Users, ArrowRight, Filter } from 'lucide-react';
 import DemoProjectsPage from './DemoProjectsPage';
 import { getEntities } from '@/lib/dynamodb/service';
+import { batchFetchTeams, getComponentCountsByProjectIds } from '@/lib/dynamodb/batch-queries';
 
 // Type for project data used in the projects listing
 interface ProjectWithStats {
@@ -36,13 +37,11 @@ export default async function ProjectsPage() {
   if (teamIds.length === 0) {
     projectsWithStats = [];
   } else {
-    // Step 2: Fetch teams for names
-    const teamResults = await Promise.all(teamIds.map((teamId) => entities.team.get({ id: teamId }).go()));
-    const teamMap = new Map<string, { id: string; name: string }>();
-    for (const result of teamResults) {
-      if (result.data) {
-        teamMap.set(result.data.id, { id: result.data.id, name: result.data.name });
-      }
+    // Step 2: Batch fetch teams
+    const teamMap = await batchFetchTeams(teamIds);
+    const teamInfoMap = new Map<string, { id: string; name: string }>();
+    for (const [tid, team] of teamMap) {
+      teamInfoMap.set(tid, { id: team.id, name: team.name });
     }
 
     // Step 3: Fetch all projects for all teams
@@ -54,36 +53,29 @@ export default async function ProjectsPage() {
     const allProjects = projectsByTeam.flatMap((result, index) =>
       result.data.map((project) => ({
         ...project,
-        team: teamMap.get(teamIds[index]) || { id: teamIds[index], name: 'Unknown' },
+        team: teamInfoMap.get(teamIds[index]) ?? { id: teamIds[index], name: 'Unknown' },
       }))
     );
 
     // Sort by updatedAt desc
     allProjects.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
 
-    // Step 4: For each project, fetch components and aggregate status counts
-    projectsWithStats = await Promise.all(
-      allProjects.map(async (project) => {
-        const componentsResult = await entities.component.query.byProject({ projectId: project.id }).go();
+    // Step 4: Batch fetch component counts for all projects
+    const projectIds = allProjects.map((p) => p.id);
+    const countsMap = await getComponentCountsByProjectIds(projectIds);
 
-        // Application-layer aggregation: group by status
-        const componentsByStatus: Record<string, number> = {};
-        for (const component of componentsResult.data) {
-          const status = component.status || 'PLANNING';
-          componentsByStatus[status] = (componentsByStatus[status] || 0) + 1;
-        }
-
-        return {
-          id: project.id,
-          name: project.name,
-          description: project.description ?? null,
-          updatedAt: new Date(project.updatedAt || Date.now()),
-          team: project.team,
-          _count: { components: componentsResult.data.length },
-          componentsByStatus,
-        };
-      })
-    );
+    projectsWithStats = allProjects.map((project) => {
+      const { count, componentsByStatus } = countsMap.get(project.id) ?? { count: 0, componentsByStatus: {} };
+      return {
+        id: project.id,
+        name: project.name,
+        description: project.description ?? null,
+        updatedAt: new Date(project.updatedAt || Date.now()),
+        team: project.team,
+        _count: { components: count },
+        componentsByStatus,
+      };
+    });
   }
 
   return (

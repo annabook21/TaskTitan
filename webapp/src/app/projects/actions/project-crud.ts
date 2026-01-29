@@ -192,7 +192,8 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
               return activities.data.length;
             },
             compensate: async () => {
-              // Activities are append-only, no compensate needed if project delete fails
+              // Activities are append-only; no re-insert. If a later step failed, project still exists and activities are already deleted.
+              // Rollback: restore activities from PITR/backup if needed, or leave as-is (project delete will be retried or abandoned).
             },
           },
           {
@@ -272,8 +273,9 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
               return components.data.length;
             },
             compensate: async () => {
-              // Complex compensation - in practice, may need to restore from backup
-              // For now, log the failure for manual intervention
+              // Cannot re-create deleted components and related rows without full backup.
+              // Rollback strategy: use DynamoDB PITR to restore to a point before this saga, or restore from application-level backup.
+              // Manual intervention: if project delete step failed, orphaned components may exist; clean up or restore from backup.
             },
           },
           {
@@ -283,8 +285,8 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
               return 1;
             },
             compensate: async () => {
-              // Cannot easily restore deleted project without original data
-              // In production, consider soft-delete pattern
+              // Cannot re-create deleted project without original payload.
+              // Rollback strategy: restore project (and children) from PITR or application backup; or use soft-delete pattern in future.
             },
           },
         ]);

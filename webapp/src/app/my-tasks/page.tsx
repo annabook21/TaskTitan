@@ -4,6 +4,13 @@ import Link from 'next/link';
 import { CheckCircle2, Clock, AlertCircle, ListTodo, Calendar, ArrowRight } from 'lucide-react';
 import DemoMyTasksPage from './DemoMyTasksPage';
 import { getEntities } from '@/lib/dynamodb/service';
+import {
+  batchFetchComponents,
+  batchFetchProjects,
+  batchFetchTeams,
+  batchFetchSprints,
+  batchFetchStatusHistory,
+} from '@/lib/dynamodb/batch-queries';
 
 export default async function MyTasksPage() {
   const session = await getSession();
@@ -20,38 +27,38 @@ export default async function MyTasksPage() {
   const assignmentsResult = await entities.assignment.query.byUser({ userId }).go();
   const assignments = assignmentsResult.data;
 
-  // Fetch component, project, team, sprint, and status history for each assignment
-  const tasks = await Promise.all(
-    assignments.map(async (a) => {
-      const [componentResult, statusHistoryResult] = await Promise.all([
-        entities.component.get({ id: a.componentId }).go(),
-        entities.componentStatusHistory.query.primary({ componentId: a.componentId }).go(),
-      ]);
+  const componentIds = assignments.map((a) => a.componentId);
+  const [componentsMap, statusHistoryMap] = await Promise.all([
+    batchFetchComponents(componentIds),
+    batchFetchStatusHistory(componentIds),
+  ]);
 
-      const component = componentResult.data;
+  const componentList = Array.from(componentsMap.values());
+  const projectIds = [...new Set(componentList.map((c) => c.projectId).filter((id): id is string => Boolean(id)))];
+  const sprintIds = [...new Set(componentList.map((c) => c.sprintId).filter((id): id is string => Boolean(id)))];
+
+  const projectsMap = await batchFetchProjects(projectIds);
+  const teamIds = [...new Set(Array.from(projectsMap.values()).map((p) => p.teamId))];
+  const [teamsMap2, sprintsMap] = await Promise.all([
+    batchFetchTeams(teamIds),
+    batchFetchSprints(sprintIds),
+  ]);
+
+  const tasks = assignments
+    .map((a) => {
+      const component = componentsMap.get(a.componentId);
       if (!component) return null;
-
-      const [projectResult, sprintResult] = await Promise.all([
-        entities.project.get({ id: component.projectId }).go(),
-        component.sprintId ? entities.sprint.get({ id: component.sprintId }).go() : Promise.resolve({ data: null }),
-      ]);
-
-      const project = projectResult.data;
+      const project = projectsMap.get(component.projectId);
       if (!project) return null;
+      const team = teamsMap2.get(project.teamId);
+      const sprint = component.sprintId ? sprintsMap.get(component.sprintId) : null;
 
-      const teamResult = await entities.team.get({ id: project.teamId }).go();
-      const team = teamResult.data;
-
-      // Sort status history by enteredAt
-      const sortedHistory = statusHistoryResult.data.sort(
-        (a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime()
+      const history = statusHistoryMap.get(component.id) ?? [];
+      const sortedHistory = [...history].sort(
+        (x, y) => new Date(x.enteredAt).getTime() - new Date(y.enteredAt).getTime()
       );
-
-      // Find current status entry (no exitedAt) or use last entry
       const currentStatusEntry =
-        sortedHistory.find((h) => !h.exitedAt) || sortedHistory[sortedHistory.length - 1];
-
-      // Calculate how long in current status
+        sortedHistory.find((h) => !h.exitedAt) ?? sortedHistory[sortedHistory.length - 1];
       const statusAge = currentStatusEntry
         ? Math.floor((Date.now() - new Date(currentStatusEntry.enteredAt).getTime()) / (1000 * 60 * 60 * 24))
         : 0;
@@ -72,19 +79,19 @@ export default async function MyTasksPage() {
           name: project.name,
           Team: team ? { id: team.id, name: team.name } : { id: project.teamId, name: 'Unknown' },
         },
-        sprint: sprintResult.data
+        sprint: sprint
           ? {
-              id: sprintResult.data.id,
-              name: sprintResult.data.name,
-              status: sprintResult.data.status,
-              startDate: sprintResult.data.startDate,
-              endDate: sprintResult.data.endDate,
+              id: sprint.id,
+              name: sprint.name,
+              status: sprint.status,
+              startDate: sprint.startDate,
+              endDate: sprint.endDate,
             }
           : null,
         assignedAt: a.assignedAt,
       };
     })
-  );
+    .filter((t): t is NonNullable<typeof t> => t !== null);
 
   // Filter out null tasks and sort by assignedAt descending
   const validTasks = tasks

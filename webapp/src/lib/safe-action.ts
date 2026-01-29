@@ -64,13 +64,8 @@ export const authActionClient = actionClient.use(async ({ next }) => {
           createdAt: now,
           updatedAt: now,
         })
-        .go({
-          // Only create if the item doesn't already exist (pk doesn't exist)
-          condition: {
-            field: 'pk',
-            exists: false,
-          },
-        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .go({ condition: { field: 'pk', exists: false } } as any);
     } catch (error) {
       // ConditionalCheckFailedException means user already exists - that's fine
       const errorName = (error as { code?: string })?.code;

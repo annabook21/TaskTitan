@@ -420,7 +420,8 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
               return assignments.data.length;
             },
             compensate: async () => {
-              // Log for manual recovery if needed
+              // Assignments already deleted; cannot re-create without original data.
+              // Manual rollback: use DynamoDB PITR or application backup to restore if a later step failed.
             },
           },
           {
@@ -450,7 +451,10 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
 
               return dependsOnResult.data.length + requiredByResult.data.length;
             },
-            compensate: async () => {},
+            compensate: async () => {
+              // Dependencies already deleted; cannot re-create without original data.
+              // Manual rollback: use DynamoDB PITR or application backup to restore if a later step failed.
+            },
           },
           {
             name: 'Delete status history',
@@ -466,7 +470,10 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
               }
               return history.data.length;
             },
-            compensate: async () => {},
+            compensate: async () => {
+              // Status history already deleted; cannot re-create without original data.
+              // Manual rollback: use DynamoDB PITR or application backup to restore if a later step failed.
+            },
           },
           {
             name: 'Delete previews',
@@ -482,7 +489,10 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
               }
               return previews.data.length;
             },
-            compensate: async () => {},
+            compensate: async () => {
+              // Previews already deleted; cannot re-create without original data.
+              // Manual rollback: use DynamoDB PITR or application backup to restore if a later step failed.
+            },
           },
           {
             name: 'Delete component and log activity',
@@ -512,7 +522,8 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
               return 1;
             },
             compensate: async () => {
-              // Cannot easily restore - would need original data
+              // Cannot re-create deleted component and activity without original data.
+              // Manual rollback: use DynamoDB PITR or application backup to restore; componentId = id.
             },
           },
         ]);

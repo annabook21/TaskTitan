@@ -103,10 +103,8 @@ export const createSprint = authActionClient.schema(createSprintSchema).action(a
             capacity,
             status: 'PLANNING',
           })
-          .go({
-            // Conditional write to prevent duplicate sprint creation
-            condition: { field: 'pk', exists: false },
-          });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .go({ condition: { field: 'pk', exists: false } } as any);
         return created.data;
       } catch (error) {
         // If sprint already exists (duplicate submission), throw friendly error

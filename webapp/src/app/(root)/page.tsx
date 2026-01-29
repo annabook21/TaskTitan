@@ -6,6 +6,7 @@ import DemoDashboard from './DemoDashboard';
 
 // DynamoDB imports
 import { getEntities } from '@/lib/dynamodb/service';
+import { batchFetchTeams, getComponentCountsByProjectIds } from '@/lib/dynamodb/batch-queries';
 
 // Type for team data used in the dashboard
 interface DashboardTeam {
@@ -32,60 +33,65 @@ export default async function Dashboard() {
 
   let teams: DashboardTeam[];
 
-  // DynamoDB: Multiple round-trips with application-layer aggregation
+  // DynamoDB: Batch queries to reduce N+1
   const entities = getEntities();
 
-    // Step 1: Get user's memberships (GSI1: userId)
-    const membershipsResult = await entities.membership.query.byUser({ userId }).go();
-    const teamIds = membershipsResult.data.map((m) => m.teamId);
+  // Step 1: Get user's memberships (GSI1: userId)
+  const membershipsResult = await entities.membership.query.byUser({ userId }).go();
+  const teamIds = membershipsResult.data.map((m) => m.teamId);
 
-    if (teamIds.length === 0) {
-      teams = [];
-    } else {
-      // Step 2: Fetch teams in parallel
-      const teamResults = await Promise.all(teamIds.map((teamId) => entities.team.get({ id: teamId }).go()));
+  if (teamIds.length === 0) {
+    teams = [];
+  } else {
+    // Step 2: Batch fetch teams
+    const teamMap = await batchFetchTeams(teamIds);
 
-      // Step 3: For each team, fetch projects and member counts in parallel
-      const teamsWithData = await Promise.all(
-        teamResults.map(async (teamResult) => {
-          const team = teamResult.data;
-          if (!team) return null;
+    // Step 3: For each team, fetch projects and member counts in parallel
+    const teamsWithData = await Promise.all(
+      teamIds.map(async (teamId) => {
+        const team = teamMap.get(teamId);
+        if (!team) return null;
 
-          // Parallel: projects and memberships for this team
-          const [projectsResult, membershipsCountResult] = await Promise.all([
-            entities.project.query.byTeam({ teamId: team.id }).go(),
-            entities.membership.query.primary({ teamId: team.id }).go(),
-          ]);
+        // Parallel: projects and memberships for this team
+        const [projectsResult, membershipsCountResult] = await Promise.all([
+          entities.project.query.byTeam({ teamId: team.id }).go(),
+          entities.membership.query.primary({ teamId: team.id }).go(),
+        ]);
 
-          // Sort projects by updatedAt desc and take first 5
-          const sortedProjects = projectsResult.data
-            .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
-            .slice(0, 5);
+        // Sort projects by updatedAt desc and take first 5
+        const sortedProjects = projectsResult.data
+          .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+          .slice(0, 5);
 
-          // Step 4: For each project, get component count
-          const projectsWithCounts = await Promise.all(
-            sortedProjects.map(async (project) => {
-              const componentsResult = await entities.component.query.byProject({ projectId: project.id }).go();
-              return {
-                id: project.id,
-                name: project.name,
-                description: project.description ?? null,
-                updatedAt: new Date(project.updatedAt || Date.now()),
-                _count: { Component: componentsResult.data.length },
-              };
-            })
-          );
+        return {
+          id: team.id,
+          name: team.name,
+          sortedProjects,
+          membershipsCount: membershipsCountResult.data.length,
+        };
+      })
+    );
 
-          return {
-            id: team.id,
-            name: team.name,
-            Project: projectsWithCounts,
-            _count: { Membership: membershipsCountResult.data.length },
-          };
-        })
-      );
+    // Step 4: Batch component counts for all projects across teams
+    const allProjectIds = teamsWithData
+      .filter((t): t is NonNullable<typeof t> => t !== null)
+      .flatMap((t) => t.sortedProjects.map((p) => p.id));
+    const countsMap = await getComponentCountsByProjectIds(allProjectIds);
 
-      teams = teamsWithData.filter((t): t is DashboardTeam => t !== null);
+    teams = teamsWithData
+      .filter((t): t is NonNullable<typeof t> => t !== null)
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        Project: t.sortedProjects.map((project) => ({
+          id: project.id,
+          name: project.name,
+          description: project.description ?? null,
+          updatedAt: new Date(project.updatedAt || Date.now()),
+          _count: { Component: countsMap.get(project.id)?.count ?? 0 },
+        })),
+        _count: { Membership: t.membershipsCount },
+      }));
   }
 
   const recentProjects = teams.flatMap((t) => t.Project).slice(0, 5);

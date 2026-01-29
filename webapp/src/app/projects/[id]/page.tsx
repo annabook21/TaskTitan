@@ -25,6 +25,12 @@ import SprintTimeline from './components/SprintTimeline';
 import DemoProjectDetailPage from './DemoProjectDetailPage';
 import { getEntities } from '@/lib/dynamodb/service';
 import { verifyProjectAccess } from '@/lib/dynamodb/auth-helpers';
+import {
+  fetchProjectDetailData,
+  batchFetchUsers,
+  batchFetchSprints,
+  batchFetchPreviewsByComponents,
+} from '@/lib/dynamodb/batch-queries';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -65,30 +71,32 @@ export default async function ProjectDetailPage({ params }: Props) {
   }
   const membership = access.membership;
 
-  // Fetch all related data in parallel
+  // Fetch all related data in parallel (batch queries for project detail)
   const [
     membershipsResult,
     sprintsResult,
     workflowConfigResult,
-    componentsResult,
+    projectDetailData,
     activitiesResult,
     ownerResult,
   ] = await Promise.all([
     entities.membership.query.primary({ teamId: team.id }).go(),
     entities.sprint.query.byTeam({ teamId: team.id }).go(),
     entities.teamWorkflowConfig.get({ teamId: team.id }).go(),
-    entities.component.query.byProject({ projectId: id }).go(),
+    fetchProjectDetailData(id),
     entities.activity.query.primary({ projectId: id }).go(),
     entities.user.get({ id: project.ownerId }).go(),
   ]);
 
-  // Fetch users for all memberships
-  const memberUsers = await Promise.all(
-    membershipsResult.data.map(async (m) => {
-      const userResult = await entities.user.get({ id: m.userId }).go();
-      return { membership: m, user: userResult.data };
-    })
-  );
+  const { components: rawComponents, assignmentsMap, dependenciesMap, statusHistoryMap, usersMap } = projectDetailData;
+
+  // Batch fetch users for memberships
+  const memberUserIds = membershipsResult.data.map((m) => m.userId);
+  const memberUsersMap = await batchFetchUsers(memberUserIds);
+  const memberUsers = membershipsResult.data.map((m) => ({
+    membership: m,
+    user: memberUsersMap.get(m.userId) ?? null,
+  }));
 
   // Active sprints - convert date strings to Date objects
   const availableSprints = sprintsResult.data
@@ -100,126 +108,102 @@ export default async function ProjectDetailPage({ params }: Props) {
       endDate: new Date(s.endDate),
     }));
 
-  // Fetch component-related data
-  const componentsWithRelations = await Promise.all(
-    componentsResult.data.slice(0, 200).map(async (c) => {
-      const [
-        assignmentsResult,
-        dependsOnResult,
-        dependedOnByResult,
-        statusHistoryResult,
-        previewResult,
-        sprintResult,
-      ] = await Promise.all([
-        entities.assignment.query.primary({ componentId: c.id }).go(),
-        entities.dependency.query.primary({ dependentComponentId: c.id }).go(),
-        entities.dependency.query.byRequired({ requiredComponentId: c.id }).go(),
-        entities.componentStatusHistory.query.primary({ componentId: c.id }).go(),
-        entities.componentPreview.query.primary({ componentId: c.id }).go(),
-        c.sprintId ? entities.sprint.get({ id: c.sprintId }).go() : Promise.resolve({ data: null }),
-      ]);
+  // Batch fetch sprints and previews for components (no N+1)
+  const uniqueSprintIds = [...new Set(rawComponents.map((c) => c.sprintId).filter(Boolean))] as string[];
+  const sprintMap = await batchFetchSprints(uniqueSprintIds);
+  const previewsByComponent = await batchFetchPreviewsByComponents(rawComponents.map((c) => c.id));
 
-      // Fetch assigned users
-      const assignments = await Promise.all(
-        assignmentsResult.data.map(async (a) => {
-          const userResult = await entities.user.get({ id: a.userId }).go();
-          return { ...a, user: userResult.data, User: userResult.data };
-        })
-      );
+  const componentMap = new Map(rawComponents.map((c) => [c.id, c]));
 
-      // Fetch dependency component info
-      const dependsOn = await Promise.all(
-        dependsOnResult.data.map(async (d) => {
-          const compResult = await entities.component.get({ id: d.requiredComponentId }).go();
-          return {
-            requiredComponent: compResult.data
-              ? { id: compResult.data.id, name: compResult.data.name, status: compResult.data.status, type: compResult.data.type }
-              : { id: d.requiredComponentId, name: 'Unknown', status: 'PLANNING', type: 'TASK' },
-          };
-        })
-      );
-
-      const dependedOnBy = await Promise.all(
-        dependedOnByResult.data.map(async (d) => {
-          const compResult = await entities.component.get({ id: d.dependentComponentId }).go();
-          return {
-            dependentComponent: compResult.data
-              ? { id: compResult.data.id, name: compResult.data.name, status: compResult.data.status, type: compResult.data.type }
-              : { id: d.dependentComponentId, name: 'Unknown', status: 'PLANNING', type: 'TASK' },
-          };
-        })
-      );
-
-      // Sort status history
-      const sortedHistory = statusHistoryResult.data.sort(
-        (a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime()
-      );
-
-      const currentStatusEntry = sortedHistory.find((h) => !h.exitedAt) || sortedHistory[sortedHistory.length - 1];
-
-      // Calculate cycle time for completed items
-      let cycleTimeDays: number | null = null;
-      if (c.status === 'COMPLETED') {
-        const inProgressEntry = sortedHistory.find((h) => h.status === 'IN_PROGRESS');
-        const completedEntry = sortedHistory.find((h) => h.status === 'COMPLETED');
-        if (inProgressEntry && completedEntry) {
-          const cycleTimeMs = new Date(completedEntry.enteredAt).getTime() - new Date(inProgressEntry.enteredAt).getTime();
-          cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10;
-        }
+  // Build componentsWithRelations from batch data (no N+1)
+  const componentsWithRelations = rawComponents.slice(0, 200).map((c, idx) => {
+    const assignments = (assignmentsMap.get(c.id) ?? []).map((a) => ({
+      ...a,
+      user: usersMap.get(a.userId) ?? null,
+      User: usersMap.get(a.userId) ?? null,
+    }));
+    const dependsOnData = dependenciesMap.dependsOn.get(c.id) ?? [];
+    const dependedOnByData = dependenciesMap.requiredBy.get(c.id) ?? [];
+    const dependsOn = dependsOnData.map((d) => ({
+      requiredComponent: componentMap.get(d.requiredComponentId) ?? {
+        id: d.requiredComponentId,
+        name: 'Unknown',
+        status: 'PLANNING',
+        type: 'TASK',
+      },
+    }));
+    const dependedOnBy = dependedOnByData.map((d) => ({
+      dependentComponent: componentMap.get(d.dependentComponentId) ?? {
+        id: d.dependentComponentId,
+        name: 'Unknown',
+        status: 'PLANNING',
+        type: 'TASK',
+      },
+    }));
+    const statusHistoryData = statusHistoryMap.get(c.id) ?? [];
+    const sortedHistory = [...statusHistoryData].sort(
+      (a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime()
+    );
+    const currentStatusEntry = sortedHistory.find((h) => !h.exitedAt) ?? sortedHistory[sortedHistory.length - 1];
+    let cycleTimeDays: number | null = null;
+    if (c.status === 'COMPLETED') {
+      const inProgressEntry = sortedHistory.find((h) => h.status === 'IN_PROGRESS');
+      const completedEntry = sortedHistory.find((h) => h.status === 'COMPLETED');
+      if (inProgressEntry && completedEntry) {
+        const cycleTimeMs = new Date(completedEntry.enteredAt).getTime() - new Date(inProgressEntry.enteredAt).getTime();
+        cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10;
       }
+    }
+    const previewList = previewsByComponent.get(c.id) ?? [];
+    const sortedPreviews = [...previewList].sort(
+      (a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+    );
+    const latestPreview = sortedPreviews[0] ?? null;
+    const sprintData = c.sprintId ? sprintMap.get(c.sprintId) : null;
 
-      // Get latest preview
-      const sortedPreviews = previewResult.data.sort(
-        (a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
-      );
-      const latestPreview = sortedPreviews[0];
-
-      return {
-        ...c,
-        // Normalize undefined to null/defaults for optional fields
-        priority: c.priority ?? 0,
-        estimatedHours: c.estimatedHours ?? null,
-        actualHours: c.actualHours ?? null,
-        description: c.description ?? null,
-        parentId: c.parentId ?? null,
-        dueDate: c.dueDate ? new Date(c.dueDate) : null,
-        owner: c.owner ?? null,
-        externalId: c.externalId ?? null,
-        // Map DynamoDB context fields to expected names
-        contextSummary: c.contextAiSummary ?? null,
-        contextDetail: c.contextRationale ?? null,
-        contextFiles: c.contextLinks ?? null,
-        contextDecision: c.contextDecision ?? null,
-        contextAlternatives: c.contextAlternatives ?? null,
-        contextUpdatedAt: c.contextUpdatedAt ?? null,
-        contextUpdatedBy: c.contextUpdatedBy ?? null,
-        githubPrUrl: c.githubPrUrl ?? null,
-        githubPrNumber: c.githubPrNumber ?? null,
-        githubPrTitle: c.githubPrTitle ?? null,
-        githubPrStatus: c.githubPrStatus ?? null,
-        githubPrUpdatedAt: c.githubPrUpdatedAt ?? null,
-        createdAt: new Date(c.createdAt ?? Date.now()),
-        updatedAt: new Date(c.updatedAt ?? Date.now()),
-        sprint: sprintResult.data ? { ...sprintResult.data, startDate: new Date(sprintResult.data.startDate), endDate: new Date(sprintResult.data.endDate) } : null,
-        Sprint: sprintResult.data ? { ...sprintResult.data, startDate: new Date(sprintResult.data.startDate), endDate: new Date(sprintResult.data.endDate) } : null,
-        sprintId: c.sprintId ?? null,
-        assignments,
-        Assignment: assignments,
-        dependsOn,
-        Dependency_Dependency_dependentComponentIdToComponent: dependsOn.map((d) => ({
-          Component_Dependency_requiredComponentIdToComponent: d.requiredComponent,
-        })),
-        dependedOnBy,
-        Dependency_Dependency_requiredComponentIdToComponent: dependedOnBy.map((d) => ({
-          Component_Dependency_dependentComponentIdToComponent: d.dependentComponent,
-        })),
-        Preview: latestPreview ? [{ id: latestPreview.id, htmlContent: latestPreview.htmlContent }] : [],
-        StatusHistory: sortedHistory,
-        statusEnteredAt: currentStatusEntry?.enteredAt ? new Date(currentStatusEntry.enteredAt) : new Date(c.createdAt ?? Date.now()),
-        cycleTimeDays,
-      };
-    })
-  );
+    return {
+      ...c,
+      priority: c.priority ?? 0,
+      estimatedHours: c.estimatedHours ?? null,
+      actualHours: c.actualHours ?? null,
+      description: c.description ?? null,
+      parentId: c.parentId ?? null,
+      dueDate: c.dueDate ? new Date(c.dueDate) : null,
+      owner: c.owner ?? null,
+      externalId: c.externalId ?? null,
+      contextSummary: c.contextAiSummary ?? null,
+      contextDetail: c.contextRationale ?? null,
+      contextFiles: c.contextLinks ?? null,
+      contextDecision: c.contextDecision ?? null,
+      contextAlternatives: c.contextAlternatives ?? null,
+      contextUpdatedAt: c.contextUpdatedAt ?? null,
+      contextUpdatedBy: c.contextUpdatedBy ?? null,
+      githubPrUrl: c.githubPrUrl ?? null,
+      githubPrNumber: c.githubPrNumber ?? null,
+      githubPrTitle: c.githubPrTitle ?? null,
+      githubPrStatus: c.githubPrStatus ?? null,
+      githubPrUpdatedAt: c.githubPrUpdatedAt ?? null,
+      createdAt: new Date(c.createdAt ?? Date.now()),
+      updatedAt: new Date(c.updatedAt ?? Date.now()),
+      sprint: sprintData ? { ...sprintData, startDate: new Date(sprintData.startDate), endDate: new Date(sprintData.endDate) } : null,
+      Sprint: sprintData ? { ...sprintData, startDate: new Date(sprintData.startDate), endDate: new Date(sprintData.endDate) } : null,
+      sprintId: c.sprintId ?? null,
+      assignments,
+      Assignment: assignments,
+      dependsOn,
+      Dependency_Dependency_dependentComponentIdToComponent: dependsOn.map((d) => ({
+        Component_Dependency_requiredComponentIdToComponent: d.requiredComponent,
+      })),
+      dependedOnBy,
+      Dependency_Dependency_requiredComponentIdToComponent: dependedOnBy.map((d) => ({
+        Component_Dependency_dependentComponentIdToComponent: d.dependentComponent,
+      })),
+      Preview: latestPreview ? [{ id: latestPreview.id, htmlContent: latestPreview.htmlContent }] : [],
+      StatusHistory: sortedHistory,
+      statusEnteredAt: currentStatusEntry?.enteredAt ? new Date(currentStatusEntry.enteredAt) : new Date(c.createdAt ?? Date.now()),
+      cycleTimeDays,
+    };
+  });
 
   // Sort components by priority desc, createdAt asc
   const components = componentsWithRelations.sort((a, b) => {
@@ -228,22 +212,21 @@ export default async function ProjectDetailPage({ params }: Props) {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
 
-  // Fetch activity users
+  // Batch fetch activity users
   const sortedActivities = activitiesResult.data
     .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
     .slice(0, 10);
-
-  const activities = await Promise.all(
-    sortedActivities.map(async (a) => {
-      const userResult = await entities.user.get({ id: a.userId }).go();
-      return {
-        ...a,
-        createdAt: new Date(a.createdAt ?? Date.now()),
-        user: userResult.data || { id: a.userId, email: 'unknown', name: null },
-        User: userResult.data || { id: a.userId, email: 'unknown', name: null },
-      };
-    })
-  );
+  const activityUserIds = sortedActivities.map((a) => a.userId);
+  const activityUsersMap = await batchFetchUsers(activityUserIds);
+  const activities = sortedActivities.map((a) => {
+    const activityUser = activityUsersMap.get(a.userId);
+    return {
+      ...a,
+      createdAt: new Date(a.createdAt ?? Date.now()),
+      user: activityUser ?? { id: a.userId, email: 'unknown', name: null },
+      User: activityUser ?? { id: a.userId, email: 'unknown', name: null },
+    };
+  });
 
   // Group components by status
   const componentsByStatus = {
