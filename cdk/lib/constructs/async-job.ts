@@ -2,7 +2,7 @@ import { Construct } from 'constructs';
 import { CfnOutput, Duration, Stack, TimeZone } from 'aws-cdk-lib';
 import { Architecture, DockerImageCode, DockerImageFunction, IFunction, Tracing } from 'aws-cdk-lib/aws-lambda';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import { Database } from './database';
+import { TaskTitanTable } from './dynamodb';
 import { EventBus } from './event-bus';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { join } from 'path';
@@ -11,7 +11,7 @@ import { LambdaInvoke } from 'aws-cdk-lib/aws-scheduler-targets';
 import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 
 export interface AsyncJobProps {
-  readonly database: Database;
+  readonly dynamoTable: TaskTitanTable;
   readonly eventBus: EventBus;
 }
 
@@ -20,7 +20,7 @@ export class AsyncJob extends Construct {
 
   constructor(scope: Construct, id: string, props: AsyncJobProps) {
     super(scope, id);
-    const { database, eventBus } = props;
+    const { dynamoTable, eventBus } = props;
 
     // Dead Letter Queue for failed async jobs
     // AWS Best Practice: Capture failed invocations for debugging and retry
@@ -47,17 +47,16 @@ export class AsyncJob extends Construct {
       timeout: Duration.minutes(10),
       architecture: Architecture.ARM_64,
       environment: {
-        ...database.getLambdaEnvironment('main'),
+        DYNAMODB_TABLE_NAME: dynamoTable.tableName,
         EVENT_HTTP_ENDPOINT: eventBus.httpEndpoint,
         // AWS Powertools configuration for structured logging
         POWERTOOLS_SERVICE_NAME: 'TaskTitanAsyncJob',
         LOG_LEVEL: 'INFO',
       },
-      vpc: database.cluster.vpc,
-      // AWS Best Practice: Set based on downstream capacity
-      // 25 concurrent × 1 Prisma connection = 25 DB connections (safe for Aurora)
-      // Reference: https://docs.aws.amazon.com/lambda/latest/operatorguide/lambda-concurrency.html
-      reservedConcurrentExecutions: 25,
+      // No VPC needed - DynamoDB uses public HTTPS endpoint
+      // AWS Best Practice: Avoid VPC for Lambda when not required (faster cold starts)
+      // Reference: https://docs.aws.amazon.com/lambda/latest/operatorguide/networking-vpc.html
+      reservedConcurrentExecutions: 100, // Higher limit without DB connection constraints
       // X-Ray tracing for async job processing
       tracing: Tracing.ACTIVE,
       // DLQ configuration for failed async invocations
@@ -66,7 +65,8 @@ export class AsyncJob extends Construct {
       retryAttempts: 2, // Retry 2 times before sending to DLQ (AWS max)
     });
 
-    handler.connections.allowToDefaultPort(database);
+    // Grant DynamoDB access
+    dynamoTable.table.grantReadWriteData(handler);
     eventBus.api.grantPublish(handler);
 
     handler.addToRolePolicy(

@@ -1,8 +1,8 @@
 import { Construct } from 'constructs';
 import { Duration } from 'aws-cdk-lib';
-import { Dashboard, GraphWidget, Metric, TextWidget, Row } from 'aws-cdk-lib/aws-cloudwatch';
+import { Dashboard, GraphWidget, Metric, TextWidget } from 'aws-cdk-lib/aws-cloudwatch';
 import { IFunction } from 'aws-cdk-lib/aws-lambda';
-import { IDatabaseCluster } from 'aws-cdk-lib/aws-rds';
+import { TaskTitanTable } from './dynamodb';
 
 export interface MonitoringProps {
   /**
@@ -16,16 +16,16 @@ export interface MonitoringProps {
   readonly lambdaFunctions: Array<{ name: string; fn: IFunction }>;
 
   /**
-   * Database cluster to monitor
+   * DynamoDB table to monitor
    */
-  readonly databaseCluster: IDatabaseCluster;
+  readonly dynamoTable: TaskTitanTable;
 }
 
 /**
  * CloudWatch Monitoring Dashboard
  *
  * Creates a comprehensive monitoring dashboard for the TaskTitan application
- * including Lambda performance, database metrics, and error tracking.
+ * including Lambda performance, DynamoDB metrics, and error tracking.
  */
 export class Monitoring extends Construct {
   public readonly dashboard: Dashboard;
@@ -33,7 +33,7 @@ export class Monitoring extends Construct {
   constructor(scope: Construct, id: string, props: MonitoringProps) {
     super(scope, id);
 
-    const { applicationName, lambdaFunctions, databaseCluster } = props;
+    const { applicationName, lambdaFunctions, dynamoTable } = props;
 
     // Create CloudWatch Dashboard
     this.dashboard = new Dashboard(this, 'Dashboard', {
@@ -146,118 +146,118 @@ export class Monitoring extends Construct {
       }),
     );
 
-    // Database Metrics Section
+    // DynamoDB Metrics Section
     this.dashboard.addWidgets(
       new TextWidget({
-        markdown: '## Aurora PostgreSQL Database',
+        markdown: '## DynamoDB',
         width: 24,
         height: 1,
       }),
     );
 
-    // Database Connections
+    // DynamoDB Read/Write Capacity
     this.dashboard.addWidgets(
       new GraphWidget({
-        title: 'Database Connections',
-        width: 8,
-        height: 6,
-        left: [
-          new Metric({
-            namespace: 'AWS/RDS',
-            metricName: 'DatabaseConnections',
-            dimensionsMap: { DBClusterIdentifier: databaseCluster.clusterIdentifier },
-            statistic: 'Average',
-            period: Duration.minutes(5),
-          }),
-        ],
-      }),
-    );
-
-    // Database CPU
-    this.dashboard.addWidgets(
-      new GraphWidget({
-        title: 'Database CPU Utilization (%)',
-        width: 8,
-        height: 6,
-        left: [
-          new Metric({
-            namespace: 'AWS/RDS',
-            metricName: 'CPUUtilization',
-            dimensionsMap: { DBClusterIdentifier: databaseCluster.clusterIdentifier },
-            statistic: 'Average',
-            period: Duration.minutes(5),
-          }),
-        ],
-      }),
-    );
-
-    // Database ACU (Serverless Capacity)
-    this.dashboard.addWidgets(
-      new GraphWidget({
-        title: 'Serverless Database Capacity (ACU)',
-        width: 8,
-        height: 6,
-        left: [
-          new Metric({
-            namespace: 'AWS/RDS',
-            metricName: 'ServerlessDatabaseCapacity',
-            dimensionsMap: { DBClusterIdentifier: databaseCluster.clusterIdentifier },
-            statistic: 'Average',
-            period: Duration.minutes(5),
-          }),
-        ],
-      }),
-    );
-
-    // Database Read/Write Latency
-    this.dashboard.addWidgets(
-      new GraphWidget({
-        title: 'Database Latency (ms)',
+        title: 'DynamoDB Consumed Capacity Units',
         width: 12,
         height: 6,
         left: [
           new Metric({
-            namespace: 'AWS/RDS',
-            metricName: 'ReadLatency',
-            dimensionsMap: { DBClusterIdentifier: databaseCluster.clusterIdentifier },
-            statistic: 'Average',
+            namespace: 'AWS/DynamoDB',
+            metricName: 'ConsumedReadCapacityUnits',
+            dimensionsMap: { TableName: dynamoTable.tableName },
+            statistic: 'Sum',
             period: Duration.minutes(5),
-            label: 'Read Latency',
+            label: 'Read Capacity Units',
           }),
           new Metric({
-            namespace: 'AWS/RDS',
-            metricName: 'WriteLatency',
-            dimensionsMap: { DBClusterIdentifier: databaseCluster.clusterIdentifier },
-            statistic: 'Average',
+            namespace: 'AWS/DynamoDB',
+            metricName: 'ConsumedWriteCapacityUnits',
+            dimensionsMap: { TableName: dynamoTable.tableName },
+            statistic: 'Sum',
             period: Duration.minutes(5),
-            label: 'Write Latency',
+            label: 'Write Capacity Units',
           }),
         ],
       }),
     );
 
-    // Database IOPS
+    // DynamoDB Throttled Requests
     this.dashboard.addWidgets(
       new GraphWidget({
-        title: 'Database IOPS',
+        title: 'DynamoDB Throttled Requests',
         width: 12,
         height: 6,
         left: [
           new Metric({
-            namespace: 'AWS/RDS',
-            metricName: 'ReadIOPS',
-            dimensionsMap: { DBClusterIdentifier: databaseCluster.clusterIdentifier },
+            namespace: 'AWS/DynamoDB',
+            metricName: 'ThrottledRequests',
+            dimensionsMap: { TableName: dynamoTable.tableName },
+            statistic: 'Sum',
+            period: Duration.minutes(5),
+            label: 'Throttled Requests',
+          }),
+        ],
+      }),
+    );
+
+    // DynamoDB Latency
+    this.dashboard.addWidgets(
+      new GraphWidget({
+        title: 'DynamoDB Latency (ms)',
+        width: 12,
+        height: 6,
+        left: [
+          new Metric({
+            namespace: 'AWS/DynamoDB',
+            metricName: 'SuccessfulRequestLatency',
+            dimensionsMap: { TableName: dynamoTable.tableName, Operation: 'GetItem' },
             statistic: 'Average',
             period: Duration.minutes(5),
-            label: 'Read IOPS',
+            label: 'GetItem Latency',
           }),
           new Metric({
-            namespace: 'AWS/RDS',
-            metricName: 'WriteIOPS',
-            dimensionsMap: { DBClusterIdentifier: databaseCluster.clusterIdentifier },
+            namespace: 'AWS/DynamoDB',
+            metricName: 'SuccessfulRequestLatency',
+            dimensionsMap: { TableName: dynamoTable.tableName, Operation: 'Query' },
             statistic: 'Average',
             period: Duration.minutes(5),
-            label: 'Write IOPS',
+            label: 'Query Latency',
+          }),
+          new Metric({
+            namespace: 'AWS/DynamoDB',
+            metricName: 'SuccessfulRequestLatency',
+            dimensionsMap: { TableName: dynamoTable.tableName, Operation: 'PutItem' },
+            statistic: 'Average',
+            period: Duration.minutes(5),
+            label: 'PutItem Latency',
+          }),
+        ],
+      }),
+    );
+
+    // DynamoDB System Errors
+    this.dashboard.addWidgets(
+      new GraphWidget({
+        title: 'DynamoDB Errors',
+        width: 12,
+        height: 6,
+        left: [
+          new Metric({
+            namespace: 'AWS/DynamoDB',
+            metricName: 'SystemErrors',
+            dimensionsMap: { TableName: dynamoTable.tableName },
+            statistic: 'Sum',
+            period: Duration.minutes(5),
+            label: 'System Errors',
+          }),
+          new Metric({
+            namespace: 'AWS/DynamoDB',
+            metricName: 'UserErrors',
+            dimensionsMap: { TableName: dynamoTable.tableName },
+            statistic: 'Sum',
+            period: Duration.minutes(5),
+            label: 'User Errors',
           }),
         ],
       }),

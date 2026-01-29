@@ -5,25 +5,13 @@ import { MainStack } from '../lib/main-stack';
 
 const app = new cdk.App();
 
-interface EnvironmentProps {
-  account: string;
-  useNatInstance?: boolean;
-}
-
-// Read configuration from CDK context (cdk.json or --context flag)
-const useNatInstance = app.node.tryGetContext('useNatInstance') ?? false;
-
-const props: EnvironmentProps = {
-  account: process.env.CDK_DEFAULT_ACCOUNT!,
-  useNatInstance,
-};
-
-// FORGE: Cost-optimized deployment to us-east-2 only
-// No custom domain - uses CloudFront default domain
+// FORGE v2: Fully serverless deployment to us-east-2
+// - App Runner (no ALB/NAT Gateway needed)
+// - DynamoDB (no VPC needed)
+// - No custom domain (uses *.awsapprunner.com)
 new MainStack(app, 'TaskTitanForgeStack', {
   env: {
-    account: props.account,
+    account: process.env.CDK_DEFAULT_ACCOUNT!,
     region: 'us-east-2',
   },
-  useNatInstance: props.useNatInstance,
 });

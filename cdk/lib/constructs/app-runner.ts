@@ -1,15 +1,13 @@
 import { CfnOutput, Duration, Fn, Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { Service, Source, Cpu, Memory, HealthCheck, AutoScalingConfiguration, Secret as AppRunnerSecret, VpcConnector } from '@aws-cdk/aws-apprunner-alpha';
+import { Service, Source, Cpu, Memory, HealthCheck, AutoScalingConfiguration, Secret as AppRunnerSecret } from '@aws-cdk/aws-apprunner-alpha';
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
-import { SecurityGroup, SubnetType } from 'aws-cdk-lib/aws-ec2';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 import { Auth } from './auth/';
-import { Database } from './database';
 import { TaskTitanTable } from './dynamodb';
 import { EventBus } from './event-bus/';
 import { AsyncJob } from './async-job';
@@ -20,13 +18,9 @@ import { AsyncJob } from './async-job';
  * AWS App Runner provides:
  * - Zero cold starts (containers stay warm)
  * - Automatic scaling based on traffic
- * - Built-in HTTPS
- * - No VPC required for DynamoDB (HTTPS endpoint)
- * - ~50-70% cost savings vs ECS Fargate + ALB + NAT Gateway
- *
- * During dual-write migration period:
- * - Optional VPC Connector for Aurora PostgreSQL access
- * - Both DATABASE_URL and DYNAMODB_TABLE_NAME are set
+ * - Built-in HTTPS on *.awsapprunner.com
+ * - No VPC required (DynamoDB uses public HTTPS endpoint)
+ * - ~70% cost savings vs ECS Fargate + ALB + NAT Gateway + Aurora
  *
  * Reference: https://docs.aws.amazon.com/apprunner/latest/dg/what-is-apprunner.html
  */
@@ -36,12 +30,6 @@ export interface AppRunnerServiceProps {
   dynamoTable: TaskTitanTable;
   eventBus: EventBus;
   asyncJob: AsyncJob;
-  /**
-   * Optional: Database for dual-write migration period.
-   * When provided, VPC Connector is created for Aurora access.
-   * Remove after migration to DynamoDB is complete.
-   */
-  database?: Database;
 }
 
 export class AppRunnerService extends Construct {
@@ -51,7 +39,7 @@ export class AppRunnerService extends Construct {
   constructor(scope: Construct, id: string, props: AppRunnerServiceProps) {
     super(scope, id);
 
-    const { auth, dynamoTable, eventBus, asyncJob, database } = props;
+    const { auth, dynamoTable, eventBus, asyncJob } = props;
 
     // SSM parameter to store AMPLIFY_APP_ORIGIN (resolved after service creation)
     // The webapp reads this parameter at startup via AMPLIFY_APP_ORIGIN_SOURCE_PARAMETER
@@ -158,44 +146,8 @@ export class AppRunnerService extends Construct {
       ),
     };
 
-    // Optional: VPC Connector for Aurora access during dual-write migration
-    let vpcConnector: VpcConnector | undefined;
-    if (database) {
-      const vpc = database.cluster.vpc;
-
-      // Security group for App Runner VPC Connector
-      const vpcConnectorSg = new SecurityGroup(this, 'VpcConnectorSg', {
-        vpc,
-        description: 'Security group for App Runner VPC Connector to access Aurora',
-        allowAllOutbound: true,
-      });
-
-      // Allow connection to Aurora
-      database.cluster.connections.allowFrom(vpcConnectorSg, database.cluster.connections.defaultPort!);
-
-      // Create VPC Connector
-      vpcConnector = new VpcConnector(this, 'VpcConnector', {
-        vpc,
-        vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-        securityGroups: [vpcConnectorSg],
-        vpcConnectorName: `${Stack.of(this).stackName}-vpc-connector`,
-      });
-
-      // Add database environment variables
-      const dbEnv = database.getEcsEnvironment('main');
-      Object.assign(environmentVariables, {
-        DATABASE_ENGINE: dbEnv.DATABASE_ENGINE,
-        DATABASE_HOST: dbEnv.DATABASE_HOST,
-        DATABASE_PORT: dbEnv.DATABASE_PORT,
-        DATABASE_NAME: dbEnv.DATABASE_NAME,
-      });
-
-      // Add database secrets
-      const dbSecrets = database.getAppRunnerSecrets();
-      Object.assign(environmentSecrets, dbSecrets);
-    }
-
     // Create App Runner service
+    // No VPC needed - DynamoDB uses public HTTPS endpoint
     // Reference: https://docs.aws.amazon.com/cdk/api/v2/docs/@aws-cdk_aws-apprunner-alpha.Service.html
     // Note: AMPLIFY_APP_ORIGIN uses Fn::GetAtt to get the service URL after creation
     // This is a circular reference workaround - we add it via the L1 construct after service creation
@@ -213,7 +165,6 @@ export class AppRunnerService extends Construct {
       memory: Memory.TWO_GB,
       instanceRole,
       autoScalingConfiguration: autoScaling,
-      vpcConnector,
       healthCheck: HealthCheck.http({
         path: '/api/health',
         interval: Duration.seconds(10),
