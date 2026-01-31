@@ -4,6 +4,8 @@
 
 TaskTitan is an AI-powered project planning tool that helps development teams break down projects into manageable components, track decisions, visualize dependencies, and coordinate sprints — eliminating merge conflicts before they happen.
 
+**Live App:** [https://d1nms7auefufdj.cloudfront.net](https://d1nms7auefufdj.cloudfront.net)
+
 ## Features
 
 ### Core Planning
