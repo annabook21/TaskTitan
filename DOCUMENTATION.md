@@ -216,4 +216,4 @@ The AI automatically detects and maps common column names:
 
 ## Need More Help?
 
-Try the demo mode to explore features risk-free, or reach out to our team.
+Explore the features and reach out to our team if you have any questions.

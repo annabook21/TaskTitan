@@ -192,10 +192,6 @@ User ──┬── Membership ──── Team ──┬── Project ──
 - **Dependency**: Relationships between components
 - **Assignment**: Who is responsible for each component
 
-## Demo Mode
-
-Try TaskTitan without signing up by clicking "Try Demo Mode" on the sign-in page. Demo mode stores all data locally in your browser — nothing is sent to the server.
-
 ## Contributing
 
 1. Fork the repository
