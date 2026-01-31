@@ -34,33 +34,39 @@ TaskTitan is an AI-powered project planning tool that helps development teams br
 
 ## Architecture
 
-TaskTitan FORGE v2 is built on a fully serverless AWS architecture — no VPC, NAT Gateway, or ALB required:
+TaskTitan FORGE v3 is built on a fully serverless AWS architecture — no VPC, NAT Gateway, or ALB required:
 
 ![TaskTitan Architecture](./tasktitan-architecture.drawio.svg)
+
+> For detailed architecture documentation including AWS Well-Architected alignment, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Key Technologies
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | Next.js 15 App Router, React 19, Tailwind CSS 4 |
-| Compute | AWS App Runner (auto-scaling, built-in HTTPS) |
+| Frontend | Vite + React 18, Tailwind CSS, React Router |
+| CDN | Amazon CloudFront (edge caching, security headers) |
+| API | AWS AppSync GraphQL (Cognito + API Key auth) |
 | Database | Amazon DynamoDB (single-table design with ElectroDB) |
-| Async Jobs | AWS Lambda (ARM64, no VPC) |
-| Auth | Amazon Cognito (User Pool with self sign-up) |
-| Real-time | AWS AppSync Events (WebSocket) |
+| Async Jobs | AWS Lambda (ARM64, Docker, 10-min timeout) |
+| Auth | Amazon Cognito (User Pool, OAuth 2.0) |
+| Real-time | AWS AppSync Events (WebSocket pub/sub) |
 | AI | Amazon Bedrock (Claude Sonnet 4.5) |
-| Infrastructure | AWS CDK (TypeScript) |
+| Security | AWS WAF (rate limiting, no payload inspection) |
+| Infrastructure | AWS CDK (TypeScript, two-stack deployment) |
 | Observability | CloudWatch Dashboard, X-Ray Tracing |
 
 ### Cost Estimate
 
 | Service | Monthly Cost |
 |---------|-------------|
-| App Runner (1 vCPU, 2GB) | ~$45-50 |
+| CloudFront | ~$5-15 |
+| AppSync | ~$5-20 |
 | DynamoDB (on-demand) | ~$5-25 |
-| Lambda (async jobs) | ~$1-5 |
-| Other (Cognito, CloudWatch, etc.) | ~$5-10 |
-| **Total** | **~$55-90/month** |
+| Lambda (async jobs) | ~$1-10 |
+| WAF | ~$5-10 |
+| Other (Cognito, CloudWatch, S3) | ~$3-10 |
+| **Total** | **~$25-90/month** |
 
 ## Prerequisites
 
@@ -70,35 +76,37 @@ TaskTitan FORGE v2 is built on a fully serverless AWS architecture — no VPC, N
 
 ## Local Development
 
-1. **Start DynamoDB Local**:
-   ```bash
-   docker compose up -d
-   ```
+### Frontend (Vite + React)
 
-2. **Install dependencies**:
+1. **Install dependencies**:
    ```bash
-   cd webapp
+   cd webapp-static
    npm install
    ```
 
-3. **Create `.env.local`** (if not exists):
+2. **Create `.env.local`** from example:
    ```bash
-   # DynamoDB Local
-   DYNAMODB_TABLE_NAME=TaskTitan
-   DYNAMODB_ENDPOINT=http://localhost:8000
-   AWS_ACCESS_KEY_ID=local
-   AWS_SECRET_ACCESS_KEY=local
-   AWS_REGION=us-east-2
+   cp .env.example .env.local
+   # Edit .env.local with your AppSync and Cognito endpoints
    ```
 
-4. **Start the development server**:
+3. **Start the development server**:
    ```bash
    npm run dev
    ```
 
-5. Open [http://localhost:3010](http://localhost:3010)
+4. Open [http://localhost:5173](http://localhost:5173)
 
-In local development mode, authentication is bypassed and a mock user is created automatically.
+### Backend (Lambda handlers)
+
+The Lambda handlers in `webapp/src/jobs/` use the AI generators from `webapp/src/lib/ai/`. These are deployed as Docker containers and don't require local setup for frontend development.
+
+For local backend testing:
+```bash
+cd webapp
+npm install
+# Lambda handlers are built during CDK deploy
+```
 
 ## Deploy to AWS
 
@@ -116,12 +124,14 @@ npx cdk bootstrap
 npx cdk deploy --all
 ```
 
-Initial deployment takes approximately 15 minutes. After deployment, you'll see output like:
+Initial deployment takes approximately 10-15 minutes (two stacks: WAF in us-east-1, main in us-east-2). After deployment, you'll see output like:
 
 ```
-TaskTitanForgeStack.FrontendDomainName = https://xxxxxxxxxx.us-east-2.awsapprunner.com
+TaskTitanWafStack.WebACLArn = arn:aws:wafv2:us-east-1:...
+TaskTitanForgeStack.FrontendURL = https://xxxxxxxxxx.cloudfront.net
+TaskTitanForgeStack.GraphQLEndpoint = https://xxxxxxxxxx.appsync-api.us-east-2.amazonaws.com/graphql
 TaskTitanForgeStack.CognitoUserPoolId = us-east-2_xxxxxx
-TaskTitanForgeStack.DynamoDBTableName = TaskTitanForgeStack-DynamoTable-xxxxxx
+TaskTitanForgeStack.DynamoDBTableName = TaskTitanForgeStack-TaskTitanTable-xxxxxx
 ```
 
 ### AI Features
@@ -131,33 +141,35 @@ AI features are powered by Amazon Bedrock with Claude Sonnet 4.5. No external AP
 ## Project Structure
 
 ```
-├── cdk/                    # AWS CDK infrastructure
-│   ├── bin/cdk.ts          # Stack entry point
+├── cdk/                        # AWS CDK infrastructure
+│   ├── bin/cdk.ts              # Stack entry point (WAF + Main stacks)
 │   ├── lib/
-│   │   ├── main-stack.ts   # Main stack orchestration
-│   │   └── constructs/     # CDK constructs
-│   │       ├── app-runner.ts   # App Runner service
-│   │       ├── dynamodb.ts     # DynamoDB table
-│   │       ├── async-job.ts    # Lambda async jobs
-│   │       ├── auth/           # Cognito authentication
-│   │       ├── event-bus/      # AppSync real-time
-│   │       └── monitoring.ts   # CloudWatch dashboard
-│   └── test/               # Infrastructure tests
+│   │   ├── main-stack.ts       # Main stack orchestration
+│   │   ├── waf-stack.ts        # WAF stack (us-east-1)
+│   │   └── constructs/         # CDK constructs
+│   │       ├── static-frontend.ts  # CloudFront + S3
+│   │       ├── appsync-graphql.ts  # AppSync API + resolvers
+│   │       ├── dynamodb.ts         # DynamoDB table
+│   │       ├── async-job.ts        # Lambda async jobs
+│   │       ├── auth/               # Cognito authentication
+│   │       ├── event-bus/          # AppSync Events (real-time)
+│   │       └── monitoring.ts       # CloudWatch dashboard
+│   └── test/                   # Infrastructure tests
 │
-└── webapp/                 # Next.js application
-    ├── src/
-    │   ├── app/            # Next.js App Router pages
-    │   │   ├── projects/   # Project management
-    │   │   ├── team/       # Team management
-    │   │   ├── sprints/    # Sprint planning
-    │   │   └── api/        # API routes
-    │   ├── components/     # Shared React components
-    │   ├── lib/
-    │   │   ├── dynamodb/   # DynamoDB client & ElectroDB entities
-    │   │   ├── ai/         # Bedrock client and generators
-    │   │   └── demo/       # Demo mode (browser-only storage)
-    │   └── jobs/           # Async job handlers
-    └── public/             # Static assets
+├── webapp-static/              # Vite + React frontend (deployed)
+│   ├── src/
+│   │   ├── api/                # AppSync GraphQL client
+│   │   ├── components/         # React components
+│   │   ├── pages/              # Route pages
+│   │   └── hooks/              # Custom React hooks
+│   └── public/                 # Static assets
+│
+└── webapp/                     # Backend code (Lambda handlers)
+    └── src/
+        ├── lib/
+        │   ├── ai/             # Bedrock AI generators
+        │   └── dynamodb/       # ElectroDB entities
+        └── jobs/               # Lambda async job handlers
 ```
 
 ## Data Model
@@ -189,7 +201,9 @@ Try TaskTitan without signing up by clicking "Try Demo Mode" on the sign-in page
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run tests: `cd webapp && npm test`
+4. Run tests:
+   - Frontend: `cd webapp-static && npm run build`
+   - Infrastructure: `cd cdk && npm test`
 5. Submit a pull request
 
 ## License
