@@ -36,7 +36,7 @@ TaskTitan is an AI-powered project planning tool that helps development teams br
 
 ## Architecture
 
-TaskTitan FORGE v3 is built on a fully serverless AWS architecture — no VPC, NAT Gateway, or ALB required:
+TaskTitan is built on a fully serverless AWS architecture:
 
 ![TaskTitan Architecture](./tasktitan-architecture.drawio.svg)
 
