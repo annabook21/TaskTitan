@@ -27,7 +27,9 @@ import {
   BarChart3,
   Trash2,
   Loader2,
+  ChevronRight,
 } from 'lucide-react';
+import { MemberWorkloadModal } from '../components/MemberWorkloadModal';
 
 type TeamRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
 
@@ -73,6 +75,12 @@ export function TeamDetailPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  // Member workload modal
+  const [selectedMember, setSelectedMember] = useState<{
+    userId: string;
+    name: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!id || authLoading) return;
@@ -433,14 +441,30 @@ export function TeamDetailPage() {
                 const displayName = member.user?.name || member.user?.email || 'Unknown User';
                 const displayEmail = member.user?.email || member.userId;
                 const initial = (member.user?.name?.[0] || member.user?.email?.[0] || 'U').toUpperCase();
+                const canViewWorkload = isOwner || isAdmin;
+                
                 return (
-                  <div key={member.id} className="flex items-center gap-3">
+                  <button
+                    key={member.id}
+                    onClick={() => canViewWorkload && setSelectedMember({ 
+                      userId: member.userId, 
+                      name: displayName 
+                    })}
+                    className={`flex items-center gap-3 w-full text-left ${
+                      canViewWorkload 
+                        ? 'hover:bg-slate-800/50 -mx-2 px-2 py-2 rounded-lg cursor-pointer transition-colors group' 
+                        : ''
+                    }`}
+                    disabled={!canViewWorkload}
+                  >
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-sm font-medium text-white">
                       {initial}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-200 truncate">
+                        <span className={`text-sm font-medium text-slate-200 truncate ${
+                          canViewWorkload ? 'group-hover:text-cyan-400 transition-colors' : ''
+                        }`}>
                           {displayName}
                         </span>
                         <span
@@ -455,10 +479,18 @@ export function TeamDetailPage() {
                         <span className="truncate">{displayEmail}</span>
                       </div>
                     </div>
-                  </div>
+                    {canViewWorkload && (
+                      <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 flex-shrink-0" />
+                    )}
+                  </button>
                 );
               })}
             </div>
+            {(isOwner || isAdmin) && (
+              <p className="mt-4 pt-3 border-t border-slate-700/50 text-xs text-slate-500">
+                Click a member to view their workload
+              </p>
+            )}
           </div>
 
           {/* Danger Zone - only for owner */}
@@ -522,6 +554,17 @@ export function TeamDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Member Workload Modal */}
+      {selectedMember && id && (
+        <MemberWorkloadModal
+          isOpen={!!selectedMember}
+          onClose={() => setSelectedMember(null)}
+          teamId={id}
+          userId={selectedMember.userId}
+          userName={selectedMember.name}
+        />
+      )}
     </div>
   );
 }

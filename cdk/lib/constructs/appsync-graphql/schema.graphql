@@ -288,6 +288,51 @@ type TeamMetrics {
   completedSprints: Int!
 }
 
+# ============================================
+# Share Code System for Guest Access
+# AWS Best Practice: Cognito Identity Pool + IAM auth for guests
+# ============================================
+
+# Share code for project access (stored in DynamoDB with TTL auto-delete)
+# pk=SHARE_CODE#<code>, sk=METADATA, ttl=Unix epoch for auto-expiration
+type ShareCode {
+  code: String!
+  projectId: ID!
+  teamId: ID!
+  expiresAt: String!
+  createdAt: String!
+}
+
+# Result of validating a share code (unauthenticated via API_KEY)
+type ShareCodeInfo {
+  valid: Boolean!
+  projectId: ID
+  projectName: String
+  teamId: ID
+  teamName: String
+  expiresAt: String
+}
+
+# Guest session after joining with share code
+# pk=GUEST#<guestId>, sk=METADATA
+type GuestSession {
+  guestId: ID!
+  displayName: String!
+  projectId: ID!
+  teamId: ID!
+}
+
+input GenerateShareCodeInput {
+  projectId: ID!
+  # Hours until code expires (default 168 = 7 days, max 720 = 30 days)
+  expiresInHours: Int
+}
+
+input GuestJoinInput {
+  code: String!
+  displayName: String!
+}
+
 type Query {
   # Get the current authenticated user (DynamoDB: pk=USER#sub, sk=METADATA)
   getCurrentUser: User
@@ -339,6 +384,24 @@ type Query {
   # Get team metrics (Pipeline Resolver: Query projects → Query components → Aggregate)
   # Best practice: Uses Query operations on GSIs, not Scan
   getTeamMetrics(teamId: ID!): TeamMetrics!
+
+  # ============================================
+  # Share Code / Guest Access Queries
+  # ============================================
+
+  # Validate share code (unauthenticated - API_KEY auth)
+  # Returns project/team info if code is valid and not expired
+  validateShareCode(code: String!): ShareCodeInfo! @aws_api_key
+
+  # Guest operations (IAM auth from Cognito Identity Pool)
+  # AWS Best Practice: Temporary credentials with least-privilege IAM policy
+  guestGetProject(guestId: ID!): Project @aws_iam
+  guestListComponents(guestId: ID!): [Component!]! @aws_iam
+  guestListAssignments(guestId: ID!): [AssignmentWithComponent!]! @aws_iam
+
+  # List assignments for a specific team member (requires team membership - Cognito auth)
+  # For owner/admin member workload view
+  listAssignmentsForTeamMember(teamId: ID!, userId: ID!): [AssignmentWithComponent!]!
 }
 
 input CreateProjectInput {
@@ -898,6 +961,33 @@ type Mutation {
   # Update team workflow config (DynamoDB: UpdateItem/PutItem)
   # Best practice: Direct DynamoDB for O(1) write
   updateTeamWorkflowConfig(teamId: ID!, input: UpdateWorkflowConfigInput!): TeamWorkflowConfig!
+
+  # ============================================
+  # Share Code / Guest Access Mutations
+  # ============================================
+
+  # Owner generates a share code for their project (Cognito auth required)
+  # Creates SHARE_CODE#<code> item in DynamoDB with TTL for auto-expiration
+  generateShareCode(input: GenerateShareCodeInput!): ShareCode!
+
+  # Owner revokes a share code (Cognito auth required)
+  revokeShareCode(code: String!): Boolean!
+
+  # Guest joins project with share code (IAM auth from Identity Pool)
+  # Creates GUEST#<guestId> and TEAM#<teamId>/MEMBER#GUEST#<guestId> items
+  guestJoinProject(input: GuestJoinInput!): GuestSession! @aws_iam
+
+  # Guest self-assigns to a component (IAM auth)
+  # Only allowed if component is in guest's project
+  guestAssignSelf(guestId: ID!, componentId: ID!): Assignment! @aws_iam
+
+  # Guest unassigns self from a component (IAM auth)
+  # Only allowed if guest owns the assignment
+  guestUnassignSelf(guestId: ID!, componentId: ID!): Boolean! @aws_iam
+
+  # Guest updates component status (IAM auth)
+  # Only allowed on components the guest is assigned to
+  guestUpdateStatus(guestId: ID!, componentId: ID!, status: ComponentStatus!): Component! @aws_iam
 }
 
 type Subscription {

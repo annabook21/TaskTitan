@@ -25,6 +25,8 @@ import { DocsPage } from './pages/DocsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { JoinPage } from './pages/JoinPage';
+import { GuestDashboardPage } from './pages/GuestDashboardPage';
 
 export default function App() {
   return (
@@ -38,6 +40,10 @@ export default function App() {
           <Route path="auth-callback" element={<AuthCallbackPage />} />
           <Route path="docs" element={<DocsPage />} />
           <Route path="privacy" element={<PrivacyPage />} />
+
+          {/* Guest routes (share code access via Cognito Identity Pool) */}
+          <Route path="join" element={<JoinPage />} />
+          <Route path="guest" element={<GuestDashboardPage />} />
 
           {/* Protected routes (auth required) */}
           <Route element={<ProtectedRoute />}>

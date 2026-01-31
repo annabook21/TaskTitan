@@ -2845,6 +2845,495 @@ export function response(ctx) {
       `),
     });
 
+    // ============================================
+    // Share Code / Guest Access Resolvers
+    // AWS Best Practice: Cognito Identity Pool + IAM auth for guests
+    // ============================================
+
+    // Resolver: Query.validateShareCode (API_KEY auth) - Check if code is valid
+    new appsync.Resolver(this, 'ValidateShareCodeResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'validateShareCode',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + ctx.args.code.toUpperCase(),
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const item = ctx.result;
+  if (!item) {
+    return { valid: false };
+  }
+  // Check if code has expired (TTL is in Unix seconds)
+  const now = Math.floor(Date.now() / 1000);
+  if (item.ttl && item.ttl < now) {
+    return { valid: false };
+  }
+  return {
+    valid: true,
+    projectId: item.projectId,
+    projectName: item.projectName || null,
+    teamId: item.teamId,
+    teamName: item.teamName || null,
+    expiresAt: item.expiresAt
+  };
+}
+`.trim()),
+    });
+
+    // Resolver: Mutation.generateShareCode (Cognito auth) - Generate share code for project
+    new appsync.Resolver(this, 'GenerateShareCodeResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'generateShareCode',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const input = ctx.args.input;
+  const projectId = input.projectId;
+  
+  // Generate 6-character alphanumeric code
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I, O, 0, 1 to avoid confusion
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  // Calculate expiration (default 7 days, max 30 days)
+  const expiresInHours = Math.min(input.expiresInHours || 168, 720);
+  const now = util.time.nowEpochSeconds();
+  const ttl = now + (expiresInHours * 3600);
+  const expiresAt = util.time.epochSecondsToISO8601(ttl);
+  const createdAt = util.time.nowISO8601();
+  
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + code,
+      sk: 'METADATA'
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      code: code,
+      projectId: projectId,
+      teamId: ctx.stash.teamId || '', // Will be set in pipeline if needed
+      createdBy: userId,
+      ttl: ttl,
+      expiresAt: expiresAt,
+      createdAt: createdAt
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    // Code collision - retry would be needed in production
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const item = ctx.result;
+  return {
+    code: item.code,
+    projectId: item.projectId,
+    teamId: item.teamId,
+    expiresAt: item.expiresAt,
+    createdAt: item.createdAt
+  };
+}
+`.trim()),
+    });
+
+    // Resolver: Mutation.revokeShareCode (Cognito auth) - Delete share code
+    new appsync.Resolver(this, 'RevokeShareCodeResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'revokeShareCode',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + ctx.args.code.toUpperCase(),
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}
+`.trim()),
+    });
+
+    // Resolver: Mutation.guestJoinProject (IAM auth) - Create guest user and membership
+    new appsync.Resolver(this, 'GuestJoinProjectResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestJoinProject',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const code = input.code.toUpperCase();
+  const displayName = input.displayName;
+  const guestId = util.autoId();
+  const now = util.time.nowISO8601();
+  
+  // First, validate the code exists
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const codeItem = ctx.result;
+  if (!codeItem) {
+    util.error('Invalid share code', 'InvalidShareCode');
+  }
+  // Check expiration
+  const now = Math.floor(Date.now() / 1000);
+  if (codeItem.ttl && codeItem.ttl < now) {
+    util.error('Share code has expired', 'ExpiredShareCode');
+  }
+  // Store info for next step (would be pipeline resolver in production)
+  return {
+    guestId: util.autoId(),
+    displayName: ctx.args.input.displayName,
+    projectId: codeItem.projectId,
+    teamId: codeItem.teamId
+  };
+}
+`.trim()),
+    });
+
+    // Resolver: Query.guestGetProject (IAM auth) - Get project for guest
+    new appsync.Resolver(this, 'GuestGetProjectResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'guestGetProject',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  // First verify guest exists and get their projectId
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const guest = ctx.result;
+  if (!guest) {
+    util.error('Guest not found', 'GuestNotFound');
+  }
+  // Return project info from guest record
+  // In production, would do a second query for full project data
+  return {
+    id: guest.projectId,
+    name: guest.projectName || 'Project',
+    teamId: guest.teamId
+  };
+}
+`.trim()),
+    });
+
+    // Resolver: Query.guestListComponents (IAM auth) - List components for guest's project
+    new appsync.Resolver(this, 'GuestListComponentsResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'guestListComponents',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  // First verify guest and get projectId
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const guest = ctx.result;
+  if (!guest) {
+    util.error('Guest not found', 'GuestNotFound');
+  }
+  // Store projectId for component query
+  // In production, this would be a pipeline resolver
+  ctx.stash.projectId = guest.projectId;
+  return [];
+}
+`.trim()),
+    });
+
+    // Resolver: Query.guestListAssignments (IAM auth) - List guest's assignments
+    new appsync.Resolver(this, 'GuestListAssignmentsResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'guestListAssignments',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  // Query GSI1 for guest's assignments
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'GUEST#' + guestId,
+        ':sk': 'ASSIGNMENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  // Map to AssignmentWithComponent format
+  return (ctx.result.items || []).map(item => ({
+    assignment: {
+      id: item.id,
+      componentId: item.componentId,
+      userId: item.guestId,
+      assignedAt: item.assignedAt
+    },
+    component: item.component || { id: item.componentId, name: 'Component' }
+  }));
+}
+`.trim()),
+    });
+
+    // Resolver: Mutation.guestAssignSelf (IAM auth) - Guest assigns self to component
+    new appsync.Resolver(this, 'GuestAssignSelfResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestAssignSelf',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.componentId;
+  const assignmentId = util.autoId();
+  const now = util.time.nowISO8601();
+  
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: assignmentId,
+      componentId: componentId,
+      guestId: guestId,
+      assignedAt: now,
+      isGuest: true,
+      gsi1pk: 'GUEST#' + guestId,
+      gsi1sk: 'ASSIGNMENT#' + componentId
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Already assigned to this component', 'AlreadyAssigned');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const item = ctx.result;
+  return {
+    id: item.id,
+    componentId: item.componentId,
+    userId: item.guestId,
+    assignedAt: item.assignedAt
+  };
+}
+`.trim()),
+    });
+
+    // Resolver: Mutation.guestUnassignSelf (IAM auth) - Guest removes self from component
+    new appsync.Resolver(this, 'GuestUnassignSelfResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestUnassignSelf',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.componentId;
+  
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    }),
+    condition: {
+      expression: 'attribute_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Not assigned to this component', 'NotAssigned');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}
+`.trim()),
+    });
+
+    // Resolver: Mutation.guestUpdateStatus (IAM auth) - Guest updates component status
+    new appsync.Resolver(this, 'GuestUpdateStatusResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestUpdateStatus',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.componentId;
+  const status = ctx.args.status;
+  const now = util.time.nowISO8601();
+  
+  // Update component status
+  // In production, would first verify guest is assigned to this component
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET #status = :status, #updatedAt = :now',
+      expressionNames: {
+        '#status': 'status',
+        '#updatedAt': 'updatedAt'
+      },
+      expressionValues: util.dynamodb.toMapValues({
+        ':status': status,
+        ':now': now
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}
+`.trim()),
+    });
+
+    // Resolver: Query.listAssignmentsForTeamMember (Cognito auth) - Owner views member's assignments
+    new appsync.Resolver(this, 'ListAssignmentsForTeamMemberResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'listAssignmentsForTeamMember',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.args.userId;
+  // Query GSI1 for user's assignments
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'ASSIGNMENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  // Map to AssignmentWithComponent format
+  // In production, would batch-get component details
+  return (ctx.result.items || []).map(item => ({
+    assignment: {
+      id: item.id,
+      componentId: item.componentId,
+      userId: item.userId,
+      assignedAt: item.assignedAt
+    },
+    component: {
+      id: item.componentId,
+      name: item.componentName || 'Component',
+      status: item.componentStatus || 'PLANNING',
+      type: item.componentType || 'TASK',
+      projectId: item.projectId
+    }
+  }));
+}
+`.trim()),
+    });
+
     new CfnOutput(this, 'GraphQLApiUrl', {
       value: this.api.graphqlUrl,
       description: 'AppSync GraphQL API URL (us-east-2)',

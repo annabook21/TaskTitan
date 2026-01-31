@@ -7,6 +7,7 @@ const userPoolId = import.meta.env.VITE_USER_POOL_ID;
 const userPoolClientId = import.meta.env.VITE_USER_POOL_CLIENT_ID;
 const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
 const apiKey = import.meta.env.VITE_APPSYNC_API_KEY;
+const identityPoolId = import.meta.env.VITE_IDENTITY_POOL_ID;
 const appOrigin = import.meta.env.VITE_APP_ORIGIN || (typeof window !== 'undefined' ? window.location.origin : '');
 
 export const config = {
@@ -14,6 +15,9 @@ export const config = {
     Cognito: {
       userPoolId: userPoolId || '',
       userPoolClientId: userPoolClientId || '',
+      // Identity Pool for guest (unauthenticated) access via share codes
+      // AWS Best Practice: Use Identity Pool with IAM for temporary guest credentials
+      identityPoolId: identityPoolId || '',
       loginWith: {
         oauth: {
           domain: cognitoDomain || '',
@@ -37,5 +41,11 @@ export const config = {
 
 export const hasConfig = Boolean(graphqlUrl && userPoolId && userPoolClientId && cognitoDomain);
 
-// API key for unauthenticated operations (registerUser)
+// API key for unauthenticated operations (registerUser, validateShareCode)
 export const appSyncApiKey = apiKey || '';
+
+// Identity Pool ID for guest access via share codes
+export const guestIdentityPoolId = identityPoolId || '';
+
+// Check if guest mode is available (Identity Pool configured)
+export const hasGuestMode = Boolean(identityPoolId && graphqlUrl);

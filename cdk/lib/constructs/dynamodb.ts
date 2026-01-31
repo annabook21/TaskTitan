@@ -33,6 +33,9 @@ import { Construct } from 'constructs';
  * | USER#<id>             | NOTIFICATION#<timestamp>#<id>   | Notification              |
  * | TEAM#<id>             | WORKFLOW_CONFIG                 | TeamWorkflowConfig        |
  * | PROJECT#<id>          | GITHUB_CONFIG#<event>           | GitHubTransitionConfig    |
+ * | SHARE_CODE#<code>     | METADATA                        | ShareCode (TTL auto-delete)|
+ * | GUEST#<id>            | METADATA                        | GuestUser                 |
+ * | TEAM#<id>             | MEMBER#GUEST#<guestId>          | GuestMembership           |
  *
  * GSI1 (gsi1pk, gsi1sk): Cross-entity lookups
  * - User email lookup: gsi1pk=EMAIL#<email>, gsi1sk=USER
@@ -113,6 +116,11 @@ export class TaskTitanTable extends Construct {
       // Enable Contributor Insights for identifying hot keys
       // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/contributorinsights.html
       contributorInsightsEnabled: true,
+
+      // AWS Best Practice: TTL for automatic item expiration (share codes, etc.)
+      // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html
+      // Items with 'ttl' attribute (Unix epoch seconds) are auto-deleted at no cost
+      timeToLiveAttribute: 'ttl',
     });
 
     // GSI1: Cross-entity lookups (user email, user's teams, assignments)

@@ -6,6 +6,7 @@ import { AppSyncGraphql } from './constructs/appsync-graphql';
 import { Auth } from './constructs/auth/';
 import { TaskTitanTable } from './constructs/dynamodb';
 import { EventBus } from './constructs/event-bus/';
+import { GuestIdentityPool } from './constructs/guest-identity-pool';
 import { Monitoring } from './constructs/monitoring';
 import { StaticFrontend } from './constructs/static-frontend';
 
@@ -59,6 +60,13 @@ export class MainStack extends Stack {
       dynamoTable,
       auth,
       asyncJob,
+    });
+
+    // Guest Identity Pool for share code feature
+    // AWS Best Practice: Cognito Identity Pool with unauthenticated role for guest access
+    // Reference: https://docs.aws.amazon.com/cognito/latest/developerguide/identity-pools-security-best-practices.html
+    const guestIdentityPool = new GuestIdentityPool(this, 'GuestIdentityPool', {
+      appSyncApi: appSyncGraphql.api,
     });
 
     // PRESENTATION TIER: CloudFront + S3 static frontend
@@ -122,6 +130,12 @@ export class MainStack extends Stack {
     new CfnOutput(this, 'DynamoDBTableArn', {
       value: dynamoTable.tableArn,
       description: 'DynamoDB table ARN for IAM policies',
+    });
+
+    // Guest Identity Pool output for frontend configuration
+    new CfnOutput(this, 'GuestIdentityPoolId', {
+      value: guestIdentityPool.identityPoolId,
+      description: 'Cognito Identity Pool ID for guest (share code) access',
     });
   }
 }

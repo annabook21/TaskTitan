@@ -21,6 +21,7 @@ import { ComponentDetailModal } from '../components/ComponentDetailModal';
 import { TimelineView } from '../components/TimelineView';
 import { CumulativeFlowDiagram } from '../components/CumulativeFlowDiagram';
 import { HillChart } from '../components/HillChart';
+import { ShareCodeModal } from '../components/ShareCodeModal';
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -43,6 +44,9 @@ export function ProjectDetailPage() {
   const [teamMembers, setTeamMembers] = useState<Membership[]>([]);
   const [workflowTemplate, setWorkflowTemplate] = useState<string>('SCRUM');
   const [activeView, setActiveView] = useState<'kanban' | 'timeline' | 'cfd' | 'hill'>('kanban');
+  
+  // Share code modal
+  const [showShareModal, setShowShareModal] = useState(false);
 
   // Create form state
   const [newName, setNewName] = useState('');
@@ -253,6 +257,15 @@ export function ProjectDetailPage() {
             className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
           >
             Manual Add
+          </button>
+          <button
+            onClick={() => setShowShareModal(true)}
+            className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 hover:text-emerald-300 border border-emerald-600/30 rounded-lg font-medium transition-colors flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M18 8A3 3 0 1 0 18 2a3 3 0 0 0 0 6zm-12 4a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" />
+            </svg>
+            Share
           </button>
           <button
             onClick={() => setShowDeleteConfirm(true)}
@@ -533,6 +546,16 @@ export function ProjectDetailPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Share Code Modal */}
+      {showShareModal && project && (
+        <ShareCodeModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          projectId={project.id}
+          projectName={project.name}
+        />
       )}
     </div>
   );

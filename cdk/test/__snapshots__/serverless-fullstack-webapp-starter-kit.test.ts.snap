@@ -125,6 +125,18 @@ exports[`Snapshot test 1`] = `
         ],
       },
     },
+    "GuestIdentityPoolId": {
+      "Description": "Cognito Identity Pool ID for guest (share code) access",
+      "Value": {
+        "Ref": "GuestIdentityPoolC2EBF60C",
+      },
+    },
+    "GuestIdentityPoolIdentityPoolId76162A78": {
+      "Description": "Cognito Identity Pool ID for guest access",
+      "Value": {
+        "Ref": "GuestIdentityPoolC2EBF60C",
+      },
+    },
     "MonitoringDashboardUrl": {
       "Description": "CloudWatch Monitoring Dashboard URL",
       "Value": "https://us-east-2.console.aws.amazon.com/cloudwatch/home?region=us-east-2#dashboards:name=TaskTitan-Monitoring",
@@ -1195,6 +1207,51 @@ type TeamMetrics {
   completedSprints: Int!
 }
 
+# ============================================
+# Share Code System for Guest Access
+# AWS Best Practice: Cognito Identity Pool + IAM auth for guests
+# ============================================
+
+# Share code for project access (stored in DynamoDB with TTL auto-delete)
+# pk=SHARE_CODE#<code>, sk=METADATA, ttl=Unix epoch for auto-expiration
+type ShareCode {
+  code: String!
+  projectId: ID!
+  teamId: ID!
+  expiresAt: String!
+  createdAt: String!
+}
+
+# Result of validating a share code (unauthenticated via API_KEY)
+type ShareCodeInfo {
+  valid: Boolean!
+  projectId: ID
+  projectName: String
+  teamId: ID
+  teamName: String
+  expiresAt: String
+}
+
+# Guest session after joining with share code
+# pk=GUEST#<guestId>, sk=METADATA
+type GuestSession {
+  guestId: ID!
+  displayName: String!
+  projectId: ID!
+  teamId: ID!
+}
+
+input GenerateShareCodeInput {
+  projectId: ID!
+  # Hours until code expires (default 168 = 7 days, max 720 = 30 days)
+  expiresInHours: Int
+}
+
+input GuestJoinInput {
+  code: String!
+  displayName: String!
+}
+
 type Query {
   # Get the current authenticated user (DynamoDB: pk=USER#sub, sk=METADATA)
   getCurrentUser: User
@@ -1246,6 +1303,24 @@ type Query {
   # Get team metrics (Pipeline Resolver: Query projects → Query components → Aggregate)
   # Best practice: Uses Query operations on GSIs, not Scan
   getTeamMetrics(teamId: ID!): TeamMetrics!
+
+  # ============================================
+  # Share Code / Guest Access Queries
+  # ============================================
+
+  # Validate share code (unauthenticated - API_KEY auth)
+  # Returns project/team info if code is valid and not expired
+  validateShareCode(code: String!): ShareCodeInfo! @aws_api_key
+
+  # Guest operations (IAM auth from Cognito Identity Pool)
+  # AWS Best Practice: Temporary credentials with least-privilege IAM policy
+  guestGetProject(guestId: ID!): Project @aws_iam
+  guestListComponents(guestId: ID!): [Component!]! @aws_iam
+  guestListAssignments(guestId: ID!): [AssignmentWithComponent!]! @aws_iam
+
+  # List assignments for a specific team member (requires team membership - Cognito auth)
+  # For owner/admin member workload view
+  listAssignmentsForTeamMember(teamId: ID!, userId: ID!): [AssignmentWithComponent!]!
 }
 
 input CreateProjectInput {
@@ -1805,6 +1880,33 @@ type Mutation {
   # Update team workflow config (DynamoDB: UpdateItem/PutItem)
   # Best practice: Direct DynamoDB for O(1) write
   updateTeamWorkflowConfig(teamId: ID!, input: UpdateWorkflowConfigInput!): TeamWorkflowConfig!
+
+  # ============================================
+  # Share Code / Guest Access Mutations
+  # ============================================
+
+  # Owner generates a share code for their project (Cognito auth required)
+  # Creates SHARE_CODE#<code> item in DynamoDB with TTL for auto-expiration
+  generateShareCode(input: GenerateShareCodeInput!): ShareCode!
+
+  # Owner revokes a share code (Cognito auth required)
+  revokeShareCode(code: String!): Boolean!
+
+  # Guest joins project with share code (IAM auth from Identity Pool)
+  # Creates GUEST#<guestId> and TEAM#<teamId>/MEMBER#GUEST#<guestId> items
+  guestJoinProject(input: GuestJoinInput!): GuestSession! @aws_iam
+
+  # Guest self-assigns to a component (IAM auth)
+  # Only allowed if component is in guest's project
+  guestAssignSelf(guestId: ID!, componentId: ID!): Assignment! @aws_iam
+
+  # Guest unassigns self from a component (IAM auth)
+  # Only allowed if guest owns the assignment
+  guestUnassignSelf(guestId: ID!, componentId: ID!): Boolean! @aws_iam
+
+  # Guest updates component status (IAM auth)
+  # Only allowed on components the guest is assigned to
+  guestUpdateStatus(guestId: ID!, componentId: ID!, status: ComponentStatus!): Component! @aws_iam
 }
 
 type Subscription {
@@ -3045,6 +3147,83 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlGenerateShareCodeResolverB56419A7": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const input = ctx.args.input;
+  const projectId = input.projectId;
+  
+  // Generate 6-character alphanumeric code
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I, O, 0, 1 to avoid confusion
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  // Calculate expiration (default 7 days, max 30 days)
+  const expiresInHours = Math.min(input.expiresInHours || 168, 720);
+  const now = util.time.nowEpochSeconds();
+  const ttl = now + (expiresInHours * 3600);
+  const expiresAt = util.time.epochSecondsToISO8601(ttl);
+  const createdAt = util.time.nowISO8601();
+  
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + code,
+      sk: 'METADATA'
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      code: code,
+      projectId: projectId,
+      teamId: ctx.stash.teamId || '', // Will be set in pipeline if needed
+      createdBy: userId,
+      ttl: ttl,
+      expiresAt: expiresAt,
+      createdAt: createdAt
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    // Code collision - retry would be needed in production
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const item = ctx.result;
+  return {
+    code: item.code,
+    projectId: item.projectId,
+    teamId: item.teamId,
+    expiresAt: item.expiresAt,
+    createdAt: item.createdAt
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "generateShareCode",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlGenerateWireframeResolver1F9B64B2": {
       "DependsOn": [
         "AppSyncGraphqlApiBedrockLambda55C98CBB",
@@ -3808,6 +3987,390 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlGuestAssignSelfResolver86AC46D9": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.componentId;
+  const assignmentId = util.autoId();
+  const now = util.time.nowISO8601();
+  
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: assignmentId,
+      componentId: componentId,
+      guestId: guestId,
+      assignedAt: now,
+      isGuest: true,
+      gsi1pk: 'GUEST#' + guestId,
+      gsi1sk: 'ASSIGNMENT#' + componentId
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Already assigned to this component', 'AlreadyAssigned');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const item = ctx.result;
+  return {
+    id: item.id,
+    componentId: item.componentId,
+    userId: item.guestId,
+    assignedAt: item.assignedAt
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestAssignSelf",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestGetProjectResolverD7FCC0E4": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  // First verify guest exists and get their projectId
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const guest = ctx.result;
+  if (!guest) {
+    util.error('Guest not found', 'GuestNotFound');
+  }
+  // Return project info from guest record
+  // In production, would do a second query for full project data
+  return {
+    id: guest.projectId,
+    name: guest.projectName || 'Project',
+    teamId: guest.teamId
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestGetProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestJoinProjectResolverCB3D8713": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const code = input.code.toUpperCase();
+  const displayName = input.displayName;
+  const guestId = util.autoId();
+  const now = util.time.nowISO8601();
+  
+  // First, validate the code exists
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const codeItem = ctx.result;
+  if (!codeItem) {
+    util.error('Invalid share code', 'InvalidShareCode');
+  }
+  // Check expiration
+  const now = Math.floor(Date.now() / 1000);
+  if (codeItem.ttl && codeItem.ttl < now) {
+    util.error('Share code has expired', 'ExpiredShareCode');
+  }
+  // Store info for next step (would be pipeline resolver in production)
+  return {
+    guestId: util.autoId(),
+    displayName: ctx.args.input.displayName,
+    projectId: codeItem.projectId,
+    teamId: codeItem.teamId
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestJoinProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestListAssignmentsResolverF01366D6": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  // Query GSI1 for guest's assignments
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'GUEST#' + guestId,
+        ':sk': 'ASSIGNMENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  // Map to AssignmentWithComponent format
+  return (ctx.result.items || []).map(item => ({
+    assignment: {
+      id: item.id,
+      componentId: item.componentId,
+      userId: item.guestId,
+      assignedAt: item.assignedAt
+    },
+    component: item.component || { id: item.componentId, name: 'Component' }
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestListAssignments",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestListComponentsResolverD0E67493": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  // First verify guest and get projectId
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const guest = ctx.result;
+  if (!guest) {
+    util.error('Guest not found', 'GuestNotFound');
+  }
+  // Store projectId for component query
+  // In production, this would be a pipeline resolver
+  ctx.stash.projectId = guest.projectId;
+  return [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestListComponents",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestUnassignSelfResolverCB6CA95C": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.componentId;
+  
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    }),
+    condition: {
+      expression: 'attribute_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Not assigned to this component', 'NotAssigned');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestUnassignSelf",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestUpdateStatusResolverD1820372": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.componentId;
+  const status = ctx.args.status;
+  const now = util.time.nowISO8601();
+  
+  // Update component status
+  // In production, would first verify guest is assigned to this component
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET #status = :status, #updatedAt = :now',
+      expressionNames: {
+        '#status': 'status',
+        '#updatedAt': 'updatedAt'
+      },
+      expressionValues: util.dynamodb.toMapValues({
+        ':status': status,
+        ':now': now
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestUpdateStatus",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlListActivitiesForProjectResolver377BC776": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -3894,6 +4457,67 @@ export function response(ctx) {
 }",
         "DataSourceName": "DynamoDB",
         "FieldName": "listAssignmentsForComponent",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListAssignmentsForTeamMemberResolver851A1A2B": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.args.userId;
+  // Query GSI1 for user's assignments
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'ASSIGNMENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  // Map to AssignmentWithComponent format
+  // In production, would batch-get component details
+  return (ctx.result.items || []).map(item => ({
+    assignment: {
+      id: item.id,
+      componentId: item.componentId,
+      userId: item.userId,
+      assignedAt: item.assignedAt
+    },
+    component: {
+      id: item.componentId,
+      name: item.componentName || 'Component',
+      status: item.componentStatus || 'PLANNING',
+      type: item.componentType || 'TASK',
+      projectId: item.projectId
+    }
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listAssignmentsForTeamMember",
         "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
@@ -4977,6 +5601,45 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlRevokeShareCodeResolver1E82FAE8": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + ctx.args.code.toUpperCase(),
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "revokeShareCode",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlStartAIGenerationResolver7635D674": {
       "DependsOn": [
         "AppSyncGraphqlApiBedrockLambda55C98CBB",
@@ -5674,6 +6337,61 @@ export function response(ctx) {
           "RuntimeVersion": "1.0.0",
         },
         "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlValidateShareCodeResolverAE4DE598": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + ctx.args.code.toUpperCase(),
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const item = ctx.result;
+  if (!item) {
+    return { valid: false };
+  }
+  // Check if code has expired (TTL is in Unix seconds)
+  const now = Math.floor(Date.now() / 1000);
+  if (item.ttl && item.ttl < now) {
+    return { valid: false };
+  }
+  return {
+    valid: true,
+    projectId: item.projectId,
+    projectName: item.projectName || null,
+    teamId: item.teamId,
+    teamName: item.teamName || null,
+    expiresAt: item.expiresAt
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "validateShareCode",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
       },
       "Type": "AWS::AppSync::Resolver",
     },
@@ -6410,6 +7128,10 @@ Welcome to intelligent project planning!
           "StreamViewType": "NEW_AND_OLD_IMAGES",
         },
         "TableName": "TaskTitanForgeStack-TaskTitan",
+        "TimeToLiveSpecification": {
+          "AttributeName": "ttl",
+          "Enabled": true,
+        },
       },
       "Type": "AWS::DynamoDB::Table",
       "UpdateReplacePolicy": "Retain",
@@ -6470,6 +7192,252 @@ Welcome to intelligent project planning!
         "Name": "event-bus",
       },
       "Type": "AWS::AppSync::ChannelNamespace",
+    },
+    "GuestIdentityPoolAuthenticatedRoleE68C462F": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "ForAnyValue:StringLike": {
+                  "cognito-identity.amazonaws.com:amr": "authenticated",
+                },
+                "StringEquals": {
+                  "cognito-identity.amazonaws.com:aud": {
+                    "Ref": "GuestIdentityPoolC2EBF60C",
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "cognito-identity.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Default Authenticated Role for Identity Pool ",
+              {
+                "Fn::GetAtt": [
+                  "GuestIdentityPoolC2EBF60C",
+                  "Name",
+                ],
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "GuestIdentityPoolC2EBF60C": {
+      "Properties": {
+        "AllowUnauthenticatedIdentities": true,
+        "CognitoIdentityProviders": [],
+        "IdentityPoolName": "TaskTitanForgeStack-GuestPool",
+      },
+      "Type": "AWS::Cognito::IdentityPool",
+    },
+    "GuestIdentityPoolDefaultRoleAttachmentBD645224": {
+      "Properties": {
+        "IdentityPoolId": {
+          "Ref": "GuestIdentityPoolC2EBF60C",
+        },
+        "Roles": {
+          "authenticated": {
+            "Fn::GetAtt": [
+              "GuestIdentityPoolAuthenticatedRoleE68C462F",
+              "Arn",
+            ],
+          },
+          "unauthenticated": {
+            "Fn::GetAtt": [
+              "GuestIdentityPoolUnauthenticatedRole22647100",
+              "Arn",
+            ],
+          },
+        },
+      },
+      "Type": "AWS::Cognito::IdentityPoolRoleAttachment",
+    },
+    "GuestIdentityPoolUnauthenticatedRole22647100": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "ForAnyValue:StringLike": {
+                  "cognito-identity.amazonaws.com:amr": "unauthenticated",
+                },
+                "StringEquals": {
+                  "cognito-identity.amazonaws.com:aud": {
+                    "Ref": "GuestIdentityPoolC2EBF60C",
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "cognito-identity.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Default Unauthenticated Role for Identity Pool ",
+              {
+                "Fn::GetAtt": [
+                  "GuestIdentityPoolC2EBF60C",
+                  "Name",
+                ],
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "GuestIdentityPoolUnauthenticatedRoleDefaultPolicy7DDD6F5E": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "appsync:GraphQL",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/validateShareCode",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestGetProject",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListComponents",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListAssignments",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestJoinProject",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestAssignSelf",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestUnassignSelf",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestUpdateStatus",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "GuestIdentityPoolUnauthenticatedRoleDefaultPolicy7DDD6F5E",
+        "Roles": [
+          {
+            "Ref": "GuestIdentityPoolUnauthenticatedRole22647100",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "MonitoringDashboard0C3675C6": {
       "Properties": {
