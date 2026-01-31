@@ -78,14 +78,57 @@ export async function generateComponents(
 
     // Use robust JSON extraction with sentinel delimiters
     const jsonContent = extractJsonFromResponse(content);
-    const result = JSON.parse(jsonContent) as AIGenerationResult;
+    const parsed = JSON.parse(jsonContent);
+
+    // Detect Shape Up workflow (6-week cycles with "Cycle" name)
+    const isShapeUp =
+      workflowConfig?.cycleEnabled === true &&
+      workflowConfig?.cycleDurationWeeks === 6 &&
+      workflowConfig?.cycleName?.toLowerCase() === 'cycle';
+
+    const isKanban = !workflowConfig?.cycleEnabled;
+
+    // Shape Up returns "scopes" instead of "components" - normalize the response
+    let result: AIGenerationResult;
+    if (isShapeUp && parsed.scopes && Array.isArray(parsed.scopes)) {
+      // Convert Shape Up scopes to components format
+      logger.info('Shape Up response detected, converting scopes to components', {
+        scopeCount: parsed.scopes.length,
+      });
+      result = {
+        components: parsed.scopes.map((scope: {
+          name: string;
+          description: string;
+          appetite?: string;
+          priority?: number;
+          suggestedDependencies?: string[];
+        }) => ({
+          name: scope.name,
+          description: scope.description,
+          type: 'STORY', // Shape Up scopes map to STORY type
+          // Appetite-based estimation: SMALL_BATCH = 20h, BIG_BATCH = 80h (rough mapping)
+          estimatedHours: scope.appetite === 'BIG_BATCH' ? 80 : 20,
+          priority: scope.priority || 5,
+          suggestedDependencies: scope.suggestedDependencies || [],
+        })),
+        summary: parsed.summary || 'Shape Up cycle plan generated.',
+        enhancedDescription: parsed.enhancedDescription,
+        // Shape Up doesn't use sprints or epics
+      };
+    } else {
+      result = parsed as AIGenerationResult;
+    }
 
     // Validate and sanitize the response
     if (!result.components || !Array.isArray(result.components)) {
+      logger.error('Invalid AI response: missing components array', {
+        hasComponents: !!result.components,
+        isArray: Array.isArray(result.components),
+        isShapeUp,
+        parsedKeys: Object.keys(parsed),
+      });
       throw new Error('Invalid response format: missing components array');
     }
-
-    const isKanban = !workflowConfig?.cycleEnabled;
 
     // For Scrum: EPIC and FEATURE should NOT be generated as work items
     // They should only exist as optional backlog groupings (in the epics array)
