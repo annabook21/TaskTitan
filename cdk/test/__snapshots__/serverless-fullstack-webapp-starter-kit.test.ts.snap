@@ -2,40 +2,23 @@
 
 exports[`Snapshot test 1`] = `
 {
-  "Description": "TaskTitan FORGE v2 - App Runner + DynamoDB (us-east-2)",
+  "Description": "TaskTitan FORGE v3 - CloudFront + AppSync + DynamoDB (fully serverless)",
   "Outputs": {
-    "AppRunnerServiceArn": {
-      "Description": "App Runner service ARN",
-      "Value": {
-        "Fn::GetAtt": [
-          "WebappService6D458A13",
-          "ServiceArn",
-        ],
-      },
-    },
-    "AppRunnerServiceUrl": {
-      "Description": "App Runner service URL (HTTPS)",
-      "Value": {
-        "Fn::Join": [
-          "",
-          [
-            "https://",
-            {
-              "Fn::GetAtt": [
-                "WebappService6D458A13",
-                "ServiceUrl",
-              ],
-            },
-          ],
-        ],
-      },
-    },
     "AppSyncGraphqlGraphQLApiId2F3F9645": {
       "Description": "AppSync GraphQL API ID",
       "Value": {
         "Fn::GetAtt": [
           "AppSyncGraphqlApi48248BEB",
           "ApiId",
+        ],
+      },
+    },
+    "AppSyncGraphqlGraphQLApiKeyB5C39B76": {
+      "Description": "AppSync API Key for unauthenticated operations (registerUser)",
+      "Value": {
+        "Fn::GetAtt": [
+          "AppSyncGraphqlApiDefaultApiKey2ED2A22F",
+          "ApiKey",
         ],
       },
     },
@@ -126,7 +109,7 @@ exports[`Snapshot test 1`] = `
       },
     },
     "FrontendDomainName": {
-      "Description": "TaskTitan frontend URL (App Runner HTTPS)",
+      "Description": "TaskTitan frontend URL (CloudFront)",
       "Value": {
         "Fn::Join": [
           "",
@@ -134,8 +117,8 @@ exports[`Snapshot test 1`] = `
             "https://",
             {
               "Fn::GetAtt": [
-                "WebappService6D458A13",
-                "ServiceUrl",
+                "StaticFrontendDistribution1DBCD836",
+                "DomainName",
               ],
             },
           ],
@@ -374,6 +357,119 @@ exports[`Snapshot test 1`] = `
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "AppSyncGraphqlAddDependencyResolver94823985": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const fromId = ctx.args.fromComponentId;
+  const toId = ctx.args.toComponentId;
+
+  // Validate: cannot depend on self
+  if (fromId === toId) {
+    util.error('A component cannot depend on itself', 'SelfDependencyError');
+  }
+
+  const now = util.time.nowISO8601();
+  const dependencyItem = {
+    pk: 'COMPONENT#' + fromId,
+    sk: 'DEPENDS_ON#' + toId,
+    fromComponentId: fromId,
+    toComponentId: toId,
+    createdAt: now,
+    gsi1pk: 'REQUIRED_BY#' + toId,
+    gsi1sk: 'COMPONENT#' + fromId
+  };
+
+  return {
+    operation: 'TransactWriteItems',
+    transactItems: [
+      // Check that the "from" component exists
+      {
+        table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+        operation: 'ConditionCheck',
+        key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + fromId, sk: 'METADATA' }),
+        condition: { expression: 'attribute_exists(pk)' }
+      },
+      // Check that the "to" component exists
+      {
+        table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+        operation: 'ConditionCheck',
+        key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + toId, sk: 'METADATA' }),
+        condition: { expression: 'attribute_exists(pk)' }
+      },
+      // Create the dependency (fail if already exists)
+      {
+        table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ pk: dependencyItem.pk, sk: dependencyItem.sk }),
+        attributeValues: util.dynamodb.toMapValues(dependencyItem),
+        condition: { expression: 'attribute_not_exists(pk)' }
+      }
+    ]
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    // Check for transaction cancellation reasons
+    if (ctx.result && ctx.result.cancellationReasons) {
+      const reasons = ctx.result.cancellationReasons;
+      if (reasons[0] && reasons[0].type === 'ConditionCheckFailed') {
+        util.error('Source component not found', 'ComponentNotFound');
+      }
+      if (reasons[1] && reasons[1].type === 'ConditionCheckFailed') {
+        util.error('Target component not found', 'ComponentNotFound');
+      }
+      if (reasons[2] && reasons[2].type === 'ConditionCheckFailed') {
+        util.error('Dependency already exists', 'DependencyAlreadyExists');
+      }
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const fromId = ctx.args.fromComponentId;
+  const toId = ctx.args.toComponentId;
+  const now = util.time.nowISO8601();
+  return { fromComponentId: fromId, toComponentId: toId, createdAt: now };
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FieldName": "addDependency",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlAddTeamMemberResolver0EBF5754": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -432,8 +528,37 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlAnalyzeImportDataResolverFE410829": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "analyzeImportData",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlApi48248BEB": {
       "Properties": {
+        "AdditionalAuthenticationProviders": [
+          {
+            "AuthenticationType": "API_KEY",
+          },
+          {
+            "AuthenticationType": "AWS_IAM",
+          },
+        ],
         "AuthenticationType": "AMAZON_COGNITO_USER_POOLS",
         "Name": "TaskTitanForgeStack-GraphQL",
         "UserPoolConfig": {
@@ -532,6 +657,22 @@ export function response(ctx) {
         },
       },
       "Type": "AWS::IAM::Role",
+    },
+    "AppSyncGraphqlApiDefaultApiKey2ED2A22F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Description": "API key for unauthenticated operations (registerUser)",
+        "Expires": 1609372800,
+      },
+      "Type": "AWS::AppSync::ApiKey",
     },
     "AppSyncGraphqlApiDynamoDBA02B9D11": {
       "Properties": {
@@ -657,6 +798,105 @@ export function response(ctx) {
       },
       "Type": "AWS::IAM::Policy",
     },
+    "AppSyncGraphqlApiNoneDataSourceA0A13C9A": {
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Name": "NoneDataSource",
+        "Type": "NONE",
+      },
+      "Type": "AWS::AppSync::DataSource",
+    },
+    "AppSyncGraphqlApiRegisterUserLambda470431B1": {
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "LambdaConfig": {
+          "LambdaFunctionArn": {
+            "Fn::GetAtt": [
+              "AppSyncGraphqlRegisterUserHandlerCBC1F83E",
+              "Arn",
+            ],
+          },
+        },
+        "Name": "RegisterUserLambda",
+        "ServiceRoleArn": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApiRegisterUserLambdaServiceRoleE7AF812E",
+            "Arn",
+          ],
+        },
+        "Type": "AWS_LAMBDA",
+      },
+      "Type": "AWS::AppSync::DataSource",
+    },
+    "AppSyncGraphqlApiRegisterUserLambdaServiceRoleDefaultPolicy0B405022": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AppSyncGraphqlRegisterUserHandlerCBC1F83E",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlRegisterUserHandlerCBC1F83E",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AppSyncGraphqlApiRegisterUserLambdaServiceRoleDefaultPolicy0B405022",
+        "Roles": [
+          {
+            "Ref": "AppSyncGraphqlApiRegisterUserLambdaServiceRoleE7AF812E",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AppSyncGraphqlApiRegisterUserLambdaServiceRoleE7AF812E": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "appsync.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
     "AppSyncGraphqlApiSchemaC2E94F39": {
       "Properties": {
         "ApiId": {
@@ -671,11 +911,15 @@ export function response(ctx) {
 
 type User {
   id: ID!
-  email: String!
+  # Email is nullable to handle edge cases where user record exists but email wasn't migrated
+  email: String
   name: String
   avatarUrl: String
   createdAt: String
   updatedAt: String
+  # Timestamp-based "Read Until" marker for O(1) mark-all-as-read (AWS best practice)
+  # Notifications with createdAt <= notificationsReadUntil are considered read
+  notificationsReadUntil: String
 }
 
 type Project {
@@ -703,6 +947,73 @@ enum MemberRole {
   VIEWER
 }
 
+enum ComponentType {
+  EPIC
+  FEATURE
+  STORY
+  TASK
+  BUG
+}
+
+enum ComponentStatus {
+  PLANNING
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  COMPLETED
+}
+
+enum SprintStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+# Sprint: time-boxed iteration for a team
+# pk=SPRINT#id, sk=METADATA, gsi1pk=TEAM#teamId, gsi1sk=SPRINT#id
+type Sprint {
+  id: ID!
+  teamId: String!
+  name: String!
+  goal: String
+  status: SprintStatus!
+  startDate: String
+  endDate: String
+  createdAt: String
+  updatedAt: String
+}
+
+type SprintWithComponents {
+  sprint: Sprint!
+  components: [Component!]!
+}
+
+type Component {
+  id: ID!
+  name: String!
+  description: String
+  type: ComponentType!
+  projectId: String!
+  parentId: String
+  sprintId: String
+  status: ComponentStatus!
+  priority: Int
+  estimatedHours: Float
+  actualHours: Float
+  dueDate: String
+  owner: String
+  tags: [String!]
+  createdAt: String
+  updatedAt: String
+  # Kanban: Timestamp when work started (for cycle time calculation)
+  # Cycle Time = completedAt - startedAt (Little's Law)
+  startedAt: String
+  # Shape Up: Manual hill chart position (0-100)
+  # 0-50 = "figuring things out" (uphill), 51-100 = "making it happen" (downhill)
+  hillPhase: Int
+}
+
 type Membership {
   id: ID!
   userId: String!
@@ -715,9 +1026,173 @@ type Membership {
   user: User
 }
 
+# Dependency represents a "depends on" relationship between components
+# pk=COMPONENT#fromId, sk=DEPENDS_ON#toId, gsi1pk=REQUIRED_BY#toId, gsi1sk=COMPONENT#fromId
+type Dependency {
+  fromComponentId: ID!
+  toComponentId: ID!
+  createdAt: String
+}
+
+# Assignment represents a user assigned to a component
+# pk=COMPONENT#componentId, sk=ASSIGNEE#userId, gsi1pk=USER#userId, gsi1sk=ASSIGNMENT#componentId
+type Assignment {
+  id: ID!
+  componentId: ID!
+  userId: ID!
+  assignedAt: String!
+  user: User
+  component: Component
+}
+
+# For MyTasksPage - returns assignments with full component details
+type AssignmentWithComponent {
+  assignment: Assignment!
+  component: Component!
+}
+
 type TeamWithMembers {
   team: Team!
   members: [Membership!]!
+}
+
+# Activity types for project activity feed
+enum ActivityType {
+  PROJECT_CREATED
+  COMPONENT_CREATED
+  COMPONENT_UPDATED
+  COMPONENT_STATUS_CHANGED
+  DEPENDENCY_ADDED
+  DEPENDENCY_REMOVED
+  MEMBER_ASSIGNED
+  MEMBER_UNASSIGNED
+  COMMENT_ADDED
+  SPRINT_CREATED
+  SPRINT_STARTED
+  SPRINT_COMPLETED
+  COMPONENT_ADDED_TO_SPRINT
+  COMPONENT_REMOVED_FROM_SPRINT
+  GITHUB_PR_OPENED
+  GITHUB_PR_MERGED
+  GITHUB_PR_CLOSED
+  GITHUB_PR_LINKED
+}
+
+# Activity: project event log entry
+# pk=PROJECT#projectId, sk=ACTIVITY#createdAt#id
+type Activity {
+  id: ID!
+  type: ActivityType!
+  projectId: String!
+  userId: String!
+  metadata: String
+  createdAt: String!
+}
+
+# Notification types for user notifications
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_STATUS_CHANGED
+  TASK_COMMENT
+  TASK_DUE_SOON
+  TASK_OVERDUE
+  SPRINT_STARTED
+  SPRINT_ENDING
+}
+
+# Notification: user notification
+# pk=USER#userId, sk=NOTIFICATION#createdAt#id
+type Notification {
+  id: ID!
+  userId: String!
+  type: NotificationType!
+  title: String!
+  message: String!
+  componentId: String
+  projectId: String
+  read: Boolean!
+  createdAt: String!
+}
+
+# TeamWorkflowConfig: workflow settings for a team
+# pk=TEAM#teamId, sk=WORKFLOW_CONFIG
+# Best practice: Direct DynamoDB GetItem for O(1) config reads
+type TeamWorkflowConfig {
+  id: ID!
+  teamId: String!
+  # WIP limits per status column
+  wipLimitPlanning: Int
+  wipLimitInProgress: Int
+  wipLimitBlocked: Int
+  wipLimitReview: Int
+  # Sprint/cycle settings
+  cycleEnabled: Boolean!
+  cycleDurationWeeks: Int
+  cycleStartDayOfWeek: Int
+  cycleName: String
+  backlogName: String
+  # Workflow preferences
+  workflowTemplate: String
+  enforceEstimates: Boolean!
+  autoArchiveCompleted: Boolean!
+  createdAt: String
+  updatedAt: String
+}
+
+input UpdateWorkflowConfigInput {
+  wipLimitPlanning: Int
+  wipLimitInProgress: Int
+  wipLimitBlocked: Int
+  wipLimitReview: Int
+  cycleEnabled: Boolean
+  cycleDurationWeeks: Int
+  cycleStartDayOfWeek: Int
+  cycleName: String
+  backlogName: String
+  workflowTemplate: String
+  enforceEstimates: Boolean
+  autoArchiveCompleted: Boolean
+}
+
+input RegisterUserInput {
+  email: String!
+  name: String!
+}
+
+# Input for syncing user profile from ID token claims after OAuth callback
+# AWS Best Practice: Access token doesn't contain email/name claims, so frontend
+# must sync these from the ID token after successful authentication
+input SyncUserProfileInput {
+  email: String!
+  name: String!
+}
+
+type RegisterUserResult {
+  success: Boolean!
+  message: String!
+}
+
+# TeamMetrics: aggregated metrics for a team
+# Computed via Pipeline Resolver using Query operations (not Scan) per AWS best practices
+type StatusCount {
+  status: ComponentStatus!
+  count: Int!
+}
+
+type TeamMetrics {
+  teamId: String!
+  totalComponents: Int!
+  statusDistribution: [StatusCount!]!
+  # Breakdown by type
+  epicCount: Int!
+  featureCount: Int!
+  storyCount: Int!
+  taskCount: Int!
+  bugCount: Int!
+  # Sprint metrics
+  totalSprints: Int!
+  activeSprints: Int!
+  completedSprints: Int!
 }
 
 type Query {
@@ -735,6 +1210,42 @@ type Query {
   getTeamWithMembers(teamId: ID!): TeamWithMembers
   # List projects for a team (DynamoDB GSI2: gsi2pk=TEAM#teamId)
   listProjectsByTeam(teamId: ID!): [Project!]!
+  # List projects owned by current user (DynamoDB GSI1: gsi1pk=OWNER#userId)
+  listProjectsForUser: [Project!]!
+  # Get a single component by ID (DynamoDB: pk=COMPONENT#id, sk=METADATA)
+  getComponent(id: ID!): Component
+  # List components for a project (DynamoDB GSI1: gsi1pk=PROJECT#projectId)
+  listComponentsByProject(projectId: ID!): [Component!]!
+  # Get children of a component (DynamoDB GSI1 + filter by parentId)
+  getComponentChildren(parentId: ID!): [Component!]!
+  # Get dependencies of a component (what this component depends on)
+  # DynamoDB: Query pk=COMPONENT#id, sk begins_with DEPENDS_ON#
+  getDependencies(componentId: ID!): [Dependency!]!
+  # Get dependents of a component (what depends on this component)
+  # DynamoDB GSI1: Query gsi1pk=REQUIRED_BY#id
+  getDependents(componentId: ID!): [Dependency!]!
+  # Get a single sprint by ID (DynamoDB: pk=SPRINT#id, sk=METADATA)
+  getSprint(id: ID!): Sprint
+  # List sprints for a team (DynamoDB GSI1: gsi1pk=TEAM#teamId, sk begins_with SPRINT#)
+  listSprintsByTeam(teamId: ID!): [Sprint!]!
+  # Get sprint with its components (DynamoDB: GetItem + Query GSI2 gsi2pk=SPRINT#sprintId)
+  getSprintWithComponents(sprintId: ID!): SprintWithComponents
+  # List assignments for current user (DynamoDB GSI1: gsi1pk=USER#userId) - for MyTasksPage
+  listAssignmentsForUser: [AssignmentWithComponent!]!
+  # List assignees for a component (DynamoDB: Query pk=COMPONENT#id, sk begins_with ASSIGNEE#)
+  listAssignmentsForComponent(componentId: ID!): [Assignment!]!
+  # List activities for a project (DynamoDB: Query pk=PROJECT#projectId, sk begins_with ACTIVITY#)
+  listActivitiesForProject(projectId: ID!, limit: Int): [Activity!]!
+  # List notifications for current user (DynamoDB: Query pk=USER#userId, sk begins_with NOTIFICATION#)
+  listNotificationsForUser(limit: Int, unreadOnly: Boolean): [Notification!]!
+  # Count unread notifications for current user
+  countUnreadNotifications: Int!
+  # Get team workflow config (DynamoDB: GetItem pk=TEAM#teamId, sk=WORKFLOW_CONFIG)
+  # Best practice: Direct DynamoDB for O(1) read
+  getTeamWorkflowConfig(teamId: ID!): TeamWorkflowConfig
+  # Get team metrics (Pipeline Resolver: Query projects → Query components → Aggregate)
+  # Best practice: Uses Query operations on GSIs, not Scan
+  getTeamMetrics(teamId: ID!): TeamMetrics!
 }
 
 input CreateProjectInput {
@@ -742,6 +1253,11 @@ input CreateProjectInput {
   teamId: ID!
   ownerId: ID!
   name: String!
+  description: String
+}
+
+input UpdateProjectInput {
+  name: String
   description: String
 }
 
@@ -769,25 +1285,979 @@ input UpdateMemberRoleInput {
   role: MemberRole!
 }
 
+input CreateComponentInput {
+  id: ID!
+  projectId: ID!
+  name: String!
+  description: String
+  type: ComponentType!
+  parentId: ID
+  status: ComponentStatus
+  priority: Int
+  estimatedHours: Float
+  dueDate: String
+  owner: String
+  tags: [String!]
+  # Kanban: Timestamp when work started
+  startedAt: String
+  # Shape Up: Initial hill chart position (0-100)
+  hillPhase: Int
+}
+
+input UpdateComponentInput {
+  name: String
+  description: String
+  type: ComponentType
+  parentId: ID
+  sprintId: ID
+  status: ComponentStatus
+  priority: Int
+  estimatedHours: Float
+  actualHours: Float
+  dueDate: String
+  owner: String
+  tags: [String!]
+  # Kanban: Timestamp when work started (set automatically when status -> IN_PROGRESS)
+  startedAt: String
+  # Shape Up: Manual hill chart position (0-100, user-draggable)
+  hillPhase: Int
+}
+
+input CreateSprintInput {
+  id: ID!
+  teamId: ID!
+  name: String!
+  goal: String
+  startDate: String
+  endDate: String
+}
+
+input UpdateSprintInput {
+  name: String
+  goal: String
+  startDate: String
+  endDate: String
+}
+
+# ============================================
+# AI Generation Types (Full Parity with Next.js)
+# ============================================
+
+# Input for generating a full project plan with workflow awareness
+input GenerateFullPlanInput {
+  projectId: ID!
+  # Generate epic groupings (Scrum only, optional backlog organization)
+  generateEpics: Boolean
+}
+
+# Generated component from AI (before applying to database)
+input GeneratedComponentInput {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  # Component names this depends on (resolved to IDs during apply)
+  suggestedDependencies: [String!]!
+  # Parent component name for hierarchy (resolved to ID during apply)
+  parentName: String
+  # Acceptance criteria for the component
+  acceptanceCriteria: [String!]
+}
+
+# Generated sprint from AI
+input GeneratedSprintInput {
+  name: String!
+  goal: String!
+  durationWeeks: Int!
+  # Component names assigned to this sprint
+  componentNames: [String!]!
+  capacity: Float
+}
+
+# Generated epic grouping from AI
+input GeneratedEpicInput {
+  name: String!
+  description: String!
+  # Component names grouped under this epic
+  componentNames: [String!]!
+}
+
+# Input for applying a generated plan to the database
+input ApplyFullPlanInput {
+  projectId: ID!
+  components: [GeneratedComponentInput!]!
+  enhancedDescription: String
+  sprints: [GeneratedSprintInput!]
+  epics: [GeneratedEpicInput!]
+}
+
+# Input for refining a single component via chat
+input RefineComponentInput {
+  projectId: ID!
+  currentComponent: NaturalLanguageComponentInput!
+  refinementRequest: String!
+}
+
+# Component structure for natural language operations
+input NaturalLanguageComponentInput {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+  reasoning: String!
+  acceptanceCriteria: [String!]
+}
+
+# Input for refining an entire plan via chat
+input RefineBulkPlanInput {
+  projectId: ID!
+  currentPlan: CurrentPlanInput!
+  refinementRequest: String!
+}
+
+# Current plan state for bulk refinement
+input CurrentPlanInput {
+  components: [GeneratedComponentInput!]!
+  sprints: [GeneratedSprintInput!]
+  epics: [GeneratedEpicInput!]
+}
+
+# Input for creating a component from natural language
+input SmartComponentInput {
+  projectId: ID!
+  userInput: String!
+  parentComponentId: ID
+}
+
+# Input for AI sprint planning
+input PlanSprintInput {
+  teamId: ID!
+  sprintId: ID
+  capacityHours: Float!
+}
+
+# Output types for AI operations
+# Both IAM (Lambda publishes via IAM) and Cognito (frontend subscribes via user pool) need access
+
+type GeneratedComponentOutput @aws_iam @aws_cognito_user_pools {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+  parentName: String
+  acceptanceCriteria: [String!]
+}
+
+type GeneratedSprintOutput @aws_iam @aws_cognito_user_pools {
+  name: String!
+  goal: String!
+  durationWeeks: Int!
+  componentNames: [String!]!
+  capacity: Float
+}
+
+type GeneratedEpicOutput @aws_iam @aws_cognito_user_pools {
+  name: String!
+  description: String!
+  componentNames: [String!]!
+}
+
+input FullPlanResultInput {
+  components: [GeneratedComponentInput!]!
+  summary: String!
+  enhancedDescription: String
+  sprints: [GeneratedSprintInput!]
+  epics: [GeneratedEpicInput!]
+}
+
+# Result of full plan generation
+type FullPlanResult @aws_iam @aws_cognito_user_pools {
+  components: [GeneratedComponentOutput!]!
+  summary: String!
+  enhancedDescription: String
+  # Sprints (Scrum workflow only)
+  sprints: [GeneratedSprintOutput!]
+  # Epic groupings (optional)
+  epics: [GeneratedEpicOutput!]
+}
+
+# Result of applying a plan to database
+type ApplyPlanResult {
+  created: Int!
+  dependencies: Int!
+  sprints: Int!
+  epics: Int!
+  componentIds: [ID!]!
+  sprintIds: [ID!]!
+}
+
+# Result of component refinement
+type RefineComponentResult {
+  component: GeneratedComponentOutput!
+  explanation: String!
+  suggestedFollowUps: [String!]!
+}
+
+# Changed item in bulk refinement
+type ChangedItem {
+  type: String!
+  name: String!
+  change: String!
+}
+
+# Result of bulk plan refinement
+type RefineBulkPlanResult {
+  components: [GeneratedComponentOutput!]!
+  sprints: [GeneratedSprintOutput!]
+  epics: [GeneratedEpicOutput!]
+  explanation: String!
+  changedItems: [ChangedItem!]!
+  suggestedFollowUps: [String!]!
+}
+
+# Result of smart component creation
+type SmartComponentResult {
+  component: GeneratedComponentOutput!
+  reasoning: String!
+  suggestedFollowUps: [String!]!
+}
+
+# Result of AI sprint planning
+type SprintPlanResult {
+  selectedComponentIds: [ID!]!
+  totalHours: Float!
+  reasoning: String!
+  warnings: [String!]!
+}
+
+# ============================================
+# Phase 1: Template Application Types
+# ============================================
+
+enum ComponentTemplateType {
+  CRUD_FEATURE
+  REST_API
+  USER_AUTH
+  FORM_WITH_VALIDATION
+  DATA_DASHBOARD
+  FILE_UPLOAD
+  SEARCH_FILTER
+  NOTIFICATION_SYSTEM
+  PAYMENT_INTEGRATION
+  ADMIN_PANEL
+}
+
+input ApplyTemplateInput {
+  template: ComponentTemplateType!
+  entityName: String!
+  projectName: String!
+  projectId: ID!
+  additionalRequirements: String
+}
+
+type TemplateComponentOutput {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+}
+
+type ApplyTemplateResult {
+  components: [TemplateComponentOutput!]!
+  implementationNotes: String!
+  techStackRecommendations: String
+}
+
+# ============================================
+# Phase 2: Component Breakdown Types
+# ============================================
+
+input SuggestBreakdownInput {
+  componentId: ID!
+  projectId: ID!
+}
+
+type BreakdownSuggestion {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+  acceptanceCriteria: [String!]
+}
+
+type SuggestBreakdownResult {
+  suggestions: [BreakdownSuggestion!]!
+  reasoning: String!
+  recommendedApproach: String!
+}
+
+# ============================================
+# Phase 3: Wireframe Generation Types
+# ============================================
+
+input GenerateWireframeInput {
+  componentId: ID!
+}
+
+type GenerateWireframeResult {
+  html: String!
+  componentName: String!
+}
+
+# ============================================
+# Phase 4: Import Analysis Types
+# ============================================
+
+input AnalyzeImportInput {
+  headers: [String!]!
+  sampleRows: [String!]!
+  projectId: ID!
+}
+
+type ColumnMappingOutput {
+  sourceColumn: String!
+  targetField: String
+  confidence: Float!
+}
+
+type AnalyzeImportResult {
+  mappings: [ColumnMappingOutput!]!
+  detectedFormat: String!
+  suggestions: [String!]!
+  warnings: [String!]!
+}
+
+input ColumnMappingInput {
+  sourceColumn: String!
+  targetField: String
+}
+
+input CleanupImportInput {
+  rows: [String!]!
+  mappings: [ColumnMappingInput!]!
+}
+
+type CleanedRowOutput {
+  original: String!
+  cleaned: String!
+  changes: [String!]!
+}
+
+type CleanupImportResult {
+  rows: [CleanedRowOutput!]!
+  summary: String!
+  totalChanges: Int!
+}
+
+# ============================================
+# Phase 5: Retrospective Generation Types
+# ============================================
+
+input GenerateRetrospectiveInput {
+  sprintId: ID!
+  applyAdjustments: Boolean
+}
+
+type EstimationInsights {
+  estimationAccuracy: String!
+  velocityTrend: String!
+  recommendations: [String!]!
+}
+
+type AdjustedEstimate {
+  componentId: ID!
+  componentName: String!
+  originalEstimate: Float!
+  adjustedEstimate: Float!
+  reasoning: String!
+}
+
+type GenerateRetrospectiveResult {
+  summary: String!
+  insights: EstimationInsights!
+  adjustedEstimates: [AdjustedEstimate!]!
+  suggestedActions: [String!]!
+  adjustmentsApplied: Boolean!
+}
+
+# =============================================================================
+# Async AI Generation Types (must be defined before Mutation that uses them)
+# =============================================================================
+
+enum AIJobStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+type AIJob {
+  sessionId: ID!
+  status: AIJobStatus!
+  createdAt: String!
+}
+
+# AIProgress type needs both IAM (for Lambda publishAIProgress) and Cognito (for frontend subscription)
+type AIProgress @aws_iam @aws_cognito_user_pools {
+  sessionId: ID!
+  progress: Int!
+  message: String!
+  status: AIJobStatus!
+  result: FullPlanResult
+  error: String
+}
+
+input StartAIGenerationInput {
+  projectId: ID!
+  generateEpics: Boolean
+}
+
 # AI generation: Lambda (Bedrock) invoked by AppSync; returns generated text.
 type Mutation {
+  # User registration (unauthenticated - uses AdminCreateUser, sends temp password via email)
+  # AWS best practice: Lambda resolver for admin SDK operations
+  registerUser(input: RegisterUserInput!): RegisterUserResult! @aws_api_key
+
+  # Sync user profile from ID token claims after OAuth callback
+  # AWS Best Practice: Access token (used by AppSync) doesn't contain email/name,
+  # so frontend extracts from ID token and syncs here
+  # MUST be called with fresh OAuth tokens immediately after authentication
+  syncUserProfile(input: SyncUserProfileInput!): User! @aws_cognito_user_pools
+
+  # =============================================================================
+  # Async AI Generation (bypasses 30s timeout)
+  # =============================================================================
+  # Start async AI generation - returns sessionId immediately, client subscribes for updates
+  startAIGeneration(input: StartAIGenerationInput!): AIJob!
+  # Internal: Lambda publishes progress updates (triggers subscription)
+  # Uses IAM auth - only callable by Lambda with appsync:GraphQL permission
+  publishAIProgress(sessionId: ID!, progress: Int!, message: String!, status: AIJobStatus!, result: FullPlanResultInput, error: String): AIProgress! @aws_iam
+
+  # Legacy: Simple AI generation (returns raw string)
   generateComponentViaAI(projectId: ID!, prompt: String!): String
+  # Full AI Plan Generation (workflow-aware: Scrum generates sprints, Kanban generates flat items)
+  # NOTE: This has 30s timeout - use startAIGeneration for production
+  generateFullPlan(input: GenerateFullPlanInput!): FullPlanResult!
+  # Apply generated plan atomically (creates components, dependencies, sprints, assigns to epics)
+  applyFullPlan(input: ApplyFullPlanInput!): ApplyPlanResult!
+  # Refine single component via chat
+  refineComponent(input: RefineComponentInput!): RefineComponentResult!
+  # Refine entire plan via chat
+  refineBulkPlan(input: RefineBulkPlanInput!): RefineBulkPlanResult!
+  # Smart component: natural language -> structured component preview
+  createSmartComponent(input: SmartComponentInput!): SmartComponentResult!
+  # AI sprint planning: suggest components for a sprint based on capacity and priorities
+  planSprint(input: PlanSprintInput!): SprintPlanResult!
+  # Template application: 10 predefined project templates
+  applyTemplate(input: ApplyTemplateInput!): ApplyTemplateResult!
+  # Component breakdown: hierarchical decomposition suggestions
+  suggestBreakdown(input: SuggestBreakdownInput!): SuggestBreakdownResult!
+  # Wireframe generation: HTML wireframe for UI components
+  generateWireframe(input: GenerateWireframeInput!): GenerateWireframeResult!
+  # Import analysis: AI-powered CSV/JSON column mapping
+  analyzeImportData(input: AnalyzeImportInput!): AnalyzeImportResult!
+  # Import cleanup: AI-powered data normalization
+  cleanupImportData(input: CleanupImportInput!): CleanupImportResult!
+  # Retrospective generation: sprint analysis with estimate adjustment
+  generateRetrospective(input: GenerateRetrospectiveInput!): GenerateRetrospectiveResult!
+  # Project mutations
   createProject(input: CreateProjectInput!): Project!
+  updateProject(id: ID!, input: UpdateProjectInput!): Project!
+  deleteProject(id: ID!): Boolean!
   # Team mutations
   createTeam(input: CreateTeamInput!): TeamWithMembers!
   updateTeam(teamId: ID!, input: UpdateTeamInput!): Team!
   addTeamMember(input: AddTeamMemberInput!): Membership!
   removeTeamMember(teamId: ID!, userId: ID!): Boolean!
   updateMemberRole(input: UpdateMemberRoleInput!): Membership!
+  # Component mutations
+  createComponent(input: CreateComponentInput!): Component!
+  updateComponent(id: ID!, input: UpdateComponentInput!): Component!
+  deleteComponent(id: ID!): Boolean!
+  # Dependency mutations (TransactWriteItems with ConditionCheck to verify both components exist)
+  addDependency(fromComponentId: ID!, toComponentId: ID!): Dependency!
+  removeDependency(fromComponentId: ID!, toComponentId: ID!): Boolean!
+  # Sprint mutations
+  createSprint(input: CreateSprintInput!): Sprint!
+  updateSprint(id: ID!, input: UpdateSprintInput!): Sprint!
+  deleteSprint(id: ID!): Boolean!
+  startSprint(id: ID!): Sprint!
+  completeSprint(id: ID!): Sprint!
+  # Assign/remove components from sprints (updates component.sprintId + GSI2)
+  assignComponentToSprint(componentId: ID!, sprintId: ID!): Component!
+  removeComponentFromSprint(componentId: ID!): Component!
+  # Assign/unassign users to/from components
+  assignUserToComponent(componentId: ID!, userId: ID!): Assignment!
+  unassignUserFromComponent(componentId: ID!, userId: ID!): Boolean!
+  # Mark notification as read
+  markNotificationRead(notificationId: ID!): Notification!
+  # Mark all notifications as read for current user
+  markAllNotificationsRead: Int!
+  # Update team workflow config (DynamoDB: UpdateItem/PutItem)
+  # Best practice: Direct DynamoDB for O(1) write
+  updateTeamWorkflowConfig(teamId: ID!, input: UpdateWorkflowConfigInput!): TeamWorkflowConfig!
+}
+
+type Subscription {
+  # Subscribe to AI generation progress updates
+  # Client subscribes with sessionId returned from startAIGeneration
+  onAIProgress(sessionId: ID!): AIProgress
+    @aws_subscribe(mutations: ["publishAIProgress"])
 }
 
 schema {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 ",
       },
       "Type": "AWS::AppSync::GraphQLSchema",
+    },
+    "AppSyncGraphqlApplyFullPlanResolver6F83B318": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "applyFullPlan",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlApplyTemplateResolver6D529E49": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "applyTemplate",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlAssignComponentToSprintResolver4D05BFF0": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.args.componentId;
+  const sprintId = ctx.args.sprintId;
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + componentId, sk: 'METADATA' }),
+    update: {
+      expression: 'SET #sprintId = :sprintId, #gsi2pk = :gsi2pk, #gsi2sk = :gsi2sk, #updatedAt = :updatedAt',
+      expressionNames: {
+        '#sprintId': 'sprintId',
+        '#gsi2pk': 'gsi2pk',
+        '#gsi2sk': 'gsi2sk',
+        '#updatedAt': 'updatedAt'
+      },
+      expressionValues: util.dynamodb.toMapValues({
+        ':sprintId': sprintId,
+        ':gsi2pk': 'SPRINT#' + sprintId,
+        ':gsi2sk': 'COMPONENT#' + componentId,
+        ':updatedAt': now
+      })
+    },
+    condition: { expression: 'attribute_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Component not found', 'ComponentNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "assignComponentToSprint",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlAssignUserToComponentResolver09BFFA95": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.args.componentId;
+  const userId = ctx.args.userId;
+  const now = util.time.nowISO8601();
+  const id = util.autoId();
+  const assignment = {
+    pk: 'COMPONENT#' + componentId,
+    sk: 'ASSIGNEE#' + userId,
+    id: id,
+    componentId: componentId,
+    userId: userId,
+    assignedAt: now,
+    gsi1pk: 'USER#' + userId,
+    gsi1sk: 'ASSIGNMENT#' + componentId
+  };
+  return {
+    operation: 'TransactWriteItems',
+    transactItems: [
+      // Check that the component exists
+      {
+        table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+        operation: 'ConditionCheck',
+        key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + componentId, sk: 'METADATA' }),
+        condition: { expression: 'attribute_exists(pk)' }
+      },
+      // Create the assignment (fail if already assigned)
+      {
+        table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ pk: assignment.pk, sk: assignment.sk }),
+        attributeValues: util.dynamodb.toMapValues(assignment),
+        condition: { expression: 'attribute_not_exists(pk)' }
+      }
+    ]
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.result && ctx.result.cancellationReasons) {
+      const reasons = ctx.result.cancellationReasons;
+      if (reasons[0] && reasons[0].type === 'ConditionCheckFailed') {
+        util.error('Component not found', 'ComponentNotFound');
+      }
+      if (reasons[1] && reasons[1].type === 'ConditionCheckFailed') {
+        util.error('User is already assigned to this component', 'AssignmentAlreadyExists');
+      }
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const componentId = ctx.args.componentId;
+  const userId = ctx.args.userId;
+  const now = util.time.nowISO8601();
+  return { id: util.autoId(), componentId, userId, assignedAt: now };
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FieldName": "assignUserToComponent",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlBatchDeleteComponentFnD65733D7": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  const dependencies = ctx.stash.dependencies || [];
+  const dependents = ctx.stash.dependents || [];
+
+  // Build delete requests: component + its dependencies + dependents pointing to it
+  const deleteRequests = [];
+
+  // Delete the component itself
+  deleteRequests.push({
+    table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + componentId, sk: 'METADATA' }),
+    condition: { expression: 'attribute_exists(pk)' }
+  });
+
+  // Delete dependencies (what this component depends on)
+  for (const dep of dependencies) {
+    deleteRequests.push({
+      table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+      operation: 'DeleteItem',
+      key: util.dynamodb.toMapValues({ pk: dep.pk, sk: dep.sk })
+    });
+  }
+
+  // Delete dependents (what depends on this component)
+  for (const dep of dependents) {
+    deleteRequests.push({
+      table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "',
+      operation: 'DeleteItem',
+      key: util.dynamodb.toMapValues({ pk: dep.pk, sk: dep.sk })
+    });
+  }
+
+  // Use TransactWriteItems for atomic deletion (max 100 items)
+  if (deleteRequests.length > 100) {
+    util.error('Too many items to delete in single transaction', 'TransactionLimitExceeded');
+  }
+
+  return {
+    operation: 'TransactWriteItems',
+    transactItems: deleteRequests
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.result && ctx.result.cancellationReasons) {
+      const reasons = ctx.result.cancellationReasons;
+      if (reasons[0] && reasons[0].type === 'ConditionCheckFailed') {
+        util.error('Component not found', 'ComponentNotFound');
+      }
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "batchDeleteComponent",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlBatchGetAssignmentComponentsFn05875A88": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const assignments = ctx.stash.assignments || [];
+  if (assignments.length === 0) {
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  }
+  const keys = assignments.map(a => util.dynamodb.toMapValues({ pk: 'COMPONENT#' + a.componentId, sk: 'METADATA' }));
+  return {
+    operation: 'BatchGetItem',
+    tables: {
+      '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "': { keys: keys }
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const assignments = ctx.stash.assignments || [];
+  const components = ctx.result.data ? (ctx.result.data['",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "'] || []) : [];
+  const componentMap = {};
+  for (const comp of components) {
+    if (comp && comp.id) componentMap[comp.id] = comp;
+  }
+  return assignments.map(a => ({
+    assignment: {
+      id: a.id,
+      componentId: a.componentId,
+      userId: a.userId,
+      assignedAt: a.assignedAt
+    },
+    component: componentMap[a.componentId] || null
+  })).filter(item => item.component !== null);
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "batchGetAssignmentComponents",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlBatchGetMemberUsersFnC7E96EEC": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const members = ctx.stash.members || [];
+  if (members.length === 0 || !ctx.stash.team) {
+    // No members or no team, skip batch fetch
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  }
+  // BatchGetItem for user details
+  const keys = members.map(m => util.dynamodb.toMapValues({ pk: 'USER#' + m.userId, sk: 'METADATA' }));
+  return {
+    operation: 'BatchGetItem',
+    tables: {
+      '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "': { keys: keys }
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const team = ctx.stash.team;
+  if (!team) return null;
+
+  // Build user lookup map
+  const userMap = {};
+  const userData = ctx.result?.data?.['",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "'] || [];
+  for (const user of userData) {
+    if (user && user.id) {
+      userMap[user.id] = user;
+    }
+  }
+
+  // Attach user details to each member
+  const members = ctx.stash.members || [];
+  const membersWithUsers = members.map(m => ({
+    ...m,
+    user: userMap[m.userId] || null
+  }));
+
+  return { team, members: membersWithUsers };
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "batchGetMemberUsers",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlBatchGetTeamsFn9CA14089": {
       "DependsOn": [
@@ -808,7 +2278,10 @@ schema {
               "import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const memberships = ctx.stash.memberships || [];
-  if (memberships.length === 0) return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  if (memberships.length === 0) {
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  }
+  // BatchGetItem format per AWS docs: tables: { tableName: { keys: [...] } }
   const keys = memberships.map(m => util.dynamodb.toMapValues({ pk: 'TEAM#' + m.teamId, sk: 'METADATA' }));
   return {
     operation: 'BatchGetItem',
@@ -817,26 +2290,27 @@ export function request(ctx) {
               {
                 "Ref": "DynamoTableE5532DA8",
               },
-              "': { keys }
+              "': { keys: keys }
     }
   };
 }
 export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   const memberships = ctx.stash.memberships || [];
-  const teams = ctx.result.data['",
+  // BatchGetItem result: ctx.result.data[tableName] contains array of items
+  const teams = ctx.result.data ? (ctx.result.data['",
               {
                 "Ref": "DynamoTableE5532DA8",
               },
-              "'] || [];
+              "'] || []) : [];
   const teamMap = {};
   for (const team of teams) {
-    teamMap[team.id] = team;
+    if (team && team.id) teamMap[team.id] = team;
   }
   return memberships.map(m => ({
     team: teamMap[m.teamId] || { id: m.teamId, name: 'Unknown' },
     members: [m]
-  })).filter(t => t.team.id);
+  })).filter(t => t.team && t.team.name !== 'Unknown');
 }",
             ],
           ],
@@ -850,6 +2324,242 @@ export function response(ctx) {
         },
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCleanupImportDataResolver07095877": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "cleanupImportData",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlCompleteSprintResolver26F0CB68": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + ctx.args.id, sk: 'METADATA' }),
+    update: {
+      expression: 'SET #status = :status, #updatedAt = :updatedAt',
+      expressionNames: { '#status': 'status', '#updatedAt': 'updatedAt' },
+      expressionValues: util.dynamodb.toMapValues({ ':status': 'COMPLETED', ':updatedAt': now, ':active': 'ACTIVE' })
+    },
+    condition: { expression: 'attribute_exists(pk) AND #status = :active' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Sprint not found or not in ACTIVE status', 'InvalidSprintStatus');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "completeSprint",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlCountNotificationsAfterFnF28913E7": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.stash.userId;
+  const readUntil = ctx.stash.notificationsReadUntil;
+  // Query notifications created AFTER the readUntil timestamp
+  // sk format is NOTIFICATION#createdAt#id, so we use > to get newer ones
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND sk > :sk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'NOTIFICATION#' + readUntil
+      })
+    },
+    select: 'COUNT'
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result.count || 0;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "countNotificationsAfter",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCountUnreadNotificationsResolver6AED50D8": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "countUnreadNotifications",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetUserReadUntilFn62CEDA5E",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCountNotificationsAfterFnF28913E7",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlCreateComponentResolverC4F82584": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const id = input.id;
+  const now = util.time.nowISO8601();
+  const item = {
+    pk: 'COMPONENT#' + id,
+    sk: 'METADATA',
+    id,
+    name: input.name,
+    description: input.description || null,
+    type: input.type,
+    projectId: input.projectId,
+    parentId: input.parentId || null,
+    sprintId: null,
+    status: input.status || 'PLANNING',
+    priority: input.priority || 0,
+    estimatedHours: input.estimatedHours || null,
+    actualHours: null,
+    dueDate: input.dueDate || null,
+    owner: input.owner || null,
+    tags: input.tags || [],
+    createdAt: now,
+    updatedAt: now,
+    gsi1pk: 'PROJECT#' + input.projectId,
+    gsi1sk: 'COMPONENT#' + id
+  };
+  // Add GSI2 keys only if sprintId is set (sparse index)
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({ pk: item.pk, sk: item.sk }),
+    attributeValues: util.dynamodb.toMapValues(item),
+    condition: { expression: 'attribute_not_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Component with this ID already exists', 'ComponentAlreadyExists');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  return {
+    id: input.id,
+    name: input.name,
+    description: input.description || null,
+    type: input.type,
+    projectId: input.projectId,
+    parentId: input.parentId || null,
+    sprintId: null,
+    status: input.status || 'PLANNING',
+    priority: input.priority || 0,
+    estimatedHours: input.estimatedHours || null,
+    actualHours: null,
+    dueDate: input.dueDate || null,
+    owner: input.owner || null,
+    tags: input.tags || [],
+    createdAt: now,
+    updatedAt: now
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "createComponent",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
     },
     "AppSyncGraphqlCreateProjectResolverAE2D7277": {
       "DependsOn": [
@@ -886,17 +2596,115 @@ export function request(ctx) {
   return {
     operation: 'PutItem',
     key: util.dynamodb.toMapValues({ pk: item.pk, sk: item.sk }),
-    attributeValues: util.dynamodb.toMapValues(item)
+    attributeValues: util.dynamodb.toMapValues(item),
+    condition: { expression: 'attribute_not_exists(pk)' }
   };
 }
 export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Project already exists', 'ProjectAlreadyExists');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
   const input = ctx.args.input;
   const now = util.time.nowISO8601();
   return { id: input.id, name: input.name, description: input.description || null, teamId: input.teamId, ownerId: input.ownerId, createdAt: now, updatedAt: now };
 }",
         "DataSourceName": "DynamoDB",
         "FieldName": "createProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlCreateSmartComponentResolverC35DB735": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "createSmartComponent",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlCreateSprintResolverA6AC3E35": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const id = input.id;
+  const now = util.time.nowISO8601();
+  const item = {
+    pk: 'SPRINT#' + id,
+    sk: 'METADATA',
+    id,
+    teamId: input.teamId,
+    name: input.name,
+    goal: input.goal || null,
+    status: 'PLANNING',
+    startDate: input.startDate || null,
+    endDate: input.endDate || null,
+    createdAt: now,
+    updatedAt: now,
+    gsi1pk: 'TEAM#' + input.teamId,
+    gsi1sk: 'SPRINT#' + id
+  };
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({ pk: item.pk, sk: item.sk }),
+    attributeValues: util.dynamodb.toMapValues(item),
+    condition: { expression: 'attribute_not_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Sprint with this ID already exists', 'SprintAlreadyExists');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  return {
+    id: input.id,
+    teamId: input.teamId,
+    name: input.name,
+    goal: input.goal || null,
+    status: 'PLANNING',
+    startDate: input.startDate || null,
+    endDate: input.endDate || null,
+    createdAt: now,
+    updatedAt: now
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "createSprint",
         "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
@@ -991,6 +2799,189 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlDeleteComponentResolver61DC824A": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "deleteComponent",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryDependenciesForDeleteFn71B765B4",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryDependentsForDeleteFnED99E4FD",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlBatchDeleteComponentFnD65733D7",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlDeleteProjectResolverDDDBE7F8": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const projectId = ctx.args.id;
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + projectId,
+      sk: 'METADATA'
+    }),
+    condition: { expression: 'attribute_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Project not found', 'ProjectNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "deleteProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlDeleteSprintResolverF8A43826": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SPRINT#' + ctx.args.id,
+      sk: 'METADATA'
+    }),
+    condition: { expression: 'attribute_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Sprint not found', 'SprintNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "deleteSprint",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlFindNotificationFn21851257": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const notificationId = ctx.args.notificationId;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'NOTIFICATION#'
+      })
+    },
+    filter: {
+      expression: 'id = :id',
+      expressionValues: util.dynamodb.toMapValues({ ':id': notificationId })
+    },
+    limit: 1
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const items = ctx.result.items || [];
+  if (items.length === 0) {
+    util.error('Notification not found', 'NotificationNotFound');
+  }
+  ctx.stash.notification = items[0];
+  return items[0];
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "findNotification",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlGenerateComponentViaAIResolver3545246F": {
       "DependsOn": [
         "AppSyncGraphqlApiBedrockLambda55C98CBB",
@@ -1012,6 +3003,145 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlGenerateFullPlanResolverDDE8959B": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "generateFullPlan",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGenerateRetrospectiveResolver888CBBC4": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "generateRetrospective",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGenerateWireframeResolver1F9B64B2": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "generateWireframe",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetComponentChildrenResolver2374B624": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "getComponentChildren",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetParentComponentFnD82EE5B9",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryChildComponentsFn62EB950B",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetComponentResolverE779C157": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + ctx.args.id,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getComponent",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlGetCurrentUserResolver1EEDB1FC": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -1027,16 +3157,70 @@ export function response(ctx) {
         "Code": "import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
+  const claims = ctx.identity.claims || {};
+  const email = claims.email || null;
+  const name = claims.name || claims['custom:name'] || null;
+  const now = util.time.nowISO8601();
+
+  // Build dynamic update expression based on available claims
+  // Core fields always set with if_not_exists
+  let expression = 'SET #id = if_not_exists(#id, :id), #createdAt = if_not_exists(#createdAt, :now), #updatedAt = :now, #gsi1sk = if_not_exists(#gsi1sk, :gsi1sk)';
+  const expNames = {
+    '#id': 'id',
+    '#createdAt': 'createdAt',
+    '#updatedAt': 'updatedAt',
+    '#gsi1sk': 'gsi1sk'
+  };
+  const expValues = {
+    ':id': userId,
+    ':now': now,
+    ':gsi1sk': 'USER#' + userId
+  };
+
+  // If we have email from claims, update it (even if NULL exists in DB)
+  // This fixes records that were created before email was properly extracted
+  if (email) {
+    expression += ', #email = :email, #gsi1pk = :gsi1pk';
+    expNames['#email'] = 'email';
+    expNames['#gsi1pk'] = 'gsi1pk';
+    expValues[':email'] = email;
+    expValues[':gsi1pk'] = 'EMAIL#' + email;
+  } else {
+    // No email in claims - only set if doesn't exist
+    expression += ', #email = if_not_exists(#email, :emailNull), #gsi1pk = if_not_exists(#gsi1pk, :gsi1pkUnknown)';
+    expNames['#email'] = 'email';
+    expNames['#gsi1pk'] = 'gsi1pk';
+    expValues[':emailNull'] = null;
+    expValues[':gsi1pkUnknown'] = 'EMAIL#unknown';
+  }
+
+  // If we have name from claims, update it (even if NULL exists in DB)
+  if (name) {
+    expression += ', #name = :name';
+    expNames['#name'] = 'name';
+    expValues[':name'] = name;
+  } else {
+    expression += ', #name = if_not_exists(#name, :nameNull)';
+    expNames['#name'] = 'name';
+    expValues[':nameNull'] = null;
+  }
+
   return {
-    operation: 'GetItem',
+    operation: 'UpdateItem',
     key: util.dynamodb.toMapValues({
       pk: 'USER#' + userId,
       sk: 'METADATA'
-    })
+    }),
+    update: {
+      expression: expression,
+      expressionNames: expNames,
+      expressionValues: util.dynamodb.toMapValues(expValues)
+    }
   };
 }
 export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  // UpdateItem returns the updated attributes
   return ctx.result;
 }",
         "DataSourceName": "DynamoDB",
@@ -1049,6 +3233,137 @@ export function response(ctx) {
         "TypeName": "Query",
       },
       "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetDependenciesResolver997F19FB": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'COMPONENT#' + ctx.args.componentId,
+        ':sk': 'DEPENDS_ON#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return (ctx.result.items || []).map(item => ({
+    fromComponentId: item.fromComponentId,
+    toComponentId: item.toComponentId,
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getDependencies",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetDependentsResolver3DFF588A": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'REQUIRED_BY#' + ctx.args.componentId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return (ctx.result.items || []).map(item => ({
+    fromComponentId: item.fromComponentId,
+    toComponentId: item.toComponentId,
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getDependents",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetParentComponentFnD82EE5B9": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + ctx.args.parentId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const parent = ctx.result;
+  if (!parent) {
+    ctx.stash.projectId = null;
+    return [];
+  }
+  ctx.stash.parentId = ctx.args.parentId;
+  ctx.stash.projectId = parent.projectId;
+  return parent;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getParentComponent",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlGetProjectResolverB43CD3DB": {
       "DependsOn": [
@@ -1085,6 +3400,195 @@ export function response(ctx) {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
         },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetSprintFnBEFDA59C": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  ctx.stash.sprintId = ctx.args.sprintId;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SPRINT#' + ctx.args.sprintId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) {
+    util.error('Sprint not found', 'SprintNotFound');
+  }
+  ctx.stash.sprint = ctx.result;
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getSprintForWithComponents",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlGetSprintResolver127F53A2": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SPRINT#' + ctx.args.id,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getSprint",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetSprintWithComponentsResolver679FB66D": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "getSprintWithComponents",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetSprintFnBEFDA59C",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQuerySprintComponentsFn61AFFB9E",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetTeamAndMembersFn517E5BBD": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const items = ctx.result.items || [];
+  let team = null;
+  const members = [];
+  for (const item of items) {
+    if (item.sk === 'METADATA') {
+      team = item;
+    } else if (item.sk && item.sk.startsWith('MEMBER#')) {
+      members.push(item);
+    }
+  }
+  ctx.stash.team = team;
+  ctx.stash.members = members;
+  return { team, members };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getTeamAndMembers",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlGetTeamMetricsResolver3178B2D0": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "getTeamMetrics",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
         "TypeName": "Query",
       },
       "Type": "AWS::AppSync::Resolver",
@@ -1128,6 +3632,45 @@ export function response(ctx) {
     },
     "AppSyncGraphqlGetTeamWithMembersResolver679CB782": {
       "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "getTeamWithMembers",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetTeamAndMembersFn517E5BBD",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlBatchGetMemberUsersFnC7E96EEC",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetTeamWorkflowConfigResolverE29EC2A6": {
+      "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
         "AppSyncGraphqlApiSchemaC2E94F39",
       ],
@@ -1140,34 +3683,38 @@ export function response(ctx) {
         },
         "Code": "import { util } from '@aws-appsync/utils';
 export function request(ctx) {
-  const teamId = ctx.args.teamId;
   return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'TEAM#' + teamId
-      })
-    }
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + ctx.args.teamId,
+      sk: 'WORKFLOW_CONFIG'
+    })
   };
 }
 export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  const items = ctx.result.items || [];
-  let team = null;
-  const members = [];
-  for (const item of items) {
-    if (item.sk === 'METADATA') {
-      team = item;
-    } else if (item.sk && item.sk.startsWith('MEMBER#')) {
-      members.push(item);
-    }
-  }
-  if (!team) return null;
-  return { team, members };
+  if (!ctx.result) return null;
+  return {
+    id: ctx.result.id,
+    teamId: ctx.result.teamId,
+    wipLimitPlanning: ctx.result.wipLimitPlanning || null,
+    wipLimitInProgress: ctx.result.wipLimitInProgress || null,
+    wipLimitBlocked: ctx.result.wipLimitBlocked || null,
+    wipLimitReview: ctx.result.wipLimitReview || null,
+    cycleEnabled: ctx.result.cycleEnabled || false,
+    cycleDurationWeeks: ctx.result.cycleDurationWeeks || null,
+    cycleStartDayOfWeek: ctx.result.cycleStartDayOfWeek || null,
+    cycleName: ctx.result.cycleName || 'Sprint',
+    backlogName: ctx.result.backlogName || 'Backlog',
+    workflowTemplate: ctx.result.workflowTemplate || 'CUSTOM',
+    enforceEstimates: ctx.result.enforceEstimates || false,
+    autoArchiveCompleted: ctx.result.autoArchiveCompleted || false,
+    createdAt: ctx.result.createdAt,
+    updatedAt: ctx.result.updatedAt
+  };
 }",
         "DataSourceName": "DynamoDB",
-        "FieldName": "getTeamWithMembers",
+        "FieldName": "getTeamWorkflowConfig",
         "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
@@ -1221,6 +3768,221 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlGetUserReadUntilFn62CEDA5E": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  ctx.stash.userId = userId;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'USER#' + userId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  // Store the timestamp; if not set, use epoch start so all notifications count
+  ctx.stash.notificationsReadUntil = ctx.result?.notificationsReadUntil || '1970-01-01T00:00:00.000Z';
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getUserReadUntil",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlListActivitiesForProjectResolver377BC776": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const limit = ctx.args.limit || 50;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'PROJECT#' + ctx.args.projectId,
+        ':sk': 'ACTIVITY#'
+      })
+    },
+    scanIndexForward: false,
+    limit: limit
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    type: item.type,
+    projectId: item.projectId,
+    userId: item.userId,
+    metadata: item.metadata ? JSON.stringify(item.metadata) : null,
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listActivitiesForProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListAssignmentsForComponentResolverEEFD427F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'COMPONENT#' + ctx.args.componentId,
+        ':sk': 'ASSIGNEE#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    componentId: item.componentId,
+    userId: item.userId,
+    assignedAt: item.assignedAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listAssignmentsForComponent",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListAssignmentsForUserResolver1C36A9E5": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "listAssignmentsForUser",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryAssignmentsForUserFn108AA8A3",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlBatchGetAssignmentComponentsFn05875A88",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListComponentsByProjectResolverACCB499A": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'PROJECT#' + ctx.args.projectId,
+        ':sk': 'COMPONENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result.items || [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listComponentsByProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlListMembershipsForUserFn2DE30B8B": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -1262,6 +4024,45 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlListNotificationsForUserResolverB3FA4514": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "listNotificationsForUser",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetUserReadUntilFn62CEDA5E",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryNotificationsWithReadStatusFnDC1D914D",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlListProjectsByTeamResolver5F6E1F61": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -1295,6 +4096,89 @@ export function response(ctx) {
 }",
         "DataSourceName": "DynamoDB",
         "FieldName": "listProjectsByTeam",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListProjectsForUserResolverE3B87F33": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'OWNER#' + userId,
+        ':sk': 'PROJECT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result.items || [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listProjectsForUser",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListSprintsByTeamResolver23BC2E2B": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + ctx.args.teamId,
+        ':sk': 'SPRINT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result.items || [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listSprintsByTeam",
         "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
@@ -1343,6 +4227,711 @@ export function response(ctx) { return ctx.prev.result; }",
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlMarkAllNotificationsReadResolver264A6224": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const now = util.time.nowISO8601();
+  // O(1) operation: just update the user's notificationsReadUntil timestamp
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'USER#' + userId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET #notificationsReadUntil = :now, #updatedAt = :now',
+      expressionNames: {
+        '#notificationsReadUntil': 'notificationsReadUntil',
+        '#updatedAt': 'updatedAt'
+      },
+      expressionValues: util.dynamodb.toMapValues({
+        ':now': now
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  // Return 0 as we no longer track individual notification updates
+  // The frontend should refresh the notification list after this call
+  return 0;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "markAllNotificationsRead",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlMarkNotificationReadPipelineResolverC81D334F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) {
+  const notification = ctx.stash.notification;
+  return {
+    id: notification.id,
+    userId: notification.userId,
+    type: notification.type,
+    title: notification.title,
+    message: notification.message,
+    componentId: notification.componentId || null,
+    projectId: notification.projectId || null,
+    read: true,
+    createdAt: notification.createdAt
+  };
+}",
+        "FieldName": "markNotificationRead",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlFindNotificationFn21851257",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlUpdateNotificationReadFn57912202",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlPlanSprintResolver0C5E794E": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "planSprint",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlPublishAIProgressResolverBFCE8C99": {
+      "DependsOn": [
+        "AppSyncGraphqlApiNoneDataSourceA0A13C9A",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "
+        export function request(ctx) {
+          return { payload: ctx.arguments };
+        }
+        export function response(ctx) {
+          return {
+            sessionId: ctx.arguments.sessionId,
+            progress: ctx.arguments.progress,
+            message: ctx.arguments.message,
+            status: ctx.arguments.status,
+            result: ctx.arguments.result,
+            error: ctx.arguments.error,
+          };
+        }
+      ",
+        "DataSourceName": "NoneDataSource",
+        "FieldName": "publishAIProgress",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlQueryAssignmentsForUserFn108AA8A3": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  ctx.stash.userId = userId;
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'ASSIGNMENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  ctx.stash.assignments = ctx.result.items || [];
+  return ctx.result.items || [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryAssignmentsForUser",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlQueryChildComponentsFn62EB950B": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const projectId = ctx.stash.projectId;
+  if (!projectId) {
+    // Return empty query if parent not found
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  }
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'PROJECT#' + projectId,
+        ':sk': 'COMPONENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const parentId = ctx.stash.parentId;
+  const items = ctx.result.items || [];
+  // Filter to only return children of the specified parent
+  return items.filter(item => item.parentId === parentId);
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryChildComponents",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlQueryDependenciesForDeleteFn71B765B4": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  ctx.stash.componentId = ctx.args.id;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'COMPONENT#' + ctx.args.id,
+        ':sk': 'DEPENDS_ON#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  ctx.stash.dependencies = ctx.result.items || [];
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryDependenciesForDelete",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlQueryDependentsForDeleteFnED99E4FD": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'REQUIRED_BY#' + ctx.stash.componentId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  ctx.stash.dependents = ctx.result.items || [];
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryDependentsForDelete",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlQueryNotificationsWithReadStatusFnDC1D914D": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.stash.userId;
+  const limit = ctx.args.limit || 50;
+  const unreadOnly = ctx.args.unreadOnly || false;
+  const readUntil = ctx.stash.notificationsReadUntil;
+
+  // If unreadOnly is true, use sort key range to get only notifications after readUntil
+  if (unreadOnly) {
+    return {
+      operation: 'Query',
+      query: {
+        expression: 'pk = :pk AND sk > :sk',
+        expressionValues: util.dynamodb.toMapValues({
+          ':pk': 'USER#' + userId,
+          ':sk': 'NOTIFICATION#' + readUntil
+        })
+      },
+      scanIndexForward: false,
+      limit: limit
+    };
+  }
+
+  // Otherwise, get all notifications
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'NOTIFICATION#'
+      })
+    },
+    scanIndexForward: false,
+    limit: limit
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const readUntil = ctx.stash.notificationsReadUntil;
+  // Compute read status: notification is read if createdAt <= readUntil OR if explicitly marked read
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    userId: item.userId,
+    type: item.type,
+    title: item.title,
+    message: item.message,
+    componentId: item.componentId || null,
+    projectId: item.projectId || null,
+    read: item.read === true || (item.createdAt && item.createdAt <= readUntil),
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryNotificationsWithReadStatus",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlQuerySprintComponentsFn61AFFB9E": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'Query',
+    index: 'gsi2',
+    query: {
+      expression: 'gsi2pk = :pk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'SPRINT#' + ctx.stash.sprintId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return {
+    sprint: ctx.stash.sprint,
+    components: ctx.result.items || []
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "querySprintComponents",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlRefineBulkPlanResolverA3B9D7D2": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "refineBulkPlan",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlRefineComponentResolver492C6CD6": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "refineComponent",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlRegisterUserHandlerCBC1F83E": {
+      "DependsOn": [
+        "AppSyncGraphqlRegisterUserHandlerServiceRoleDefaultPolicy50BF9192",
+        "AppSyncGraphqlRegisterUserHandlerServiceRole8524032D",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-2",
+          "S3Key": "REDACTED",
+        },
+        "Environment": {
+          "Variables": {
+            "USER_POOL_ID": {
+              "Ref": "AuthUserPool8115E87F",
+            },
+          },
+        },
+        "Handler": "index.handler",
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlRegisterUserHandlerServiceRole8524032D",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs20.x",
+        "Timeout": 10,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AppSyncGraphqlRegisterUserHandlerServiceRole8524032D": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "AppSyncGraphqlRegisterUserHandlerServiceRoleDefaultPolicy50BF9192": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "cognito-idp:AdminCreateUser",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuthUserPool8115E87F",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AppSyncGraphqlRegisterUserHandlerServiceRoleDefaultPolicy50BF9192",
+        "Roles": [
+          {
+            "Ref": "AppSyncGraphqlRegisterUserHandlerServiceRole8524032D",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AppSyncGraphqlRegisterUserResolver6581E404": {
+      "DependsOn": [
+        "AppSyncGraphqlApiRegisterUserLambda470431B1",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "RegisterUserLambda",
+        "FieldName": "registerUser",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlRemoveComponentFromSprintResolver4465A3D6": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.args.componentId;
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + componentId, sk: 'METADATA' }),
+    update: {
+      expression: 'SET #sprintId = :null, #updatedAt = :updatedAt REMOVE #gsi2pk, #gsi2sk',
+      expressionNames: {
+        '#sprintId': 'sprintId',
+        '#gsi2pk': 'gsi2pk',
+        '#gsi2sk': 'gsi2sk',
+        '#updatedAt': 'updatedAt'
+      },
+      expressionValues: util.dynamodb.toMapValues({
+        ':null': null,
+        ':updatedAt': now
+      })
+    },
+    condition: { expression: 'attribute_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Component not found', 'ComponentNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "removeComponentFromSprint",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlRemoveDependencyResolver786A14B3": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const fromId = ctx.args.fromComponentId;
+  const toId = ctx.args.toComponentId;
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + fromId,
+      sk: 'DEPENDS_ON#' + toId
+    }),
+    condition: { expression: 'attribute_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Dependency not found', 'DependencyNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "removeDependency",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlRemoveTeamMemberResolver3F5966A9": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -1364,15 +4953,331 @@ export function request(ctx) {
     key: util.dynamodb.toMapValues({
       pk: 'TEAM#' + teamId,
       sk: 'MEMBER#' + userId
-    })
+    }),
+    condition: { expression: 'attribute_exists(pk)' }
   };
 }
 export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Member not found in team', 'MemberNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
   return true;
 }",
         "DataSourceName": "DynamoDB",
         "FieldName": "removeTeamMember",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlStartAIGenerationResolver7635D674": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "
+        export function request(ctx) {
+          const sessionId = util.autoId();
+          // Store sessionId in stash for response function
+          ctx.stash.sessionId = sessionId;
+          return {
+            operation: 'Invoke',
+            invocationType: 'Event',
+            payload: {
+              type: 'startAIGeneration',
+              sessionId: sessionId,
+              projectId: ctx.arguments.input.projectId,
+              generateEpics: ctx.arguments.input.generateEpics || false,
+              graphqlUrl: '",
+              {
+                "Fn::GetAtt": [
+                  "AppSyncGraphqlApi48248BEB",
+                  "GraphQLUrl",
+                ],
+              },
+              "',
+            },
+          };
+        }
+        export function response(ctx) {
+          // Return immediately with sessionId (Lambda runs async)
+          // Get sessionId from stash (stored in request function)
+          return {
+            sessionId: ctx.stash.sessionId,
+            status: 'PENDING',
+            createdAt: util.time.nowISO8601(),
+          };
+        }
+      ",
+            ],
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "startAIGeneration",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlStartSprintResolver140DBFF8": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + ctx.args.id, sk: 'METADATA' }),
+    update: {
+      expression: 'SET #status = :status, #updatedAt = :updatedAt',
+      expressionNames: { '#status': 'status', '#updatedAt': 'updatedAt' },
+      expressionValues: util.dynamodb.toMapValues({ ':status': 'ACTIVE', ':updatedAt': now, ':planning': 'PLANNING' })
+    },
+    condition: { expression: 'attribute_exists(pk) AND #status = :planning' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Sprint not found or not in PLANNING status', 'InvalidSprintStatus');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "startSprint",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlSuggestBreakdownResolver57AAB66F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "suggestBreakdown",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlSyncUserProfileResolverF27D1D3F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const input = ctx.args.input;
+  const email = input.email;
+  const name = input.name;
+  const now = util.time.nowISO8601();
+
+  // Update user record with email and name from ID token
+  // This fixes records created with null values from access token claims
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'USER#' + userId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET #id = if_not_exists(#id, :id), #email = :email, #name = :name, #createdAt = if_not_exists(#createdAt, :now), #updatedAt = :now, #gsi1pk = :gsi1pk, #gsi1sk = if_not_exists(#gsi1sk, :gsi1sk)',
+      expressionNames: {
+        '#id': 'id',
+        '#email': 'email',
+        '#name': 'name',
+        '#createdAt': 'createdAt',
+        '#updatedAt': 'updatedAt',
+        '#gsi1pk': 'gsi1pk',
+        '#gsi1sk': 'gsi1sk'
+      },
+      expressionValues: util.dynamodb.toMapValues({
+        ':id': userId,
+        ':email': email,
+        ':name': name,
+        ':now': now,
+        ':gsi1pk': 'EMAIL#' + email,
+        ':gsi1sk': 'USER#' + userId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "syncUserProfile",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlUnassignUserFromComponentResolver8CBF24C9": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.args.componentId;
+  const userId = ctx.args.userId;
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#' + userId
+    }),
+    condition: { expression: 'attribute_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Assignment not found', 'AssignmentNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "unassignUserFromComponent",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlUpdateComponentResolver1E6D8633": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.args.id;
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  const expNames = { '#updatedAt': 'updatedAt' };
+  const expValues = { ':updatedAt': util.dynamodb.toDynamoDB(now) };
+  let updateExp = 'SET #updatedAt = :updatedAt';
+
+  const fields = ['name', 'description', 'type', 'parentId', 'sprintId', 'status', 'priority', 'estimatedHours', 'actualHours', 'dueDate', 'owner', 'tags'];
+  for (const field of fields) {
+    if (input[field] !== undefined) {
+      expNames['#' + field] = field;
+      expValues[':' + field] = util.dynamodb.toDynamoDB(input[field]);
+      updateExp += ', #' + field + ' = :' + field;
+    }
+  }
+
+  // Handle GSI2 (sprint) updates - sparse index
+  if (input.sprintId !== undefined) {
+    if (input.sprintId) {
+      expNames['#gsi2pk'] = 'gsi2pk';
+      expNames['#gsi2sk'] = 'gsi2sk';
+      expValues[':gsi2pk'] = util.dynamodb.toDynamoDB('SPRINT#' + input.sprintId);
+      expValues[':gsi2sk'] = util.dynamodb.toDynamoDB('COMPONENT#' + componentId);
+      updateExp += ', #gsi2pk = :gsi2pk, #gsi2sk = :gsi2sk';
+    } else {
+      // Remove from sprint GSI by setting to null (sparse index will exclude)
+      expNames['#gsi2pk'] = 'gsi2pk';
+      expNames['#gsi2sk'] = 'gsi2sk';
+      expValues[':gsi2pk'] = util.dynamodb.toDynamoDB(null);
+      expValues[':gsi2sk'] = util.dynamodb.toDynamoDB(null);
+      updateExp += ', #gsi2pk = :gsi2pk, #gsi2sk = :gsi2sk';
+    }
+  }
+
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + componentId, sk: 'METADATA' }),
+    update: { expression: updateExp, expressionNames: expNames, expressionValues: expValues }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "updateComponent",
         "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
@@ -1425,6 +5330,156 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlUpdateNotificationReadFn57912202": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const notification = ctx.stash.notification || ctx.prev.result;
+  if (!notification) {
+    util.error('Notification not found', 'NotificationNotFound');
+  }
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: notification.pk, sk: notification.sk }),
+    update: {
+      expression: 'SET #read = :readVal',
+      expressionNames: { '#read': 'read' },
+      expressionValues: util.dynamodb.toMapValues({ ':readVal': true })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "updateNotificationRead",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlUpdateProjectResolverA4C9EC99": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const projectId = ctx.args.id;
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  const expNames = { '#updatedAt': 'updatedAt' };
+  const expValues = { ':updatedAt': util.dynamodb.toDynamoDB(now) };
+  let updateExp = 'SET #updatedAt = :updatedAt';
+  if (input.name !== undefined && input.name !== null) {
+    expNames['#name'] = 'name';
+    expValues[':name'] = util.dynamodb.toDynamoDB(input.name);
+    updateExp += ', #name = :name';
+  }
+  if (input.description !== undefined) {
+    expNames['#description'] = 'description';
+    expValues[':description'] = util.dynamodb.toDynamoDB(input.description);
+    updateExp += ', #description = :description';
+  }
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'PROJECT#' + projectId, sk: 'METADATA' }),
+    update: { expression: updateExp, expressionNames: expNames, expressionValues: expValues }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "updateProject",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlUpdateSprintResolver744B97C3": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const sprintId = ctx.args.id;
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  const expNames = { '#updatedAt': 'updatedAt' };
+  const expValues = { ':updatedAt': util.dynamodb.toDynamoDB(now) };
+  let updateExp = 'SET #updatedAt = :updatedAt';
+
+  const fields = ['name', 'goal', 'startDate', 'endDate'];
+  for (const field of fields) {
+    if (input[field] !== undefined) {
+      expNames['#' + field] = field;
+      expValues[':' + field] = util.dynamodb.toDynamoDB(input[field]);
+      updateExp += ', #' + field + ' = :' + field;
+    }
+  }
+
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + sprintId, sk: 'METADATA' }),
+    update: { expression: updateExp, expressionNames: expNames, expressionValues: expValues },
+    condition: { expression: 'attribute_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Sprint not found', 'SprintNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "updateSprint",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlUpdateTeamResolver823FCEEF": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -1467,6 +5522,152 @@ export function response(ctx) {
 }",
         "DataSourceName": "DynamoDB",
         "FieldName": "updateTeam",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlUpdateTeamWorkflowConfigResolverE01EAF20": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  const id = util.autoId();
+
+  // Build update expression with if_not_exists for id, teamId, createdAt
+  let setExpressions = [
+    '#id = if_not_exists(#id, :id)',
+    '#teamId = if_not_exists(#teamId, :teamIdVal)',
+    '#createdAt = if_not_exists(#createdAt, :now)',
+    '#updatedAt = :now'
+  ];
+  const expressionNames = {
+    '#id': 'id',
+    '#teamId': 'teamId',
+    '#createdAt': 'createdAt',
+    '#updatedAt': 'updatedAt'
+  };
+  const expressionValues = {
+    ':id': id,
+    ':teamIdVal': teamId,
+    ':now': now
+  };
+
+  // Add input fields
+  if (input.wipLimitPlanning !== undefined && input.wipLimitPlanning !== null) {
+    setExpressions.push('#wipLimitPlanning = :wipLimitPlanning');
+    expressionNames['#wipLimitPlanning'] = 'wipLimitPlanning';
+    expressionValues[':wipLimitPlanning'] = input.wipLimitPlanning;
+  }
+  if (input.wipLimitInProgress !== undefined && input.wipLimitInProgress !== null) {
+    setExpressions.push('#wipLimitInProgress = :wipLimitInProgress');
+    expressionNames['#wipLimitInProgress'] = 'wipLimitInProgress';
+    expressionValues[':wipLimitInProgress'] = input.wipLimitInProgress;
+  }
+  if (input.wipLimitBlocked !== undefined && input.wipLimitBlocked !== null) {
+    setExpressions.push('#wipLimitBlocked = :wipLimitBlocked');
+    expressionNames['#wipLimitBlocked'] = 'wipLimitBlocked';
+    expressionValues[':wipLimitBlocked'] = input.wipLimitBlocked;
+  }
+  if (input.wipLimitReview !== undefined && input.wipLimitReview !== null) {
+    setExpressions.push('#wipLimitReview = :wipLimitReview');
+    expressionNames['#wipLimitReview'] = 'wipLimitReview';
+    expressionValues[':wipLimitReview'] = input.wipLimitReview;
+  }
+  if (input.cycleEnabled !== undefined && input.cycleEnabled !== null) {
+    setExpressions.push('#cycleEnabled = :cycleEnabled');
+    expressionNames['#cycleEnabled'] = 'cycleEnabled';
+    expressionValues[':cycleEnabled'] = input.cycleEnabled;
+  }
+  if (input.cycleDurationWeeks !== undefined && input.cycleDurationWeeks !== null) {
+    setExpressions.push('#cycleDurationWeeks = :cycleDurationWeeks');
+    expressionNames['#cycleDurationWeeks'] = 'cycleDurationWeeks';
+    expressionValues[':cycleDurationWeeks'] = input.cycleDurationWeeks;
+  }
+  if (input.cycleStartDayOfWeek !== undefined && input.cycleStartDayOfWeek !== null) {
+    setExpressions.push('#cycleStartDayOfWeek = :cycleStartDayOfWeek');
+    expressionNames['#cycleStartDayOfWeek'] = 'cycleStartDayOfWeek';
+    expressionValues[':cycleStartDayOfWeek'] = input.cycleStartDayOfWeek;
+  }
+  if (input.cycleName !== undefined && input.cycleName !== null) {
+    setExpressions.push('#cycleName = :cycleName');
+    expressionNames['#cycleName'] = 'cycleName';
+    expressionValues[':cycleName'] = input.cycleName;
+  }
+  if (input.backlogName !== undefined && input.backlogName !== null) {
+    setExpressions.push('#backlogName = :backlogName');
+    expressionNames['#backlogName'] = 'backlogName';
+    expressionValues[':backlogName'] = input.backlogName;
+  }
+  if (input.workflowTemplate !== undefined && input.workflowTemplate !== null) {
+    setExpressions.push('#workflowTemplate = :workflowTemplate');
+    expressionNames['#workflowTemplate'] = 'workflowTemplate';
+    expressionValues[':workflowTemplate'] = input.workflowTemplate;
+  }
+  if (input.enforceEstimates !== undefined && input.enforceEstimates !== null) {
+    setExpressions.push('#enforceEstimates = :enforceEstimates');
+    expressionNames['#enforceEstimates'] = 'enforceEstimates';
+    expressionValues[':enforceEstimates'] = input.enforceEstimates;
+  }
+  if (input.autoArchiveCompleted !== undefined && input.autoArchiveCompleted !== null) {
+    setExpressions.push('#autoArchiveCompleted = :autoArchiveCompleted');
+    expressionNames['#autoArchiveCompleted'] = 'autoArchiveCompleted';
+    expressionValues[':autoArchiveCompleted'] = input.autoArchiveCompleted;
+  }
+
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'WORKFLOW_CONFIG'
+    }),
+    update: {
+      expression: 'SET ' + setExpressions.join(', '),
+      expressionNames: expressionNames,
+      expressionValues: util.dynamodb.toMapValues(expressionValues)
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const r = ctx.result;
+  return {
+    id: r.id,
+    teamId: r.teamId,
+    wipLimitPlanning: r.wipLimitPlanning || null,
+    wipLimitInProgress: r.wipLimitInProgress || null,
+    wipLimitBlocked: r.wipLimitBlocked || null,
+    wipLimitReview: r.wipLimitReview || null,
+    cycleEnabled: r.cycleEnabled || false,
+    cycleDurationWeeks: r.cycleDurationWeeks || null,
+    cycleStartDayOfWeek: r.cycleStartDayOfWeek || null,
+    cycleName: r.cycleName || 'Sprint',
+    backlogName: r.backlogName || 'Backlog',
+    workflowTemplate: r.workflowTemplate || 'CUSTOM',
+    enforceEstimates: r.enforceEstimates || false,
+    autoArchiveCompleted: r.autoArchiveCompleted || false,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "updateTeamWorkflowConfig",
         "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
@@ -1720,8 +5921,31 @@ export function response(ctx) {
               "Resource": [
                 "arn:aws:bedrock:us-east-2:123456789012:inference-profile/global.anthropic.claude-sonnet-4-5-*",
                 "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-*",
-                "arn:aws:bedrock:*:123456789012:foundation-model/anthropic.claude-*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
               ],
+            },
+            {
+              "Action": "appsync:GraphQL",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":appsync:us-east-2:123456789012:apis/",
+                    {
+                      "Fn::GetAtt": [
+                        "AppSyncGraphqlApi48248BEB",
+                        "ApiId",
+                      ],
+                    },
+                    "/types/Mutation/fields/publishAIProgress",
+                  ],
+                ],
+              },
             },
           ],
           "Version": "2012-10-17",
@@ -1815,18 +6039,18 @@ export function response(ctx) {
               "","AllowedOAuthFlows":["code"],"AllowedOAuthFlowsUserPoolClient":true,"AllowedOAuthScopes":["profile","phone","email","openid","aws.cognito.signin.user.admin"],"ExplicitAuthFlows":["ALLOW_USER_PASSWORD_AUTH","ALLOW_USER_SRP_AUTH","ALLOW_REFRESH_TOKEN_AUTH"],"CallbackURLs":["https://",
               {
                 "Fn::GetAtt": [
-                  "WebappService6D458A13",
-                  "ServiceUrl",
+                  "StaticFrontendDistribution1DBCD836",
+                  "DomainName",
                 ],
               },
-              "/api/auth/sign-in-callback","http://localhost:3010/api/auth/sign-in-callback"],"LogoutURLs":["https://",
+              "/auth-callback","http://localhost:5173/auth-callback"],"LogoutURLs":["https://",
               {
                 "Fn::GetAtt": [
-                  "WebappService6D458A13",
-                  "ServiceUrl",
+                  "StaticFrontendDistribution1DBCD836",
+                  "DomainName",
                 ],
               },
-              "/api/auth/sign-out-callback","http://localhost:3010/api/auth/sign-out-callback"],"SupportedIdentityProviders":["COGNITO"],"TokenValidityUnits":{"IdToken":"minutes"},"IdTokenValidity":1440},"physicalResourceId":{"id":"",
+              "","http://localhost:5173"],"SupportedIdentityProviders":["COGNITO"],"TokenValidityUnits":{"IdToken":"minutes"},"IdTokenValidity":1440},"physicalResourceId":{"id":"",
               {
                 "Ref": "AuthUserPool8115E87F",
               },
@@ -1856,18 +6080,18 @@ export function response(ctx) {
               "","AllowedOAuthFlows":["code"],"AllowedOAuthFlowsUserPoolClient":true,"AllowedOAuthScopes":["profile","phone","email","openid","aws.cognito.signin.user.admin"],"ExplicitAuthFlows":["ALLOW_USER_PASSWORD_AUTH","ALLOW_USER_SRP_AUTH","ALLOW_REFRESH_TOKEN_AUTH"],"CallbackURLs":["https://",
               {
                 "Fn::GetAtt": [
-                  "WebappService6D458A13",
-                  "ServiceUrl",
+                  "StaticFrontendDistribution1DBCD836",
+                  "DomainName",
                 ],
               },
-              "/api/auth/sign-in-callback","http://localhost:3010/api/auth/sign-in-callback"],"LogoutURLs":["https://",
+              "/auth-callback","http://localhost:5173/auth-callback"],"LogoutURLs":["https://",
               {
                 "Fn::GetAtt": [
-                  "WebappService6D458A13",
-                  "ServiceUrl",
+                  "StaticFrontendDistribution1DBCD836",
+                  "DomainName",
                 ],
               },
-              "/api/auth/sign-out-callback","http://localhost:3010/api/auth/sign-out-callback"],"SupportedIdentityProviders":["COGNITO"],"TokenValidityUnits":{"IdToken":"minutes"},"IdTokenValidity":1440},"physicalResourceId":{"id":"",
+              "","http://localhost:5173"],"SupportedIdentityProviders":["COGNITO"],"TokenValidityUnits":{"IdToken":"minutes"},"IdTokenValidity":1440},"physicalResourceId":{"id":"",
               {
                 "Ref": "AuthUserPool8115E87F",
               },
@@ -2441,7 +6665,7 @@ exports.handler = async function (event, context) {
         "OwnershipControls": {
           "Rules": [
             {
-              "ObjectOwnership": "ObjectWriter",
+              "ObjectOwnership": "BucketOwnerEnforced",
             },
           ],
         },
@@ -2561,53 +6785,33 @@ exports.handler = async function (event, context) {
               ],
             },
             {
-              "Action": [
-                "s3:GetObject*",
-                "s3:GetBucket*",
-                "s3:List*",
-              ],
-              "Effect": "Allow",
-              "Principal": {
-                "CanonicalUser": {
-                  "Fn::GetAtt": [
-                    "StaticFrontendOAI06335787",
-                    "S3CanonicalUserId",
-                  ],
+              "Action": "s3:GetObject",
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":cloudfront::",
+                        {
+                          "Ref": "AWS::AccountId",
+                        },
+                        ":distribution/",
+                        {
+                          "Ref": "StaticFrontendDistribution1DBCD836",
+                        },
+                      ],
+                    ],
+                  },
                 },
               },
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "StaticFrontendBucket37767DD7",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "StaticFrontendBucket37767DD7",
-                          "Arn",
-                        ],
-                      },
-                      "/*",
-                    ],
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": "s3:GetObject",
               "Effect": "Allow",
               "Principal": {
-                "CanonicalUser": {
-                  "Fn::GetAtt": [
-                    "StaticFrontendOAI06335787",
-                    "S3CanonicalUserId",
-                  ],
-                },
+                "Service": "cloudfront.amazonaws.com",
               },
               "Resource": {
                 "Fn::Join": [
@@ -2633,6 +6837,23 @@ exports.handler = async function (event, context) {
     "StaticFrontendDistribution1DBCD836": {
       "Properties": {
         "DistributionConfig": {
+          "CacheBehaviors": [
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+              "Compress": true,
+              "PathPattern": "/assets/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "StaticFrontendSecurityHeadersPolicy642E644B",
+              },
+              "TargetOriginId": "TaskTitanForgeStackStaticFrontendDistributionOrigin11BFA011E",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+          ],
           "Comment": "TaskTitanForgeStack static frontend",
           "CustomErrorResponses": [
             {
@@ -2654,8 +6875,11 @@ exports.handler = async function (event, context) {
               "HEAD",
               "OPTIONS",
             ],
-            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
             "Compress": true,
+            "ResponseHeadersPolicyId": {
+              "Ref": "StaticFrontendSecurityHeadersPolicy642E644B",
+            },
             "TargetOriginId": "TaskTitanForgeStackStaticFrontendDistributionOrigin11BFA011E",
             "ViewerProtocolPolicy": "redirect-to-https",
           },
@@ -2681,18 +6905,14 @@ exports.handler = async function (event, context) {
                 ],
               },
               "Id": "TaskTitanForgeStackStaticFrontendDistributionOrigin11BFA011E",
+              "OriginAccessControlId": {
+                "Fn::GetAtt": [
+                  "StaticFrontendDistributionOrigin1S3OriginAccessControl9CEBCF21",
+                  "Id",
+                ],
+              },
               "S3OriginConfig": {
-                "OriginAccessIdentity": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "origin-access-identity/cloudfront/",
-                      {
-                        "Ref": "StaticFrontendOAI06335787",
-                      },
-                    ],
-                  ],
-                },
+                "OriginAccessIdentity": "",
               },
             },
           ],
@@ -2701,479 +6921,107 @@ exports.handler = async function (event, context) {
       },
       "Type": "AWS::CloudFront::Distribution",
     },
-    "StaticFrontendOAI06335787": {
+    "StaticFrontendDistributionOrigin1S3OriginAccessControl9CEBCF21": {
       "Properties": {
-        "CloudFrontOriginAccessIdentityConfig": {
-          "Comment": "OAI for TaskTitanForgeStack static frontend",
+        "OriginAccessControlConfig": {
+          "Name": "TaskTitanForgeStackStaticFroOrigin1S3OriginAccessControlEA8C1F1D",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4",
         },
       },
-      "Type": "AWS::CloudFront::CloudFrontOriginAccessIdentity",
+      "Type": "AWS::CloudFront::OriginAccessControl",
     },
-    "WebappAutoScalingD01023F3": {
+    "StaticFrontendErrorRateAlarm702A2B95": {
       "Properties": {
-        "AutoScalingConfigurationName": "TaskTitanForgeStack-autoscaling",
-        "MaxConcurrency": 100,
-        "MaxSize": 10,
-        "MinSize": 1,
-      },
-      "Type": "AWS::AppRunner::AutoScalingConfiguration",
-    },
-    "WebappInstanceRoleC33026A1": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "tasks.apprunner.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "Description": "Role for TaskTitan App Runner service to access AWS services",
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "WebappInstanceRoleDefaultPolicyD16CB624": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "dynamodb:BatchGetItem",
-                "dynamodb:Query",
-                "dynamodb:GetItem",
-                "dynamodb:Scan",
-                "dynamodb:ConditionCheckItem",
-                "dynamodb:BatchWriteItem",
-                "dynamodb:PutItem",
-                "dynamodb:UpdateItem",
-                "dynamodb:DeleteItem",
-                "dynamodb:DescribeTable",
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "DynamoTableE5532DA8",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "DynamoTableE5532DA8",
-                          "Arn",
-                        ],
-                      },
-                      "/index/*",
-                    ],
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "dynamodb:GetRecords",
-                "dynamodb:GetShardIterator",
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "DynamoTableE5532DA8",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "DynamoTableE5532DA8",
-                          "Arn",
-                        ],
-                      },
-                      "/index/*",
-                    ],
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": "bedrock:InvokeModel",
-              "Effect": "Allow",
-              "Resource": [
-                "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
-                "arn:aws:bedrock:us-*:123456789012:inference-profile/us.anthropic.claude-*",
-                "arn:aws:bedrock:*:123456789012:inference-profile/global.anthropic.claude-*",
-              ],
-            },
-            {
-              "Action": "cognito-idp:AdminCreateUser",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "AuthUserPool8115E87F",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": "lambda:InvokeFunction",
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "AsyncJobHandler438266BD",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "AsyncJobHandler438266BD",
-                          "Arn",
-                        ],
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "WebappServerActionsEncryptionKeyE7854C03",
-              },
-            },
-            {
-              "Action": "ssm:GetParameter",
-              "Effect": "Allow",
-              "Resource": "arn:aws:ssm:us-east-2:123456789012:parameter/TaskTitanForgeStack/amplify-app-origin",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "WebappInstanceRoleDefaultPolicyD16CB624",
-        "Roles": [
+        "AlarmDescription": "CloudFront 5xx error rate exceeds threshold",
+        "AlarmName": "TaskTitanForgeStack-CloudFront-5xxErrorRate",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
           {
-            "Ref": "WebappInstanceRoleC33026A1",
+            "Name": "DistributionId",
+            "Value": {
+              "Ref": "StaticFrontendDistribution1DBCD836",
+            },
+          },
+          {
+            "Name": "Region",
+            "Value": "Global",
           },
         ],
+        "EvaluationPeriods": 2,
+        "MetricName": "5xxErrorRate",
+        "Namespace": "AWS/CloudFront",
+        "Period": 300,
+        "Statistic": "Average",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
       },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::CloudWatch::Alarm",
     },
-    "WebappServerActionsEncryptionKeyE7854C03": {
-      "DeletionPolicy": "Delete",
+    "StaticFrontendHigh4xxErrorAlarm6C271165": {
       "Properties": {
-        "Description": "Encryption key for Next.js Server Actions - must be consistent across deployments",
-        "GenerateSecretString": {
-          "ExcludeCharacters": ""@/\\",
-          "GenerateStringKey": "encryptionKey",
-          "PasswordLength": 32,
-          "SecretStringTemplate": "{}",
-        },
-        "Name": "/TaskTitanForgeStack/next-server-actions-encryption-key",
-      },
-      "Type": "AWS::SecretsManager::Secret",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "WebappService6D458A13": {
-      "Properties": {
-        "AutoScalingConfigurationArn": {
-          "Fn::GetAtt": [
-            "WebappAutoScalingD01023F3",
-            "AutoScalingConfigurationArn",
-          ],
-        },
-        "HealthCheckConfiguration": {
-          "HealthyThreshold": 1,
-          "Interval": 10,
-          "Path": "/api/health",
-          "Protocol": "HTTP",
-          "Timeout": 5,
-          "UnhealthyThreshold": 5,
-        },
-        "InstanceConfiguration": {
-          "Cpu": "1 vCPU",
-          "InstanceRoleArn": {
-            "Fn::GetAtt": [
-              "WebappInstanceRoleC33026A1",
-              "Arn",
-            ],
-          },
-          "Memory": "2 GB",
-        },
-        "NetworkConfiguration": {
-          "EgressConfiguration": {
-            "EgressType": "DEFAULT",
-          },
-        },
-        "ServiceName": "TaskTitanForgeStack-webapp",
-        "SourceConfiguration": {
-          "AuthenticationConfiguration": {
-            "AccessRoleArn": {
-              "Fn::GetAtt": [
-                "WebappServiceAccessRoleD3E236CF",
-                "Arn",
-              ],
-            },
-          },
-          "ImageRepository": {
-            "ImageConfiguration": {
-              "Port": "3000",
-              "RuntimeEnvironmentSecrets": [
-                {
-                  "Name": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
-                  "Value": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        {
-                          "Ref": "WebappServerActionsEncryptionKeyE7854C03",
-                        },
-                        ":encryptionKey::",
-                      ],
-                    ],
-                  },
-                },
-              ],
-              "RuntimeEnvironmentVariables": [
-                {
-                  "Name": "DYNAMODB_TABLE_NAME",
-                  "Value": {
-                    "Ref": "DynamoTableE5532DA8",
-                  },
-                },
-                {
-                  "Name": "COGNITO_DOMAIN",
-                  "Value": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        {
-                          "Fn::GetAtt": [
-                            "AuthDomainPrefixE1742B23",
-                            "generated",
-                          ],
-                        },
-                        ".auth.us-east-2.amazoncognito.com",
-                      ],
-                    ],
-                  },
-                },
-                {
-                  "Name": "USER_POOL_ID",
-                  "Value": {
-                    "Ref": "AuthUserPool8115E87F",
-                  },
-                },
-                {
-                  "Name": "USER_POOL_CLIENT_ID",
-                  "Value": {
-                    "Ref": "AuthUserPoolClientC635291F",
-                  },
-                },
-                {
-                  "Name": "ASYNC_JOB_HANDLER_ARN",
-                  "Value": {
-                    "Fn::GetAtt": [
-                      "AsyncJobHandler438266BD",
-                      "Arn",
-                    ],
-                  },
-                },
-                {
-                  "Name": "POWERTOOLS_SERVICE_NAME",
-                  "Value": "TaskTitanWebapp",
-                },
-                {
-                  "Name": "LOG_LEVEL",
-                  "Value": "INFO",
-                },
-                {
-                  "Name": "PORT",
-                  "Value": "3000",
-                },
-                {
-                  "Name": "HOSTNAME",
-                  "Value": "0.0.0.0",
-                },
-                {
-                  "Name": "AMPLIFY_APP_ORIGIN_SOURCE_PARAMETER",
-                  "Value": "/TaskTitanForgeStack/amplify-app-origin",
-                },
-              ],
-            },
-            "ImageIdentifier": {
-              "Fn::Sub": "REDACTED",
-            },
-            "ImageRepositoryType": "ECR",
-          },
-        },
-      },
-      "Type": "AWS::AppRunner::Service",
-    },
-    "WebappServiceAccessRoleD3E236CF": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "build.apprunner.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "WebappServiceAccessRoleDefaultPolicyCCDF563F": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "ecr:GetAuthorizationToken",
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": [
-                "ecr:BatchCheckLayerAvailability",
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    "REDACTED",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": "ecr:DescribeImages",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    "REDACTED",
-                  ],
-                ],
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "WebappServiceAccessRoleDefaultPolicyCCDF563F",
-        "Roles": [
+        "AlarmDescription": "CloudFront 4xx error rate exceeds threshold",
+        "AlarmName": "TaskTitanForgeStack-CloudFront-4xxErrorRate",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
           {
-            "Ref": "WebappServiceAccessRoleD3E236CF",
+            "Name": "DistributionId",
+            "Value": {
+              "Ref": "StaticFrontendDistribution1DBCD836",
+            },
+          },
+          {
+            "Name": "Region",
+            "Value": "Global",
           },
         ],
+        "EvaluationPeriods": 3,
+        "MetricName": "4xxErrorRate",
+        "Namespace": "AWS/CloudFront",
+        "Period": 300,
+        "Statistic": "Average",
+        "Threshold": 5,
+        "TreatMissingData": "notBreaching",
       },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::CloudWatch::Alarm",
     },
-    "WebappStoreAppOrigin41AEF0A5": {
-      "DeletionPolicy": "Delete",
-      "DependsOn": [
-        "WebappStoreAppOriginCustomResourcePolicyD026BBC9",
-      ],
+    "StaticFrontendSecurityHeadersPolicy642E644B": {
       "Properties": {
-        "Create": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"@aws-sdk/client-ssm","action":"putParameter","parameters":{"Name":"/TaskTitanForgeStack/amplify-app-origin","Value":"https://",
-              {
-                "Fn::GetAtt": [
-                  "WebappService6D458A13",
-                  "ServiceUrl",
-                ],
-              },
-              "","Type":"String","Overwrite":true,"Description":"App Runner service URL for OAuth callbacks"},"physicalResourceId":{"id":"/TaskTitanForgeStack/amplify-app-origin"}}",
-            ],
-          ],
-        },
-        "Delete": "{"service":"@aws-sdk/client-ssm","action":"deleteParameter","parameters":{"Name":"/TaskTitanForgeStack/amplify-app-origin"}}",
-        "InstallLatestAwsSdk": true,
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
-            "Arn",
-          ],
-        },
-        "Update": {
-          "Fn::Join": [
-            "",
-            [
-              "{"service":"@aws-sdk/client-ssm","action":"putParameter","parameters":{"Name":"/TaskTitanForgeStack/amplify-app-origin","Value":"https://",
-              {
-                "Fn::GetAtt": [
-                  "WebappService6D458A13",
-                  "ServiceUrl",
-                ],
-              },
-              "","Type":"String","Overwrite":true,"Description":"App Runner service URL for OAuth callbacks"},"physicalResourceId":{"id":"/TaskTitanForgeStack/amplify-app-origin"}}",
-            ],
-          ],
-        },
-      },
-      "Type": "Custom::AWS",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "WebappStoreAppOriginCustomResourcePolicyD026BBC9": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "ssm:PutParameter",
-                "ssm:DeleteParameter",
-              ],
-              "Effect": "Allow",
-              "Resource": "arn:aws:ssm:us-east-2:123456789012:parameter/TaskTitanForgeStack/amplify-app-origin",
+        "ResponseHeadersPolicyConfig": {
+          "Comment": "Security headers for static frontend",
+          "Name": "TaskTitanForgeStack-SecurityHeaders",
+          "SecurityHeadersConfig": {
+            "ContentSecurityPolicy": {
+              "ContentSecurityPolicy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com wss://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+              "Override": true,
             },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "WebappStoreAppOriginCustomResourcePolicyD026BBC9",
-        "Roles": [
-          {
-            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+            "ContentTypeOptions": {
+              "Override": true,
+            },
+            "FrameOptions": {
+              "FrameOption": "DENY",
+              "Override": true,
+            },
+            "ReferrerPolicy": {
+              "Override": true,
+              "ReferrerPolicy": "strict-origin-when-cross-origin",
+            },
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 31536000,
+              "IncludeSubdomains": true,
+              "Override": true,
+              "Preload": true,
+            },
+            "XSSProtection": {
+              "ModeBlock": true,
+              "Override": true,
+              "Protection": true,
+            },
           },
-        ],
+        },
       },
-      "Type": "AWS::IAM::Policy",
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
     },
   },
   "Rules": {

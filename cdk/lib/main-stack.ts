@@ -10,7 +10,11 @@ import { Monitoring } from './constructs/monitoring';
 import { StaticFrontend } from './constructs/static-frontend';
 
 interface MainStackProps extends StackProps {
-  // No special props needed - fully serverless with DynamoDB
+  /**
+   * Optional WAF WebACL ARN for CloudFront protection.
+   * Must be created in us-east-1 with CLOUDFRONT scope.
+   */
+  readonly webAclArn?: string;
 }
 
 export class MainStack extends Stack {
@@ -62,9 +66,11 @@ export class MainStack extends Stack {
     // - Security headers (CSP, HSTS, X-Frame-Options, etc.)
     // - Tiered cache (no-cache for index.html, long TTL for hashed assets)
     // - SPA routing (403/404 → index.html)
+    // - WAF rate limiting (from us-east-1 global WebACL)
     // - CloudWatch alarms for error rate monitoring
     const staticFrontend = new StaticFrontend(this, 'StaticFrontend', {
       accessLogBucket,
+      webAclArn: props.webAclArn,
     });
 
     // Configure Cognito OAuth callback URLs for CloudFront + local dev

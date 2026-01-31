@@ -28,6 +28,13 @@ export interface StaticFrontendProps {
    * If not provided, logging is disabled.
    */
   readonly accessLogBucket?: Bucket;
+
+  /**
+   * Optional WAF WebACL ARN for CloudFront protection.
+   * Must be created in us-east-1 with CLOUDFRONT scope.
+   * Provides rate limiting without payload size restrictions.
+   */
+  readonly webAclArn?: string;
 }
 
 export class StaticFrontend extends Construct {
@@ -41,7 +48,7 @@ export class StaticFrontend extends Construct {
   constructor(scope: Construct, id: string, props: StaticFrontendProps = {}) {
     super(scope, id);
 
-    const { accessLogBucket } = props;
+    const { accessLogBucket, webAclArn } = props;
 
     // S3 bucket for static assets (private; CloudFront only via OAC)
     // Object ownership must be BUCKET_OWNER_ENFORCED when using OAC per AWS docs
@@ -124,6 +131,8 @@ export class StaticFrontend extends Construct {
       ],
       priceClass: PriceClass.PRICE_CLASS_100,
       httpVersion: HttpVersion.HTTP2_AND_3,
+      // WAF WebACL for rate limiting (must be CLOUDFRONT scope from us-east-1)
+      ...(webAclArn && { webAclId: webAclArn }),
       ...(accessLogBucket && {
         enableLogging: true,
         logBucket: accessLogBucket,
