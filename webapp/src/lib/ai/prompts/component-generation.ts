@@ -40,10 +40,16 @@ export function getFocusFactor(teamExperience?: 'NEW' | 'MODERATE' | 'EXPERIENCE
 }
 
 /**
- * Detect if workflow is Shape Up (6-week cycles with "Cycle" name)
+ * Detect if workflow is Shape Up
+ * Checks multiple indicators for robustness:
+ * 1. workflowTemplate explicitly set to 'SHAPE_UP'
+ * 2. Classic Shape Up config: 6-week cycles with "Cycle" name
  */
 function isShapeUp(workflowConfig: TeamWorkflowConfig | null): boolean {
   if (!workflowConfig) return false;
+  // Check explicit template first
+  if (workflowConfig.workflowTemplate === 'SHAPE_UP') return true;
+  // Fallback to config-based detection
   return (
     workflowConfig.cycleEnabled === true &&
     workflowConfig.cycleDurationWeeks === 6 &&

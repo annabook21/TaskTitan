@@ -80,17 +80,26 @@ export async function generateComponents(
     const jsonContent = extractJsonFromResponse(content);
     const parsed = JSON.parse(jsonContent);
 
-    // Detect Shape Up workflow (6-week cycles with "Cycle" name)
-    const isShapeUp =
+    // Detect Shape Up workflow - check multiple indicators for robustness:
+    // 1. workflowTemplate explicitly set to 'SHAPE_UP'
+    // 2. Classic Shape Up config: 6-week cycles with "Cycle" name
+    // 3. Fallback: response has "scopes" but no "components" (AI detected Shape Up from prompt)
+    const isShapeUpByTemplate = workflowConfig?.workflowTemplate === 'SHAPE_UP';
+    const isShapeUpByConfig =
       workflowConfig?.cycleEnabled === true &&
       workflowConfig?.cycleDurationWeeks === 6 &&
       workflowConfig?.cycleName?.toLowerCase() === 'cycle';
+    const hasScopes = parsed.scopes && Array.isArray(parsed.scopes);
+    const hasComponents = parsed.components && Array.isArray(parsed.components);
+
+    // If response has scopes but no components, treat as Shape Up regardless of config
+    const isShapeUp = isShapeUpByTemplate || isShapeUpByConfig || (hasScopes && !hasComponents);
 
     const isKanban = !workflowConfig?.cycleEnabled;
 
     // Shape Up returns "scopes" instead of "components" - normalize the response
     let result: AIGenerationResult;
-    if (isShapeUp && parsed.scopes && Array.isArray(parsed.scopes)) {
+    if (hasScopes && (isShapeUp || !hasComponents)) {
       // Convert Shape Up scopes to components format
       logger.info('Shape Up response detected, converting scopes to components', {
         scopeCount: parsed.scopes.length,
