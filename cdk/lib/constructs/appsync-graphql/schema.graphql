@@ -2,6 +2,19 @@
 # Auth: Cognito User Pools. Data: DynamoDB (same table as ElectroDB) + Lambda (Bedrock).
 # Region: us-east-2.
 
+type User {
+  id: ID!
+  # Email is nullable to handle edge cases where user record exists but email wasn't migrated
+  email: String
+  name: String
+  avatarUrl: String
+  createdAt: String
+  updatedAt: String
+  # Timestamp-based "Read Until" marker for O(1) mark-all-as-read (AWS best practice)
+  # Notifications with createdAt <= notificationsReadUntil are considered read
+  notificationsReadUntil: String
+}
+
 type Project {
   id: ID!
   name: String!
@@ -20,13 +33,312 @@ type Team {
   updatedAt: String
 }
 
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum ComponentType {
+  EPIC
+  FEATURE
+  STORY
+  TASK
+  BUG
+}
+
+enum ComponentStatus {
+  PLANNING
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  COMPLETED
+}
+
+enum SprintStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+# Sprint: time-boxed iteration for a team
+# pk=SPRINT#id, sk=METADATA, gsi1pk=TEAM#teamId, gsi1sk=SPRINT#id
+type Sprint {
+  id: ID!
+  teamId: String!
+  name: String!
+  goal: String
+  status: SprintStatus!
+  startDate: String
+  endDate: String
+  createdAt: String
+  updatedAt: String
+}
+
+type SprintWithComponents {
+  sprint: Sprint!
+  components: [Component!]!
+}
+
+type Component {
+  id: ID!
+  name: String!
+  description: String
+  type: ComponentType!
+  projectId: String!
+  parentId: String
+  sprintId: String
+  status: ComponentStatus!
+  priority: Int
+  estimatedHours: Float
+  actualHours: Float
+  dueDate: String
+  owner: String
+  tags: [String!]
+  createdAt: String
+  updatedAt: String
+  # Kanban: Timestamp when work started (for cycle time calculation)
+  # Cycle Time = completedAt - startedAt (Little's Law)
+  startedAt: String
+  # Shape Up: Manual hill chart position (0-100)
+  # 0-50 = "figuring things out" (uphill), 51-100 = "making it happen" (downhill)
+  hillPhase: Int
+}
+
+type Membership {
+  id: ID!
+  userId: String!
+  teamId: String!
+  role: MemberRole!
+  joinedAt: String
+  title: String
+  hoursPerDay: Int
+  availability: Int
+  user: User
+}
+
+# Dependency represents a "depends on" relationship between components
+# pk=COMPONENT#fromId, sk=DEPENDS_ON#toId, gsi1pk=REQUIRED_BY#toId, gsi1sk=COMPONENT#fromId
+type Dependency {
+  fromComponentId: ID!
+  toComponentId: ID!
+  createdAt: String
+}
+
+# Assignment represents a user assigned to a component
+# pk=COMPONENT#componentId, sk=ASSIGNEE#userId, gsi1pk=USER#userId, gsi1sk=ASSIGNMENT#componentId
+type Assignment {
+  id: ID!
+  componentId: ID!
+  userId: ID!
+  assignedAt: String!
+  user: User
+  component: Component
+}
+
+# For MyTasksPage - returns assignments with full component details
+type AssignmentWithComponent {
+  assignment: Assignment!
+  component: Component!
+}
+
+type TeamWithMembers {
+  team: Team!
+  members: [Membership!]!
+}
+
+# Activity types for project activity feed
+enum ActivityType {
+  PROJECT_CREATED
+  COMPONENT_CREATED
+  COMPONENT_UPDATED
+  COMPONENT_STATUS_CHANGED
+  DEPENDENCY_ADDED
+  DEPENDENCY_REMOVED
+  MEMBER_ASSIGNED
+  MEMBER_UNASSIGNED
+  COMMENT_ADDED
+  SPRINT_CREATED
+  SPRINT_STARTED
+  SPRINT_COMPLETED
+  COMPONENT_ADDED_TO_SPRINT
+  COMPONENT_REMOVED_FROM_SPRINT
+  GITHUB_PR_OPENED
+  GITHUB_PR_MERGED
+  GITHUB_PR_CLOSED
+  GITHUB_PR_LINKED
+}
+
+# Activity: project event log entry
+# pk=PROJECT#projectId, sk=ACTIVITY#createdAt#id
+type Activity {
+  id: ID!
+  type: ActivityType!
+  projectId: String!
+  userId: String!
+  metadata: String
+  createdAt: String!
+}
+
+# Notification types for user notifications
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_STATUS_CHANGED
+  TASK_COMMENT
+  TASK_DUE_SOON
+  TASK_OVERDUE
+  SPRINT_STARTED
+  SPRINT_ENDING
+}
+
+# Notification: user notification
+# pk=USER#userId, sk=NOTIFICATION#createdAt#id
+type Notification {
+  id: ID!
+  userId: String!
+  type: NotificationType!
+  title: String!
+  message: String!
+  componentId: String
+  projectId: String
+  read: Boolean!
+  createdAt: String!
+}
+
+# TeamWorkflowConfig: workflow settings for a team
+# pk=TEAM#teamId, sk=WORKFLOW_CONFIG
+# Best practice: Direct DynamoDB GetItem for O(1) config reads
+type TeamWorkflowConfig {
+  id: ID!
+  teamId: String!
+  # WIP limits per status column
+  wipLimitPlanning: Int
+  wipLimitInProgress: Int
+  wipLimitBlocked: Int
+  wipLimitReview: Int
+  # Sprint/cycle settings
+  cycleEnabled: Boolean!
+  cycleDurationWeeks: Int
+  cycleStartDayOfWeek: Int
+  cycleName: String
+  backlogName: String
+  # Workflow preferences
+  workflowTemplate: String
+  enforceEstimates: Boolean!
+  autoArchiveCompleted: Boolean!
+  createdAt: String
+  updatedAt: String
+}
+
+input UpdateWorkflowConfigInput {
+  wipLimitPlanning: Int
+  wipLimitInProgress: Int
+  wipLimitBlocked: Int
+  wipLimitReview: Int
+  cycleEnabled: Boolean
+  cycleDurationWeeks: Int
+  cycleStartDayOfWeek: Int
+  cycleName: String
+  backlogName: String
+  workflowTemplate: String
+  enforceEstimates: Boolean
+  autoArchiveCompleted: Boolean
+}
+
+input RegisterUserInput {
+  email: String!
+  name: String!
+}
+
+# Input for syncing user profile from ID token claims after OAuth callback
+# AWS Best Practice: Access token doesn't contain email/name claims, so frontend
+# must sync these from the ID token after successful authentication
+input SyncUserProfileInput {
+  email: String!
+  name: String!
+}
+
+type RegisterUserResult {
+  success: Boolean!
+  message: String!
+}
+
+# TeamMetrics: aggregated metrics for a team
+# Computed via Pipeline Resolver using Query operations (not Scan) per AWS best practices
+type StatusCount {
+  status: ComponentStatus!
+  count: Int!
+}
+
+type TeamMetrics {
+  teamId: String!
+  totalComponents: Int!
+  statusDistribution: [StatusCount!]!
+  # Breakdown by type
+  epicCount: Int!
+  featureCount: Int!
+  storyCount: Int!
+  taskCount: Int!
+  bugCount: Int!
+  # Sprint metrics
+  totalSprints: Int!
+  activeSprints: Int!
+  completedSprints: Int!
+}
+
 type Query {
+  # Get the current authenticated user (DynamoDB: pk=USER#sub, sk=METADATA)
+  getCurrentUser: User
+  # Get a user by email (DynamoDB GSI1: gsi1pk=EMAIL#email, gsi1sk=USER)
+  getUserByEmail(email: String!): User
   # Get a single project by ID (DynamoDB: pk=PROJECT#id, sk=METADATA)
   getProject(id: ID!): Project
   # Get a single team by ID (DynamoDB: pk=TEAM#id, sk=METADATA)
   getTeam(id: ID!): Team
+  # List teams for current user (DynamoDB GSI1: gsi1pk=USER#userId → batch get teams)
+  listTeamsForUser: [TeamWithMembers!]!
+  # Get team with all members (DynamoDB: GetItem TEAM#id + Query sk begins_with MEMBER#)
+  getTeamWithMembers(teamId: ID!): TeamWithMembers
   # List projects for a team (DynamoDB GSI2: gsi2pk=TEAM#teamId)
   listProjectsByTeam(teamId: ID!): [Project!]!
+  # List projects owned by current user (DynamoDB GSI1: gsi1pk=OWNER#userId)
+  listProjectsForUser: [Project!]!
+  # Get a single component by ID (DynamoDB: pk=COMPONENT#id, sk=METADATA)
+  getComponent(id: ID!): Component
+  # List components for a project (DynamoDB GSI1: gsi1pk=PROJECT#projectId)
+  listComponentsByProject(projectId: ID!): [Component!]!
+  # Get children of a component (DynamoDB GSI1 + filter by parentId)
+  getComponentChildren(parentId: ID!): [Component!]!
+  # Get dependencies of a component (what this component depends on)
+  # DynamoDB: Query pk=COMPONENT#id, sk begins_with DEPENDS_ON#
+  getDependencies(componentId: ID!): [Dependency!]!
+  # Get dependents of a component (what depends on this component)
+  # DynamoDB GSI1: Query gsi1pk=REQUIRED_BY#id
+  getDependents(componentId: ID!): [Dependency!]!
+  # Get a single sprint by ID (DynamoDB: pk=SPRINT#id, sk=METADATA)
+  getSprint(id: ID!): Sprint
+  # List sprints for a team (DynamoDB GSI1: gsi1pk=TEAM#teamId, sk begins_with SPRINT#)
+  listSprintsByTeam(teamId: ID!): [Sprint!]!
+  # Get sprint with its components (DynamoDB: GetItem + Query GSI2 gsi2pk=SPRINT#sprintId)
+  getSprintWithComponents(sprintId: ID!): SprintWithComponents
+  # List assignments for current user (DynamoDB GSI1: gsi1pk=USER#userId) - for MyTasksPage
+  listAssignmentsForUser: [AssignmentWithComponent!]!
+  # List assignees for a component (DynamoDB: Query pk=COMPONENT#id, sk begins_with ASSIGNEE#)
+  listAssignmentsForComponent(componentId: ID!): [Assignment!]!
+  # List activities for a project (DynamoDB: Query pk=PROJECT#projectId, sk begins_with ACTIVITY#)
+  listActivitiesForProject(projectId: ID!, limit: Int): [Activity!]!
+  # List notifications for current user (DynamoDB: Query pk=USER#userId, sk begins_with NOTIFICATION#)
+  listNotificationsForUser(limit: Int, unreadOnly: Boolean): [Notification!]!
+  # Count unread notifications for current user
+  countUnreadNotifications: Int!
+  # Get team workflow config (DynamoDB: GetItem pk=TEAM#teamId, sk=WORKFLOW_CONFIG)
+  # Best practice: Direct DynamoDB for O(1) read
+  getTeamWorkflowConfig(teamId: ID!): TeamWorkflowConfig
+  # Get team metrics (Pipeline Resolver: Query projects → Query components → Aggregate)
+  # Best practice: Uses Query operations on GSIs, not Scan
+  getTeamMetrics(teamId: ID!): TeamMetrics!
 }
 
 input CreateProjectInput {
@@ -37,13 +349,566 @@ input CreateProjectInput {
   description: String
 }
 
+input UpdateProjectInput {
+  name: String
+  description: String
+}
+
+input CreateTeamInput {
+  id: ID!
+  name: String!
+  description: String
+}
+
+input UpdateTeamInput {
+  name: String
+  description: String
+}
+
+input AddTeamMemberInput {
+  teamId: ID!
+  userId: ID!
+  role: MemberRole!
+  title: String
+}
+
+input UpdateMemberRoleInput {
+  teamId: ID!
+  userId: ID!
+  role: MemberRole!
+}
+
+input CreateComponentInput {
+  id: ID!
+  projectId: ID!
+  name: String!
+  description: String
+  type: ComponentType!
+  parentId: ID
+  status: ComponentStatus
+  priority: Int
+  estimatedHours: Float
+  dueDate: String
+  owner: String
+  tags: [String!]
+  # Kanban: Timestamp when work started
+  startedAt: String
+  # Shape Up: Initial hill chart position (0-100)
+  hillPhase: Int
+}
+
+input UpdateComponentInput {
+  name: String
+  description: String
+  type: ComponentType
+  parentId: ID
+  sprintId: ID
+  status: ComponentStatus
+  priority: Int
+  estimatedHours: Float
+  actualHours: Float
+  dueDate: String
+  owner: String
+  tags: [String!]
+  # Kanban: Timestamp when work started (set automatically when status -> IN_PROGRESS)
+  startedAt: String
+  # Shape Up: Manual hill chart position (0-100, user-draggable)
+  hillPhase: Int
+}
+
+input CreateSprintInput {
+  id: ID!
+  teamId: ID!
+  name: String!
+  goal: String
+  startDate: String
+  endDate: String
+}
+
+input UpdateSprintInput {
+  name: String
+  goal: String
+  startDate: String
+  endDate: String
+}
+
+# ============================================
+# AI Generation Types (Full Parity with Next.js)
+# ============================================
+
+# Input for generating a full project plan with workflow awareness
+input GenerateFullPlanInput {
+  projectId: ID!
+  # Generate epic groupings (Scrum only, optional backlog organization)
+  generateEpics: Boolean
+}
+
+# Generated component from AI (before applying to database)
+input GeneratedComponentInput {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  # Component names this depends on (resolved to IDs during apply)
+  suggestedDependencies: [String!]!
+  # Parent component name for hierarchy (resolved to ID during apply)
+  parentName: String
+  # Acceptance criteria for the component
+  acceptanceCriteria: [String!]
+}
+
+# Generated sprint from AI
+input GeneratedSprintInput {
+  name: String!
+  goal: String!
+  durationWeeks: Int!
+  # Component names assigned to this sprint
+  componentNames: [String!]!
+  capacity: Float
+}
+
+# Generated epic grouping from AI
+input GeneratedEpicInput {
+  name: String!
+  description: String!
+  # Component names grouped under this epic
+  componentNames: [String!]!
+}
+
+# Input for applying a generated plan to the database
+input ApplyFullPlanInput {
+  projectId: ID!
+  components: [GeneratedComponentInput!]!
+  enhancedDescription: String
+  sprints: [GeneratedSprintInput!]
+  epics: [GeneratedEpicInput!]
+}
+
+# Input for refining a single component via chat
+input RefineComponentInput {
+  projectId: ID!
+  currentComponent: NaturalLanguageComponentInput!
+  refinementRequest: String!
+}
+
+# Component structure for natural language operations
+input NaturalLanguageComponentInput {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+  reasoning: String!
+  acceptanceCriteria: [String!]
+}
+
+# Input for refining an entire plan via chat
+input RefineBulkPlanInput {
+  projectId: ID!
+  currentPlan: CurrentPlanInput!
+  refinementRequest: String!
+}
+
+# Current plan state for bulk refinement
+input CurrentPlanInput {
+  components: [GeneratedComponentInput!]!
+  sprints: [GeneratedSprintInput!]
+  epics: [GeneratedEpicInput!]
+}
+
+# Input for creating a component from natural language
+input SmartComponentInput {
+  projectId: ID!
+  userInput: String!
+  parentComponentId: ID
+}
+
+# Input for AI sprint planning
+input PlanSprintInput {
+  teamId: ID!
+  sprintId: ID
+  capacityHours: Float!
+}
+
+# Output types for AI operations
+# Both IAM (Lambda publishes via IAM) and Cognito (frontend subscribes via user pool) need access
+
+type GeneratedComponentOutput @aws_iam @aws_cognito_user_pools {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+  parentName: String
+  acceptanceCriteria: [String!]
+}
+
+type GeneratedSprintOutput @aws_iam @aws_cognito_user_pools {
+  name: String!
+  goal: String!
+  durationWeeks: Int!
+  componentNames: [String!]!
+  capacity: Float
+}
+
+type GeneratedEpicOutput @aws_iam @aws_cognito_user_pools {
+  name: String!
+  description: String!
+  componentNames: [String!]!
+}
+
+input FullPlanResultInput {
+  components: [GeneratedComponentInput!]!
+  summary: String!
+  enhancedDescription: String
+  sprints: [GeneratedSprintInput!]
+  epics: [GeneratedEpicInput!]
+}
+
+# Result of full plan generation
+type FullPlanResult @aws_iam @aws_cognito_user_pools {
+  components: [GeneratedComponentOutput!]!
+  summary: String!
+  enhancedDescription: String
+  # Sprints (Scrum workflow only)
+  sprints: [GeneratedSprintOutput!]
+  # Epic groupings (optional)
+  epics: [GeneratedEpicOutput!]
+}
+
+# Result of applying a plan to database
+type ApplyPlanResult {
+  created: Int!
+  dependencies: Int!
+  sprints: Int!
+  epics: Int!
+  componentIds: [ID!]!
+  sprintIds: [ID!]!
+}
+
+# Result of component refinement
+type RefineComponentResult {
+  component: GeneratedComponentOutput!
+  explanation: String!
+  suggestedFollowUps: [String!]!
+}
+
+# Changed item in bulk refinement
+type ChangedItem {
+  type: String!
+  name: String!
+  change: String!
+}
+
+# Result of bulk plan refinement
+type RefineBulkPlanResult {
+  components: [GeneratedComponentOutput!]!
+  sprints: [GeneratedSprintOutput!]
+  epics: [GeneratedEpicOutput!]
+  explanation: String!
+  changedItems: [ChangedItem!]!
+  suggestedFollowUps: [String!]!
+}
+
+# Result of smart component creation
+type SmartComponentResult {
+  component: GeneratedComponentOutput!
+  reasoning: String!
+  suggestedFollowUps: [String!]!
+}
+
+# Result of AI sprint planning
+type SprintPlanResult {
+  selectedComponentIds: [ID!]!
+  totalHours: Float!
+  reasoning: String!
+  warnings: [String!]!
+}
+
+# ============================================
+# Phase 1: Template Application Types
+# ============================================
+
+enum ComponentTemplateType {
+  CRUD_FEATURE
+  REST_API
+  USER_AUTH
+  FORM_WITH_VALIDATION
+  DATA_DASHBOARD
+  FILE_UPLOAD
+  SEARCH_FILTER
+  NOTIFICATION_SYSTEM
+  PAYMENT_INTEGRATION
+  ADMIN_PANEL
+}
+
+input ApplyTemplateInput {
+  template: ComponentTemplateType!
+  entityName: String!
+  projectName: String!
+  projectId: ID!
+  additionalRequirements: String
+}
+
+type TemplateComponentOutput {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+}
+
+type ApplyTemplateResult {
+  components: [TemplateComponentOutput!]!
+  implementationNotes: String!
+  techStackRecommendations: String
+}
+
+# ============================================
+# Phase 2: Component Breakdown Types
+# ============================================
+
+input SuggestBreakdownInput {
+  componentId: ID!
+  projectId: ID!
+}
+
+type BreakdownSuggestion {
+  name: String!
+  description: String!
+  type: ComponentType!
+  estimatedHours: Float!
+  priority: Int!
+  suggestedDependencies: [String!]!
+  acceptanceCriteria: [String!]
+}
+
+type SuggestBreakdownResult {
+  suggestions: [BreakdownSuggestion!]!
+  reasoning: String!
+  recommendedApproach: String!
+}
+
+# ============================================
+# Phase 3: Wireframe Generation Types
+# ============================================
+
+input GenerateWireframeInput {
+  componentId: ID!
+}
+
+type GenerateWireframeResult {
+  html: String!
+  componentName: String!
+}
+
+# ============================================
+# Phase 4: Import Analysis Types
+# ============================================
+
+input AnalyzeImportInput {
+  headers: [String!]!
+  sampleRows: [String!]!
+  projectId: ID!
+}
+
+type ColumnMappingOutput {
+  sourceColumn: String!
+  targetField: String
+  confidence: Float!
+}
+
+type AnalyzeImportResult {
+  mappings: [ColumnMappingOutput!]!
+  detectedFormat: String!
+  suggestions: [String!]!
+  warnings: [String!]!
+}
+
+input ColumnMappingInput {
+  sourceColumn: String!
+  targetField: String
+}
+
+input CleanupImportInput {
+  rows: [String!]!
+  mappings: [ColumnMappingInput!]!
+}
+
+type CleanedRowOutput {
+  original: String!
+  cleaned: String!
+  changes: [String!]!
+}
+
+type CleanupImportResult {
+  rows: [CleanedRowOutput!]!
+  summary: String!
+  totalChanges: Int!
+}
+
+# ============================================
+# Phase 5: Retrospective Generation Types
+# ============================================
+
+input GenerateRetrospectiveInput {
+  sprintId: ID!
+  applyAdjustments: Boolean
+}
+
+type EstimationInsights {
+  estimationAccuracy: String!
+  velocityTrend: String!
+  recommendations: [String!]!
+}
+
+type AdjustedEstimate {
+  componentId: ID!
+  componentName: String!
+  originalEstimate: Float!
+  adjustedEstimate: Float!
+  reasoning: String!
+}
+
+type GenerateRetrospectiveResult {
+  summary: String!
+  insights: EstimationInsights!
+  adjustedEstimates: [AdjustedEstimate!]!
+  suggestedActions: [String!]!
+  adjustmentsApplied: Boolean!
+}
+
+# =============================================================================
+# Async AI Generation Types (must be defined before Mutation that uses them)
+# =============================================================================
+
+enum AIJobStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+type AIJob {
+  sessionId: ID!
+  status: AIJobStatus!
+  createdAt: String!
+}
+
+# AIProgress type needs both IAM (for Lambda publishAIProgress) and Cognito (for frontend subscription)
+type AIProgress @aws_iam @aws_cognito_user_pools {
+  sessionId: ID!
+  progress: Int!
+  message: String!
+  status: AIJobStatus!
+  result: FullPlanResult
+  error: String
+}
+
+input StartAIGenerationInput {
+  projectId: ID!
+  generateEpics: Boolean
+}
+
 # AI generation: Lambda (Bedrock) invoked by AppSync; returns generated text.
 type Mutation {
+  # User registration (unauthenticated - uses AdminCreateUser, sends temp password via email)
+  # AWS best practice: Lambda resolver for admin SDK operations
+  registerUser(input: RegisterUserInput!): RegisterUserResult! @aws_api_key
+
+  # Sync user profile from ID token claims after OAuth callback
+  # AWS Best Practice: Access token (used by AppSync) doesn't contain email/name,
+  # so frontend extracts from ID token and syncs here
+  # MUST be called with fresh OAuth tokens immediately after authentication
+  syncUserProfile(input: SyncUserProfileInput!): User! @aws_cognito_user_pools
+
+  # =============================================================================
+  # Async AI Generation (bypasses 30s timeout)
+  # =============================================================================
+  # Start async AI generation - returns sessionId immediately, client subscribes for updates
+  startAIGeneration(input: StartAIGenerationInput!): AIJob!
+  # Internal: Lambda publishes progress updates (triggers subscription)
+  # Uses IAM auth - only callable by Lambda with appsync:GraphQL permission
+  publishAIProgress(sessionId: ID!, progress: Int!, message: String!, status: AIJobStatus!, result: FullPlanResultInput, error: String): AIProgress! @aws_iam
+
+  # Legacy: Simple AI generation (returns raw string)
   generateComponentViaAI(projectId: ID!, prompt: String!): String
+  # Full AI Plan Generation (workflow-aware: Scrum generates sprints, Kanban generates flat items)
+  # NOTE: This has 30s timeout - use startAIGeneration for production
+  generateFullPlan(input: GenerateFullPlanInput!): FullPlanResult!
+  # Apply generated plan atomically (creates components, dependencies, sprints, assigns to epics)
+  applyFullPlan(input: ApplyFullPlanInput!): ApplyPlanResult!
+  # Refine single component via chat
+  refineComponent(input: RefineComponentInput!): RefineComponentResult!
+  # Refine entire plan via chat
+  refineBulkPlan(input: RefineBulkPlanInput!): RefineBulkPlanResult!
+  # Smart component: natural language -> structured component preview
+  createSmartComponent(input: SmartComponentInput!): SmartComponentResult!
+  # AI sprint planning: suggest components for a sprint based on capacity and priorities
+  planSprint(input: PlanSprintInput!): SprintPlanResult!
+  # Template application: 10 predefined project templates
+  applyTemplate(input: ApplyTemplateInput!): ApplyTemplateResult!
+  # Component breakdown: hierarchical decomposition suggestions
+  suggestBreakdown(input: SuggestBreakdownInput!): SuggestBreakdownResult!
+  # Wireframe generation: HTML wireframe for UI components
+  generateWireframe(input: GenerateWireframeInput!): GenerateWireframeResult!
+  # Import analysis: AI-powered CSV/JSON column mapping
+  analyzeImportData(input: AnalyzeImportInput!): AnalyzeImportResult!
+  # Import cleanup: AI-powered data normalization
+  cleanupImportData(input: CleanupImportInput!): CleanupImportResult!
+  # Retrospective generation: sprint analysis with estimate adjustment
+  generateRetrospective(input: GenerateRetrospectiveInput!): GenerateRetrospectiveResult!
+  # Project mutations
   createProject(input: CreateProjectInput!): Project!
+  updateProject(id: ID!, input: UpdateProjectInput!): Project!
+  deleteProject(id: ID!): Boolean!
+  # Team mutations
+  createTeam(input: CreateTeamInput!): TeamWithMembers!
+  updateTeam(teamId: ID!, input: UpdateTeamInput!): Team!
+  addTeamMember(input: AddTeamMemberInput!): Membership!
+  removeTeamMember(teamId: ID!, userId: ID!): Boolean!
+  updateMemberRole(input: UpdateMemberRoleInput!): Membership!
+  # Component mutations
+  createComponent(input: CreateComponentInput!): Component!
+  updateComponent(id: ID!, input: UpdateComponentInput!): Component!
+  deleteComponent(id: ID!): Boolean!
+  # Dependency mutations (TransactWriteItems with ConditionCheck to verify both components exist)
+  addDependency(fromComponentId: ID!, toComponentId: ID!): Dependency!
+  removeDependency(fromComponentId: ID!, toComponentId: ID!): Boolean!
+  # Sprint mutations
+  createSprint(input: CreateSprintInput!): Sprint!
+  updateSprint(id: ID!, input: UpdateSprintInput!): Sprint!
+  deleteSprint(id: ID!): Boolean!
+  startSprint(id: ID!): Sprint!
+  completeSprint(id: ID!): Sprint!
+  # Assign/remove components from sprints (updates component.sprintId + GSI2)
+  assignComponentToSprint(componentId: ID!, sprintId: ID!): Component!
+  removeComponentFromSprint(componentId: ID!): Component!
+  # Assign/unassign users to/from components
+  assignUserToComponent(componentId: ID!, userId: ID!): Assignment!
+  unassignUserFromComponent(componentId: ID!, userId: ID!): Boolean!
+  # Mark notification as read
+  markNotificationRead(notificationId: ID!): Notification!
+  # Mark all notifications as read for current user
+  markAllNotificationsRead: Int!
+  # Update team workflow config (DynamoDB: UpdateItem/PutItem)
+  # Best practice: Direct DynamoDB for O(1) write
+  updateTeamWorkflowConfig(teamId: ID!, input: UpdateWorkflowConfigInput!): TeamWorkflowConfig!
+}
+
+type Subscription {
+  # Subscribe to AI generation progress updates
+  # Client subscribes with sessionId returned from startAIGeneration
+  onAIProgress(sessionId: ID!): AIProgress
+    @aws_subscribe(mutations: ["publishAIProgress"])
 }
 
 schema {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }

@@ -6,7 +6,6 @@ import {
   getCurrentUserId,
   startAIGeneration,
   subscribeToAIProgress,
-  applyFullPlan,
   getTeamWorkflowConfig,
   type TeamWithMembers,
   type AIProgress,
@@ -31,7 +30,8 @@ export function ProjectNewPage() {
   const [generateEpics, setGenerateEpics] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiProgress, setAiProgress] = useState<string>('');
-  const abortRef = useRef(false);
+  // AWS Best Practice: Use AbortController instead of boolean ref for cancellation
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Workflow template state
   const [workflowTemplate, setWorkflowTemplate] = useState<string>('SCRUM');
@@ -144,7 +144,9 @@ export function ProjectNewPage() {
 
     setLoading(true);
     setError(null);
-    abortRef.current = false;
+    // Create new AbortController for this submission
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
 
     try {
       const ownerId = await getCurrentUserId();
@@ -171,7 +173,7 @@ export function ProjectNewPage() {
         setAiProgress('Starting AI generation...');
 
         try {
-          if (abortRef.current) return;
+          if (signal.aborted) return;
 
           // Start async AI generation - returns sessionId immediately (bypasses 30s AppSync timeout)
           const job = await startAIGeneration({
@@ -179,62 +181,65 @@ export function ProjectNewPage() {
             generateEpics,
           });
 
-          if (abortRef.current) return;
+          if (signal.aborted) return;
+
+          // Check abort BEFORE creating subscription (fixes cleanup order issue)
+          if (signal.aborted) return;
 
           // Wait for AI generation to complete via subscription
-          const plan = await new Promise<AIProgress['result']>((resolve, reject) => {
-            const subscription = subscribeToAIProgress(
-              job.sessionId,
-              (progressUpdate: AIProgress) => {
-                setAiProgress(progressUpdate.message);
+          // Note: Lambda applies the plan directly to DynamoDB, so we just wait for COMPLETED
+          const subscription = subscribeToAIProgress(
+            job.sessionId,
+            (progressUpdate: AIProgress) => {
+              // Don't update state if aborted
+              if (signal.aborted) return;
 
-                if (progressUpdate.status === 'COMPLETED' && progressUpdate.result) {
-                  subscription.unsubscribe();
-                  resolve(progressUpdate.result);
-                } else if (progressUpdate.status === 'FAILED') {
-                  subscription.unsubscribe();
-                  reject(new Error(progressUpdate.error || 'AI generation failed'));
-                }
-              },
-              (err: Error) => {
-                console.error('Subscription error:', err);
-                reject(new Error('Lost connection to AI service'));
-              }
-            );
+              console.log('[ProjectNewPage] Progress update:', {
+                status: progressUpdate.status,
+                message: progressUpdate.message,
+              });
 
-            // Cleanup subscription if user navigates away
-            if (abortRef.current) {
-              subscription.unsubscribe();
-              reject(new Error('Aborted'));
+              setAiProgress(progressUpdate.message);
+            },
+            (err: Error) => {
+              console.error('[ProjectNewPage] Subscription error:', err);
             }
-          });
+          );
 
-          if (abortRef.current) return;
+          try {
+            await new Promise<void>((resolve, reject) => {
+              // Listen for abort signal
+              signal.addEventListener('abort', () => {
+                reject(new Error('Aborted'));
+              });
 
-          if (plan && plan.components && plan.components.length > 0) {
-            setAiProgress(`Applying ${plan.components.length} components...`);
-
-            // Apply the plan atomically
-            await applyFullPlan({
-              projectId: result.id,
-              components: plan.components.map((c) => ({
-                name: c.name,
-                description: c.description,
-                type: c.type,
-                estimatedHours: c.estimatedHours,
-                priority: c.priority,
-                suggestedDependencies: c.suggestedDependencies || [],
-                parentName: c.parentName,
-                acceptanceCriteria: c.acceptanceCriteria,
-              })),
-              enhancedDescription: plan.enhancedDescription,
-              sprints: plan.sprints,
-              epics: plan.epics,
+              // Re-subscribe with completion handlers
+              const completionSub = subscribeToAIProgress(
+                job.sessionId,
+                (progressUpdate: AIProgress) => {
+                  if (progressUpdate.status === 'COMPLETED') {
+                    completionSub.unsubscribe();
+                    console.log('[ProjectNewPage] AI generation complete, plan applied by Lambda');
+                    if (!signal.aborted) {
+                      setAiProgress('Plan applied! Redirecting...');
+                    }
+                    resolve();
+                  } else if (progressUpdate.status === 'FAILED') {
+                    completionSub.unsubscribe();
+                    reject(new Error(progressUpdate.error || 'AI generation failed'));
+                  }
+                },
+                (_err: Error) => {
+                  reject(new Error('Lost connection to AI service'));
+                }
+              );
             });
-          } else {
-            // Plan was generated but no components - log for debugging
-            console.warn('AI generated plan with no components:', plan);
+          } finally {
+            // Always cleanup subscription
+            subscription.unsubscribe();
           }
+
+          if (signal.aborted) return;
         } catch (aiErr) {
           // AI generation failed but project was created - show warning and continue
           const aiMessage = aiErr instanceof Error ? aiErr.message : 'Unknown AI error';
@@ -440,16 +445,32 @@ export function ProjectNewPage() {
               </span>{' '}
               workflow.
             </p>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={generateEpics}
-                onChange={(e) => setGenerateEpics(e.target.checked)}
-                disabled={isSubmitting}
-                className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
-              />
-              <span className="text-sm text-slate-300">Generate epics for hierarchical organization</span>
-            </label>
+
+            {/* Epic option - only for Scrum and Custom (per official methodology guidelines) */}
+            {(workflowTemplate === 'SCRUM' || workflowTemplate === 'CUSTOM') && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={generateEpics}
+                  onChange={(e) => setGenerateEpics(e.target.checked)}
+                  disabled={isSubmitting}
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-violet-500 focus:ring-violet-500"
+                />
+                <span className="text-sm text-slate-300">Generate epics for hierarchical organization</span>
+              </label>
+            )}
+
+            {/* Methodology-specific guidance */}
+            {workflowTemplate === 'KANBAN' && (
+              <p className="text-xs text-slate-400">
+                Kanban workflow: Items will be generated as flat work items optimized for continuous flow. No sprints or epics.
+              </p>
+            )}
+            {workflowTemplate === 'SHAPE_UP' && (
+              <p className="text-xs text-slate-400">
+                Shape Up workflow: Items will be organized as scopes within 6-week cycles. Progress tracked via hill charts.
+              </p>
+            )}
           </div>
         )}
 
@@ -494,7 +515,8 @@ export function ProjectNewPage() {
           <button
             type="button"
             onClick={() => {
-              abortRef.current = true;
+              // Abort any pending operations
+              abortControllerRef.current?.abort();
               navigate('/project');
             }}
             disabled={isSubmitting}

@@ -5,7 +5,6 @@ import { AsyncJob } from './constructs/async-job';
 import { AppSyncGraphql } from './constructs/appsync-graphql';
 import { Auth } from './constructs/auth/';
 import { TaskTitanTable } from './constructs/dynamodb';
-import { AppRunnerService } from './constructs/app-runner';
 import { EventBus } from './constructs/event-bus/';
 import { Monitoring } from './constructs/monitoring';
 import { StaticFrontend } from './constructs/static-frontend';
@@ -17,7 +16,7 @@ interface MainStackProps extends StackProps {
 export class MainStack extends Stack {
   constructor(scope: Construct, id: string, props: MainStackProps = {}) {
     super(scope, id, {
-      description: 'TaskTitan FORGE v2 - App Runner + DynamoDB (us-east-2)',
+      description: 'TaskTitan FORGE v3 - CloudFront + AppSync + DynamoDB (fully serverless)',
       ...props,
     });
 
@@ -58,25 +57,27 @@ export class MainStack extends Stack {
       asyncJob,
     });
 
-    // Phase 3: CloudFront + S3 static frontend (client architecture entry point)
-    // Deploy static build to the bucket; then remove App Runner and switch Cognito callbacks to this URL
+    // PRESENTATION TIER: CloudFront + S3 static frontend
+    // AWS Best Practices implemented:
+    // - Security headers (CSP, HSTS, X-Frame-Options, etc.)
+    // - Tiered cache (no-cache for index.html, long TTL for hashed assets)
+    // - SPA routing (403/404 → index.html)
+    // - CloudWatch alarms for error rate monitoring
     const staticFrontend = new StaticFrontend(this, 'StaticFrontend', {
       accessLogBucket,
     });
 
-    // PRESENTATION TIER: FORGE v2 - App Runner (fully serverless) – remove when static build is live on CloudFront
-    // App Runner provides:
-    // - Zero cold starts (containers stay warm)
-    // - Automatic scaling based on traffic
-    // - Built-in HTTPS on *.awsapprunner.com
-    // - No VPC/NAT Gateway needed for DynamoDB (public HTTPS endpoint)
-    // - ~70% cost savings vs ECS Fargate + ALB + NAT + Aurora
-    const webapp = new AppRunnerService(this, 'Webapp', {
-      auth,
-      dynamoTable,
-      eventBus,
-      asyncJob,
-    });
+    // Configure Cognito OAuth callback URLs for CloudFront + local dev
+    auth.updateAllowedCallbackUrls(
+      [
+        `${staticFrontend.distributionUrl}/auth-callback`,
+        'http://localhost:5173/auth-callback', // Vite dev server
+      ],
+      [
+        staticFrontend.distributionUrl,
+        'http://localhost:5173',
+      ],
+    );
 
     // CloudWatch Monitoring Dashboard
     new Monitoring(this, 'Monitoring', {
@@ -87,8 +88,8 @@ export class MainStack extends Stack {
 
     // Outputs
     new CfnOutput(this, 'FrontendDomainName', {
-      value: `https://${webapp.serviceUrl}`,
-      description: 'TaskTitan frontend URL (App Runner HTTPS)',
+      value: staticFrontend.distributionUrl,
+      description: 'TaskTitan frontend URL (CloudFront)',
     });
 
     new CfnOutput(this, 'CognitoUserPoolId', {

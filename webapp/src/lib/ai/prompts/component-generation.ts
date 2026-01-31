@@ -2,22 +2,87 @@
  * Component Generation Prompts
  *
  * System and user prompts for AI-powered component generation.
- * Supports workflow-aware generation (Scrum vs Kanban vs custom workflows).
+ * Supports workflow-aware generation (Scrum vs Kanban vs Shape Up vs custom).
  *
- * KEY DESIGN PRINCIPLE (matches Jira/Linear):
- * - SCRUM: Sprints are PRIMARY. Generate Stories/Tasks that go ON the sprint board.
- *          Epics are OPTIONAL backlog organization (like Jira's Epic panel).
+ * KEY DESIGN PRINCIPLES:
+ * - SCRUM: Sprints are PRIMARY. Stories/Tasks go ON the sprint board.
+ *          Epics are OPTIONAL backlog organization.
  * - KANBAN: Flat work items with continuous flow. No sprints, no hierarchy.
+ *          Metrics: cycle time, throughput, WIP (Little's Law).
+ * - SHAPE UP: 6-week cycles with Scopes (not Stories/Tasks).
+ *             Appetite replaces hour estimates. Hill chart tracks progress.
+ *
+ * Sources:
+ * - Scrum: https://www.scrum.org/resources/blog/sprint-capacity-planning-scrum-teams-practical-guide
+ * - Kanban: https://getnave.com/blog/kanban-metrics/
+ * - Shape Up: https://basecamp.com/shapeup
  */
 
 import type { TeamWorkflowConfig } from '@/lib/prisma-compat';
 import type { TeamCapacityInfo } from '../types';
 
 /**
+ * Get focus factor based on team experience level.
+ * Industry best practice: 60-80% depending on experience.
+ * Source: https://www.smartsheet.com/content/agile-sprint-scrum-capacity-planning
+ */
+export function getFocusFactor(teamExperience?: 'NEW' | 'MODERATE' | 'EXPERIENCED'): number {
+  switch (teamExperience) {
+    case 'NEW':
+      return 0.6; // New teams: more overhead, learning curve
+    case 'MODERATE':
+      return 0.7; // Moderate: standard overhead
+    case 'EXPERIENCED':
+      return 0.8; // Experienced: minimal overhead
+    default:
+      return 0.7; // Default to moderate
+  }
+}
+
+/**
+ * Detect if workflow is Shape Up (6-week cycles with "Cycle" name)
+ */
+function isShapeUp(workflowConfig: TeamWorkflowConfig | null): boolean {
+  if (!workflowConfig) return false;
+  return (
+    workflowConfig.cycleEnabled === true &&
+    workflowConfig.cycleDurationWeeks === 6 &&
+    workflowConfig.cycleName?.toLowerCase() === 'cycle'
+  );
+}
+
+/**
  * Build system prompt based on workflow configuration
  */
 export function buildSystemPrompt(workflowConfig: TeamWorkflowConfig | null): string {
   const isKanban = !workflowConfig?.cycleEnabled;
+
+  // Shape Up: 6-week cycles with Scopes and appetite-based sizing
+  if (isShapeUp(workflowConfig)) {
+    return `You are an expert product developer helping a Shape Up team plan their 6-week cycle.
+Your job is to analyze a project description and create SCOPES that fit the team's appetite.
+
+This team uses SHAPE UP methodology (Basecamp). Key concepts:
+- SCOPES replace Stories/Tasks - they are distinct sections of work that can be built and integrated independently
+- APPETITE replaces hour estimates - work is shaped to fit the time budget, not estimated
+- HILL CHART tracks progress: uphill (0-50%) = figuring things out, downhill (50-100%) = making it happen
+
+Appetite Sizes:
+- SMALL_BATCH: 1-2 weeks of focused work, batched with others into a 6-week cycle
+- BIG_BATCH: A single project taking the full 6-week cycle
+
+For each SCOPE:
+1. Name: Noun-phrase describing the deliverable (e.g., "Autopay Setup", "Search Filters")
+2. Description: What gets shipped and why it matters
+3. Appetite: SMALL_BATCH or BIG_BATCH based on complexity
+4. Priority: 1-10 (10 = most important for this cycle)
+5. Dependencies: Only when truly blocking
+
+DO NOT include estimatedHours - Shape Up uses appetite, not time estimates.
+DO NOT use type field - everything is a SCOPE.
+
+Respond with ONLY valid JSON, no other text.`;
+  }
 
   if (isKanban) {
     return `You are an expert software architect helping teams break down projects into components.
@@ -104,6 +169,41 @@ export function buildComponentGenerationPrompt(
   const isKanban = workflowConfig ? !workflowConfig.cycleEnabled : false;
   const cycleName = workflowConfig?.cycleName || 'Sprint';
 
+  // SHAPE UP: 6-week cycles with Scopes and appetite-based sizing
+  if (isShapeUp(workflowConfig ?? null)) {
+    return `Project Name: ${projectName}
+
+Project Description:
+${projectDescription}
+
+${existingComponents.length > 0 ? `Existing Scopes (do not suggest these again): ${existingComponents.join(', ')}` : ''}
+
+Create 4-8 SCOPES that can be built and shipped within a 6-week cycle. Remember:
+- No hour estimates - use APPETITE instead (SMALL_BATCH = 1-2 weeks, BIG_BATCH = full 6 weeks)
+- Each scope should be independently shippable
+- Think in terms of "what can we build?" not "how long will it take?"
+
+Return your response between <<<JSON and JSON>>> markers. Between these markers, provide ONLY valid JSON with:
+- "scopes": array of scopes with { name, description, appetite, priority, suggestedDependencies }
+  * appetite must be "SMALL_BATCH" (1-2 weeks) or "BIG_BATCH" (full 6-week cycle)
+  * Do NOT include estimatedHours - Shape Up doesn't use time estimates
+- "summary": brief summary of the cycle's focus (2-3 sentences)
+- "enhancedDescription": improved project description (3-4 sentences)
+
+Example format:
+<<<JSON
+{
+  "scopes": [
+    { "name": "Autopay Setup", "description": "Let customers configure automatic payments for recurring bills. Includes payment method selection and schedule configuration.", "appetite": "SMALL_BATCH", "priority": 10, "suggestedDependencies": [] },
+    { "name": "Payment History Dashboard", "description": "Show customers their complete payment history with filtering and export capabilities.", "appetite": "SMALL_BATCH", "priority": 8, "suggestedDependencies": ["Autopay Setup"] },
+    { "name": "Multi-currency Support", "description": "Enable payments in multiple currencies with real-time conversion rates and currency preference settings.", "appetite": "BIG_BATCH", "priority": 7, "suggestedDependencies": [] }
+  ],
+  "summary": "This cycle focuses on payment automation and visibility, giving customers control over their recurring payments.",
+  "enhancedDescription": "A payment management system that enables customers to set up automatic payments, view their payment history, and manage multi-currency transactions."
+}
+JSON>>>`;
+  }
+
   if (isKanban) {
     // KANBAN: Flat work items, no sprints, no hierarchy
     return `Project Name: ${projectName}
@@ -153,7 +253,8 @@ JSON>>>`;
   // Build team capacity constraint if available
   // Industry standard: 6 productive hours/day, 70-80% utilization target
   // totalCapacityHours is raw capacity, we apply focus factor for realistic planning
-  const focusFactor = 0.7; // 70% - accounts for meetings, code review, interruptions
+  // Focus factor varies by team experience: NEW=0.6, MODERATE=0.7, EXPERIENCED=0.8
+  const focusFactor = getFocusFactor(teamCapacity?.teamExperience);
   const effectiveCapacity = teamCapacity ? Math.floor(teamCapacity.totalCapacityHours * focusFactor) : null;
 
   const capacityConstraint = teamCapacity

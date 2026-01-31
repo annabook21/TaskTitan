@@ -55,6 +55,8 @@ export interface BulkPlanRefinementResult {
     change: string;
   }>;
   suggestedFollowUps: string[];
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 const BULK_REFINEMENT_SYSTEM_PROMPT = `You are an expert agile coach helping refine sprint plans and component breakdowns through conversation.
@@ -224,6 +226,10 @@ export async function refineBulkPlan(input: BulkPlanRefinementInput): Promise<Bu
     result.explanation = result.explanation || 'Plan updated based on your request.';
     result.changedItems = Array.isArray(result.changedItems) ? result.changedItems : [];
     result.suggestedFollowUps = Array.isArray(result.suggestedFollowUps) ? result.suggestedFollowUps.slice(0, 3) : [];
+
+    // Extract token usage from Bedrock response
+    result.inputTokens = responseBody.usage?.input_tokens;
+    result.outputTokens = responseBody.usage?.output_tokens;
 
     return result;
   } catch (error) {

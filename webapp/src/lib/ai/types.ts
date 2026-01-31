@@ -37,6 +37,8 @@ export interface AIGenerationResult {
   enhancedDescription?: string; // Optional enhanced project description
   sprints?: GeneratedSprint[]; // Sprint plan (required for Scrum, absent for Kanban)
   epics?: GeneratedEpic[]; // Optional epic groupings for backlog organization
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 // Import Analysis Types
@@ -81,6 +83,8 @@ export interface SprintPlanningResult {
   totalHours: number;
   reasoning: string;
   warnings: string[];
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface SprintSuggestion {
@@ -101,6 +105,43 @@ export interface TeamCapacityInfo {
   }>;
   sprintDays: number;
   totalCapacityHours: number;
+  // Experience level affects focus factor: NEW=0.6, MODERATE=0.7, EXPERIENCED=0.8
+  teamExperience?: 'NEW' | 'MODERATE' | 'EXPERIENCED';
+}
+
+// Shape Up Types (Basecamp methodology)
+// See: https://basecamp.com/shapeup
+export type ShapeUpAppetite = 'SMALL_BATCH' | 'BIG_BATCH';
+
+export interface GeneratedScope {
+  name: string;
+  description: string;
+  // Appetite replaces hour estimates in Shape Up
+  // SMALL_BATCH: 1-2 weeks, BIG_BATCH: full 6-week cycle
+  appetite: ShapeUpAppetite;
+  // Hill chart phase: 0-50 = figuring out, 51-100 = making it happen
+  hillPhase?: number;
+  priority: number;
+  suggestedDependencies?: string[];
+}
+
+// Kanban Metrics Types (Little's Law based)
+// See: https://getnave.com/blog/kanban-metrics/
+export interface KanbanMetrics {
+  // Cycle Time = time from started to completed (team perspective)
+  averageCycleTimeDays: number;
+  // Throughput = items completed per time period
+  throughputPerWeek: number;
+  // Current WIP = items in progress
+  currentWIP: number;
+  // Percentile-based forecasting (more accurate than averages)
+  percentileEstimates: {
+    p50: number; // 50% confidence - half complete faster
+    p85: number; // 85% confidence - good planning target
+    p95: number; // 95% confidence - worst case buffer
+  };
+  // Little's Law: Cycle Time = WIP / Throughput
+  littlesLawValid: boolean;
 }
 
 // Natural Language Types
@@ -127,6 +168,8 @@ export interface NaturalLanguageComponentResult {
   suggestedDependencies: string[];
   reasoning: string; // Why the AI chose this structure
   acceptanceCriteria?: string[]; // Testable conditions for completion
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 // Component Breakdown Types
@@ -253,4 +296,6 @@ export interface ChatRefinementResult {
   component: NaturalLanguageComponentResult;
   explanation: string;
   suggestedFollowUps: string[];
+  inputTokens?: number;
+  outputTokens?: number;
 }

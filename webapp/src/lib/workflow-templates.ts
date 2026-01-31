@@ -19,6 +19,9 @@ export interface WorkflowTemplateSettings {
   wipLimitBlocked?: number | null;
   wipLimitReview?: number | null;
   autoArchiveCompleted: boolean;
+  // Shape Up-specific flags (Basecamp methodology)
+  useScopes?: boolean; // Use "Scopes" instead of Stories/Tasks
+  useAppetite?: boolean; // Use appetite (SMALL_BATCH/BIG_BATCH) instead of hour estimates
 }
 
 export interface WorkflowTemplate {
@@ -75,6 +78,9 @@ export const WORKFLOW_TEMPLATES: Record<WorkflowTemplateKey, WorkflowTemplate> =
       wipLimitBlocked: null,
       wipLimitReview: null,
       autoArchiveCompleted: false,
+      // Shape Up uses Scopes with appetite instead of Stories/Tasks with hour estimates
+      useScopes: true,
+      useAppetite: true,
     },
   },
   CUSTOM: {

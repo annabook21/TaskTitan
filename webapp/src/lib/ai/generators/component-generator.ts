@@ -139,6 +139,8 @@ export async function generateComponents(
     }
 
     result.summary = result.summary || 'AI-generated component breakdown for your project.';
+    result.inputTokens = responseBody.usage?.input_tokens;
+    result.outputTokens = responseBody.usage?.output_tokens;
 
     return result;
   } catch (error) {

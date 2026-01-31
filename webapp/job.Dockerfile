@@ -4,7 +4,8 @@ COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY ./ ./
 # FORGE v2: No Prisma - using DynamoDB/ElectroDB only
-RUN npx esbuild src/jobs/*.ts --bundle --outdir=dist --platform=node --charset=utf8
+# Note: --alias:@=./src resolves TypeScript path aliases (@/lib/*, @/jobs/*, etc.)
+RUN npx esbuild src/jobs/*.ts --bundle --outdir=dist --platform=node --charset=utf8 --alias:@=./src
 
 FROM public.ecr.aws/lambda/nodejs:22 AS runner
 

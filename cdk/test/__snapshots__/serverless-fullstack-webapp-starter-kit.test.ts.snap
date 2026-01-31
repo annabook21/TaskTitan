@@ -374,6 +374,64 @@ exports[`Snapshot test 1`] = `
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "AppSyncGraphqlAddTeamMemberResolver0EBF5754": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  const membershipId = util.autoId();
+  const membership = {
+    pk: 'TEAM#' + input.teamId,
+    sk: 'MEMBER#' + input.userId,
+    id: membershipId,
+    userId: input.userId,
+    teamId: input.teamId,
+    role: input.role,
+    joinedAt: now,
+    title: input.title || null,
+    hoursPerDay: 6,
+    availability: 100,
+    gsi1pk: 'USER#' + input.userId,
+    gsi1sk: 'TEAM#' + input.teamId
+  };
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({ pk: membership.pk, sk: membership.sk }),
+    attributeValues: util.dynamodb.toMapValues(membership),
+    condition: { expression: 'attribute_not_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Member already exists in team', 'MemberAlreadyExists');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "addTeamMember",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlApi48248BEB": {
       "Properties": {
         "AuthenticationType": "AMAZON_COGNITO_USER_POOLS",
@@ -611,6 +669,15 @@ exports[`Snapshot test 1`] = `
 # Auth: Cognito User Pools. Data: DynamoDB (same table as ElectroDB) + Lambda (Bedrock).
 # Region: us-east-2.
 
+type User {
+  id: ID!
+  email: String!
+  name: String
+  avatarUrl: String
+  createdAt: String
+  updatedAt: String
+}
+
 type Project {
   id: ID!
   name: String!
@@ -629,11 +696,43 @@ type Team {
   updatedAt: String
 }
 
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+type Membership {
+  id: ID!
+  userId: String!
+  teamId: String!
+  role: MemberRole!
+  joinedAt: String
+  title: String
+  hoursPerDay: Int
+  availability: Int
+  user: User
+}
+
+type TeamWithMembers {
+  team: Team!
+  members: [Membership!]!
+}
+
 type Query {
+  # Get the current authenticated user (DynamoDB: pk=USER#sub, sk=METADATA)
+  getCurrentUser: User
+  # Get a user by email (DynamoDB GSI1: gsi1pk=EMAIL#email, gsi1sk=USER)
+  getUserByEmail(email: String!): User
   # Get a single project by ID (DynamoDB: pk=PROJECT#id, sk=METADATA)
   getProject(id: ID!): Project
   # Get a single team by ID (DynamoDB: pk=TEAM#id, sk=METADATA)
   getTeam(id: ID!): Team
+  # List teams for current user (DynamoDB GSI1: gsi1pk=USER#userId → batch get teams)
+  listTeamsForUser: [TeamWithMembers!]!
+  # Get team with all members (DynamoDB: GetItem TEAM#id + Query sk begins_with MEMBER#)
+  getTeamWithMembers(teamId: ID!): TeamWithMembers
   # List projects for a team (DynamoDB GSI2: gsi2pk=TEAM#teamId)
   listProjectsByTeam(teamId: ID!): [Project!]!
 }
@@ -646,10 +745,40 @@ input CreateProjectInput {
   description: String
 }
 
+input CreateTeamInput {
+  id: ID!
+  name: String!
+  description: String
+}
+
+input UpdateTeamInput {
+  name: String
+  description: String
+}
+
+input AddTeamMemberInput {
+  teamId: ID!
+  userId: ID!
+  role: MemberRole!
+  title: String
+}
+
+input UpdateMemberRoleInput {
+  teamId: ID!
+  userId: ID!
+  role: MemberRole!
+}
+
 # AI generation: Lambda (Bedrock) invoked by AppSync; returns generated text.
 type Mutation {
   generateComponentViaAI(projectId: ID!, prompt: String!): String
   createProject(input: CreateProjectInput!): Project!
+  # Team mutations
+  createTeam(input: CreateTeamInput!): TeamWithMembers!
+  updateTeam(teamId: ID!, input: UpdateTeamInput!): Team!
+  addTeamMember(input: AddTeamMemberInput!): Membership!
+  removeTeamMember(teamId: ID!, userId: ID!): Boolean!
+  updateMemberRole(input: UpdateMemberRoleInput!): Membership!
 }
 
 schema {
@@ -659,6 +788,68 @@ schema {
 ",
       },
       "Type": "AWS::AppSync::GraphQLSchema",
+    },
+    "AppSyncGraphqlBatchGetTeamsFn9CA14089": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const memberships = ctx.stash.memberships || [];
+  if (memberships.length === 0) return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  const keys = memberships.map(m => util.dynamodb.toMapValues({ pk: 'TEAM#' + m.teamId, sk: 'METADATA' }));
+  return {
+    operation: 'BatchGetItem',
+    tables: {
+      '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "': { keys }
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const memberships = ctx.stash.memberships || [];
+  const teams = ctx.result.data['",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "'] || [];
+  const teamMap = {};
+  for (const team of teams) {
+    teamMap[team.id] = team;
+  }
+  return memberships.map(m => ({
+    team: teamMap[m.teamId] || { id: m.teamId, name: 'Unknown' },
+    members: [m]
+  })).filter(t => t.team.id);
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "batchGetTeams",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlCreateProjectResolverAE2D7277": {
       "DependsOn": [
@@ -715,6 +906,91 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlCreateTeamResolver3EF60344": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const teamId = input.id;
+  const userId = ctx.identity.sub;
+  const now = util.time.nowISO8601();
+  const membershipId = util.autoId();
+  const team = {
+    pk: 'TEAM#' + teamId,
+    sk: 'METADATA',
+    id: teamId,
+    name: input.name,
+    description: input.description || null,
+    createdAt: now,
+    updatedAt: now
+  };
+  const membership = {
+    pk: 'TEAM#' + teamId,
+    sk: 'MEMBER#' + userId,
+    id: membershipId,
+    userId: userId,
+    teamId: teamId,
+    role: 'OWNER',
+    joinedAt: now,
+    title: null,
+    hoursPerDay: 6,
+    availability: 100,
+    gsi1pk: 'USER#' + userId,
+    gsi1sk: 'TEAM#' + teamId
+  };
+  return {
+    operation: 'TransactWriteItems',
+    transactItems: [
+      { table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "', operation: 'PutItem', key: util.dynamodb.toMapValues({ pk: team.pk, sk: team.sk }), attributeValues: util.dynamodb.toMapValues(team) },
+      { table: '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "', operation: 'PutItem', key: util.dynamodb.toMapValues({ pk: membership.pk, sk: membership.sk }), attributeValues: util.dynamodb.toMapValues(membership) }
+    ]
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const input = ctx.args.input;
+  const userId = ctx.identity.sub;
+  const now = util.time.nowISO8601();
+  const team = { id: input.id, name: input.name, description: input.description || null, createdAt: now, updatedAt: now };
+  const membership = { id: util.autoId(), userId, teamId: input.id, role: 'OWNER', joinedAt: now, title: null, hoursPerDay: 6, availability: 100 };
+  return { team, members: [membership] };
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FieldName": "createTeam",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlGenerateComponentViaAIResolver3545246F": {
       "DependsOn": [
         "AppSyncGraphqlApiBedrockLambda55C98CBB",
@@ -733,6 +1009,44 @@ export function response(ctx) {
         "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments)}",
         "ResponseMappingTemplate": "$util.toJson($ctx.result)",
         "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetCurrentUserResolver1EEDB1FC": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'USER#' + userId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getCurrentUser",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
       },
       "Type": "AWS::AppSync::Resolver",
     },
@@ -812,6 +1126,142 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlGetTeamWithMembersResolver679CB782": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const items = ctx.result.items || [];
+  let team = null;
+  const members = [];
+  for (const item of items) {
+    if (item.sk === 'METADATA') {
+      team = item;
+    } else if (item.sk && item.sk.startsWith('MEMBER#')) {
+      members.push(item);
+    }
+  }
+  if (!team) return null;
+  return { team, members };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getTeamWithMembers",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetUserByEmailResolver90411370": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const email = ctx.args.email;
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND gsi1sk = :sk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'EMAIL#' + email,
+        ':sk': 'USER'
+      })
+    },
+    limit: 1
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const items = ctx.result.items || [];
+  return items.length > 0 ? items[0] : null;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "getUserByEmail",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListMembershipsForUserFn2DE30B8B": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  ctx.stash.memberships = ctx.result.items || [];
+  return ctx.result.items || [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "listMembershipsForUser",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlListProjectsByTeamResolver5F6E1F61": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -851,6 +1301,178 @@ export function response(ctx) {
           "RuntimeVersion": "1.0.0",
         },
         "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListTeamsForUserResolver8DABE6AF": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "listTeamsForUser",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlListMembershipsForUserFn2DE30B8B",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlBatchGetTeamsFn9CA14089",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlRemoveTeamMemberResolver3F5966A9": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  const userId = ctx.args.userId;
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "removeTeamMember",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlUpdateMemberRoleResolverDD9E80A5": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + input.teamId,
+      sk: 'MEMBER#' + input.userId
+    }),
+    update: {
+      expression: 'SET #role = :role',
+      expressionNames: { '#role': 'role' },
+      expressionValues: { ':role': util.dynamodb.toDynamoDB(input.role) }
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "updateMemberRole",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlUpdateTeamResolver823FCEEF": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  const input = ctx.args.input;
+  const now = util.time.nowISO8601();
+  const expNames = { '#updatedAt': 'updatedAt' };
+  const expValues = { ':updatedAt': util.dynamodb.toDynamoDB(now) };
+  let updateExp = 'SET #updatedAt = :updatedAt';
+  if (input.name !== undefined && input.name !== null) {
+    expNames['#name'] = 'name';
+    expValues[':name'] = util.dynamodb.toDynamoDB(input.name);
+    updateExp += ', #name = :name';
+  }
+  if (input.description !== undefined) {
+    expNames['#description'] = 'description';
+    expValues[':description'] = util.dynamodb.toDynamoDB(input.description);
+    updateExp += ', #description = :description';
+  }
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'TEAM#' + teamId, sk: 'METADATA' }),
+    update: { expression: updateExp, expressionNames: expNames, expressionValues: expValues }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "updateTeam",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
       },
       "Type": "AWS::AppSync::Resolver",
     },

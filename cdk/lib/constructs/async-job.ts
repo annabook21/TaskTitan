@@ -83,8 +83,8 @@ export class AsyncJob extends Construct {
           `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/global.anthropic.claude-sonnet-4-5-*`,
           // Regional inference profile (fallback)
           `arn:aws:bedrock:${Stack.of(this).region}:${Stack.of(this).account}:inference-profile/us.anthropic.claude-sonnet-4-5-*`,
-          // Foundation model access
-          `arn:aws:bedrock:*:${Stack.of(this).account}:foundation-model/anthropic.claude-*`,
+          // Foundation model access (AWS-owned - no account number in ARN)
+          'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
         ],
       }),
     );
