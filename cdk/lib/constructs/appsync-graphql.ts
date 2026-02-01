@@ -2877,7 +2877,7 @@ export function response(ctx) {
     return { valid: false };
   }
   // Check if code has expired (TTL is in Unix seconds)
-  const now = Math.floor(Date.now() / 1000);
+  const now = util.time.nowEpochSeconds();
   if (item.ttl && item.ttl < now) {
     return { valid: false };
   }
@@ -2998,7 +2998,7 @@ export function response(ctx) {
   }
   
   // Filter out expired codes and return
-  const now = Math.floor(Date.now() / 1000);
+  const now = util.time.nowEpochSeconds();
   return (ctx.result.items || [])
     .filter(item => !item.ttl || item.ttl > now)
     .map(item => ({
@@ -3092,7 +3092,7 @@ export function response(ctx) {
   }
   
   // Check expiration
-  const nowEpoch = Math.floor(Date.now() / 1000);
+  const nowEpoch = util.time.nowEpochSeconds();
   if (codeItem.ttl && codeItem.ttl < nowEpoch) {
     util.error('Share code has expired', 'ExpiredShareCode');
   }
