@@ -2907,12 +2907,10 @@ export function request(ctx) {
   const input = ctx.args.input;
   const projectId = input.projectId;
   
-  // Generate 6-character alphanumeric code
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I, O, 0, 1 to avoid confusion
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
+  // Generate 6-character alphanumeric code using util.autoId()
+  // util.autoId() generates a UUID, we take the first 6 chars and convert to uppercase
+  const autoId = util.autoId().replace(/-/g, '').toUpperCase();
+  const code = autoId.substring(0, 6);
   
   // Calculate expiration (default 7 days, max 30 days)
   const expiresInHours = Math.min(input.expiresInHours || 168, 720);
