@@ -8,9 +8,18 @@
  * - Unassign self from components
  */
 
-import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useGuestAuth } from '../hooks/useGuestAuth';
+import {
+  guestListComponents,
+  guestListAssignments,
+  guestAssignSelf,
+  guestUnassignSelf,
+  guestUpdateStatus,
+  type Component as ApiComponent,
+  type ComponentStatus,
+} from '../api/appsync';
 import {
   FolderKanban,
   Clock,
@@ -22,19 +31,12 @@ import {
   Loader2,
   Plus,
   Minus,
-  ArrowRight,
+  RefreshCw,
 } from 'lucide-react';
 
-type ComponentStatus = 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
 type ComponentType = 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
 
-interface Component {
-  id: string;
-  name: string;
-  description?: string;
-  type: ComponentType;
-  status: ComponentStatus;
-  estimatedHours?: number;
+interface DisplayComponent extends ApiComponent {
   assignedToMe?: boolean;
 }
 
@@ -59,12 +61,13 @@ const typeColors: Record<ComponentType, string> = {
 
 export function GuestDashboardPage() {
   const navigate = useNavigate();
-  const { guestSession, clearGuestSession, isLoading: authLoading } = useGuestAuth();
+  const { guestSession, clearGuestSession, isLoading: authLoading, ensureValidCredentials } = useGuestAuth();
   
-  const [components, setComponents] = useState<Component[]>([]);
+  const [components, setComponents] = useState<DisplayComponent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'mine'>('all');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Redirect if not in guest mode
   useEffect(() => {
@@ -73,59 +76,150 @@ export function GuestDashboardPage() {
     }
   }, [authLoading, guestSession, navigate]);
 
-  // Load components
-  useEffect(() => {
+  // Load components and assignments
+  const loadData = useCallback(async () => {
     if (!guestSession) return;
+    
+    setLoading(true);
+    setError(null);
 
-    async function loadComponents() {
-      try {
-        // TODO: Call guestListComponents API
-        // For now, use mock data
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        const mockComponents: Component[] = [
-          { id: '1', name: 'User Authentication', type: 'FEATURE', status: 'IN_PROGRESS', estimatedHours: 8, assignedToMe: true },
-          { id: '2', name: 'Database Schema', type: 'TASK', status: 'COMPLETED', estimatedHours: 4, assignedToMe: false },
-          { id: '3', name: 'API Endpoints', type: 'FEATURE', status: 'PLANNING', estimatedHours: 12, assignedToMe: false },
-          { id: '4', name: 'Fix Login Bug', type: 'BUG', status: 'BLOCKED', estimatedHours: 2, assignedToMe: true },
-          { id: '5', name: 'Dashboard UI', type: 'STORY', status: 'REVIEW', estimatedHours: 6, assignedToMe: false },
-        ];
-        
-        setComponents(mockComponents);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load components');
-      } finally {
-        setLoading(false);
+    try {
+      // Ensure we have valid credentials
+      await ensureValidCredentials();
+      
+      const { guestId, projectId } = guestSession;
+      
+      // Load components and assignments in parallel
+      const [componentsList, assignmentsList] = await Promise.all([
+        guestListComponents(guestId, projectId),
+        guestListAssignments(guestId, projectId),
+      ]);
+      
+      // Create a set of component IDs that are assigned to this guest
+      const assignedComponentIds = new Set(
+        assignmentsList.map(a => a.assignment.componentId)
+      );
+      
+      // Merge assignment info into components
+      const componentsWithAssignments: DisplayComponent[] = componentsList.map(c => ({
+        ...c,
+        assignedToMe: assignedComponentIds.has(c.id),
+      }));
+      
+      setComponents(componentsWithAssignments);
+    } catch (err) {
+      console.error('[GuestDashboard] loadData error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to load components';
+      
+      if (message.includes('Unauthorized') || message.includes('Access denied') || message.includes('GuestNotFound')) {
+        setError('Your session has expired. Please join again.');
+        clearGuestSession();
+      } else {
+        setError(message);
       }
+    } finally {
+      setLoading(false);
     }
+  }, [guestSession, ensureValidCredentials, clearGuestSession]);
 
-    loadComponents();
-  }, [guestSession]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleAssignSelf = async (componentId: string) => {
-    // TODO: Call guestAssignSelf API
-    setComponents(prev => prev.map(c => 
-      c.id === componentId ? { ...c, assignedToMe: true } : c
-    ));
+    if (!guestSession) return;
+    
+    setActionLoading(componentId);
+    setError(null);
+    
+    try {
+      await ensureValidCredentials();
+      await guestAssignSelf(guestSession.guestId, componentId);
+      
+      // Optimistic update
+      setComponents(prev => prev.map(c => 
+        c.id === componentId ? { ...c, assignedToMe: true } : c
+      ));
+    } catch (err) {
+      console.error('[GuestDashboard] guestAssignSelf error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to assign';
+      
+      if (message.includes('AlreadyAssigned')) {
+        // Already assigned, refresh to get current state
+        loadData();
+      } else {
+        setError(message);
+      }
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleUnassignSelf = async (componentId: string) => {
-    // TODO: Call guestUnassignSelf API
-    setComponents(prev => prev.map(c => 
-      c.id === componentId ? { ...c, assignedToMe: false } : c
-    ));
+    if (!guestSession) return;
+    
+    setActionLoading(componentId);
+    setError(null);
+    
+    try {
+      await ensureValidCredentials();
+      await guestUnassignSelf(guestSession.guestId, componentId);
+      
+      // Optimistic update
+      setComponents(prev => prev.map(c => 
+        c.id === componentId ? { ...c, assignedToMe: false } : c
+      ));
+    } catch (err) {
+      console.error('[GuestDashboard] guestUnassignSelf error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to unassign';
+      
+      if (message.includes('NotAssigned')) {
+        // Not assigned, refresh to get current state
+        loadData();
+      } else {
+        setError(message);
+      }
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleUpdateStatus = async (componentId: string, newStatus: ComponentStatus) => {
-    // TODO: Call guestUpdateStatus API
-    setComponents(prev => prev.map(c => 
-      c.id === componentId ? { ...c, status: newStatus } : c
-    ));
+    if (!guestSession) return;
+    
+    setActionLoading(componentId);
+    setError(null);
+    
+    try {
+      await ensureValidCredentials();
+      await guestUpdateStatus(guestSession.guestId, componentId, newStatus);
+      
+      // Optimistic update
+      setComponents(prev => prev.map(c => 
+        c.id === componentId ? { ...c, status: newStatus } : c
+      ));
+    } catch (err) {
+      console.error('[GuestDashboard] guestUpdateStatus error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to update status';
+      
+      if (message.includes('NotAssigned')) {
+        setError('You must be assigned to this component to update its status');
+        loadData();
+      } else {
+        setError(message);
+      }
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleLeave = () => {
     clearGuestSession();
     navigate('/join');
+  };
+
+  const handleRefresh = () => {
+    loadData();
   };
 
   const filteredComponents = filter === 'mine' 
@@ -157,11 +251,21 @@ export function GuestDashboardPage() {
             </div>
             <div>
               <h1 className="text-lg font-semibold text-white">Guest Dashboard</h1>
-              <p className="text-sm text-slate-400">Project: Demo Project</p>
+              <p className="text-sm text-slate-400">
+                Project: {guestSession.projectName || 'Project'}
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="p-2 text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <User className="w-4 h-4" />
               <span>{guestSession.displayName}</span>
@@ -228,8 +332,14 @@ export function GuestDashboardPage() {
 
         {/* Error */}
         {error && (
-          <div className="mb-6 p-4 bg-red-900/30 border border-red-600/30 rounded-lg">
+          <div className="mb-6 p-4 bg-red-900/30 border border-red-600/30 rounded-lg flex items-center justify-between">
             <p className="text-red-400">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-400 hover:text-red-300"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
@@ -259,8 +369,10 @@ export function GuestDashboardPage() {
         {!loading && filteredComponents.length > 0 && (
           <div className="space-y-4">
             {filteredComponents.map((component) => {
-              const status = statusConfig[component.status];
+              const status = statusConfig[component.status] || statusConfig.PLANNING;
               const StatusIcon = status.icon;
+              const isActionLoading = actionLoading === component.id;
+              const componentType = (component.type || 'TASK') as ComponentType;
 
               return (
                 <div key={component.id} className="component-card">
@@ -268,8 +380,8 @@ export function GuestDashboardPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2">
                         <h3 className="font-medium text-slate-200">{component.name}</h3>
-                        <span className={`px-1.5 py-0.5 text-xs rounded ${typeColors[component.type]}`}>
-                          {component.type}
+                        <span className={`px-1.5 py-0.5 text-xs rounded ${typeColors[componentType]}`}>
+                          {componentType}
                         </span>
                         {component.assignedToMe && (
                           <span className="px-1.5 py-0.5 text-xs rounded bg-cyan-500/20 text-cyan-300">
@@ -301,17 +413,27 @@ export function GuestDashboardPage() {
                       {component.assignedToMe ? (
                         <button
                           onClick={() => handleUnassignSelf(component.id)}
-                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+                          disabled={isActionLoading}
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors disabled:opacity-50"
                         >
-                          <Minus className="w-3 h-3" />
+                          {isActionLoading ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Minus className="w-3 h-3" />
+                          )}
                           Unassign
                         </button>
                       ) : (
                         <button
                           onClick={() => handleAssignSelf(component.id)}
-                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors"
+                          disabled={isActionLoading}
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors disabled:opacity-50"
                         >
-                          <Plus className="w-3 h-3" />
+                          {isActionLoading ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Plus className="w-3 h-3" />
+                          )}
                           Assign me
                         </button>
                       )}
@@ -321,7 +443,8 @@ export function GuestDashboardPage() {
                         <select
                           value={component.status}
                           onChange={(e) => handleUpdateStatus(component.id, e.target.value as ComponentStatus)}
-                          className="px-2 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded text-slate-300"
+                          disabled={isActionLoading}
+                          className="px-2 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded text-slate-300 disabled:opacity-50"
                         >
                           <option value="PLANNING">Planning</option>
                           <option value="IN_PROGRESS">In Progress</option>

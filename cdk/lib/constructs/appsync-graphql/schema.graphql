@@ -295,12 +295,16 @@ type TeamMetrics {
 
 # Share code for project access (stored in DynamoDB with TTL auto-delete)
 # pk=SHARE_CODE#<code>, sk=METADATA, ttl=Unix epoch for auto-expiration
+# GSI: gsi1pk=PROJECT#<projectId>, gsi1sk=SHARE_CODE#<code> (for listing codes by project)
 type ShareCode {
   code: String!
   projectId: ID!
+  projectName: String        # Denormalized for display without extra query
   teamId: ID!
+  teamName: String           # Denormalized for display without extra query
   expiresAt: String!
   createdAt: String!
+  createdBy: ID!             # User ID who created the code
 }
 
 # Result of validating a share code (unauthenticated via API_KEY)
@@ -314,16 +318,21 @@ type ShareCodeInfo {
 }
 
 # Guest session after joining with share code
-# pk=GUEST#<guestId>, sk=METADATA
+# guestId is the Cognito Identity Pool identity ID for security validation
 type GuestSession {
   guestId: ID!
   displayName: String!
   projectId: ID!
+  projectName: String        # Denormalized for display
   teamId: ID!
+  teamName: String           # Denormalized for display
 }
 
 input GenerateShareCodeInput {
   projectId: ID!
+  projectName: String       # Denormalized for display (optional)
+  teamId: ID                # Team ID for the project (optional, derived from project)
+  teamName: String          # Denormalized for display (optional)
   # Hours until code expires (default 168 = 7 days, max 720 = 30 days)
   expiresInHours: Int
 }
@@ -395,13 +404,18 @@ type Query {
 
   # Guest operations (IAM auth from Cognito Identity Pool)
   # AWS Best Practice: Temporary credentials with least-privilege IAM policy
-  guestGetProject(guestId: ID!): Project @aws_iam
-  guestListComponents(guestId: ID!): [Component!]! @aws_iam
-  guestListAssignments(guestId: ID!): [AssignmentWithComponent!]! @aws_iam
+  # guestId must match caller's cognitoIdentityId (verified in resolver)
+  guestGetProject(guestId: ID!, projectId: ID!): Project @aws_iam
+  guestListComponents(guestId: ID!, projectId: ID!): [Component!]! @aws_iam
+  guestListAssignments(guestId: ID!, projectId: ID!): [AssignmentWithComponent!]! @aws_iam
 
   # List assignments for a specific team member (requires team membership - Cognito auth)
   # For owner/admin member workload view
   listAssignmentsForTeamMember(teamId: ID!, userId: ID!): [AssignmentWithComponent!]!
+
+  # List active share codes for a project (owner/admin only - Cognito auth)
+  # Used by project owners to manage their share codes
+  listShareCodesForProject(projectId: ID!): [ShareCode!]!
 }
 
 input CreateProjectInput {

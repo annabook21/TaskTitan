@@ -5,32 +5,16 @@
  * Uses the listAssignmentsForTeamMember query to fetch data.
  */
 
-import { useState, useEffect } from 'react';
-import { X, Loader2, Clock, CheckCircle2, AlertCircle, ListTodo, ArrowRight } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { X, Loader2, Clock, CheckCircle2, AlertCircle, ListTodo, ArrowRight, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import {
+  listAssignmentsForTeamMember,
+  type AssignmentWithComponent,
+  type ComponentStatus,
+} from '../api/appsync';
 
-type ComponentStatus = 'PLANNING' | 'IN_PROGRESS' | 'BLOCKED' | 'REVIEW' | 'COMPLETED';
 type ComponentType = 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
-
-interface Component {
-  id: string;
-  name: string;
-  description?: string | null;
-  type: ComponentType;
-  status: ComponentStatus;
-  projectId: string;
-  estimatedHours?: number | null;
-}
-
-interface AssignmentWithComponent {
-  assignment: {
-    id: string;
-    componentId: string;
-    userId: string;
-    assignedAt: string;
-  };
-  component: Component;
-}
 
 interface MemberWorkloadModalProps {
   isOpen: boolean;
@@ -72,43 +56,26 @@ export function MemberWorkloadModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadAssignments = useCallback(async () => {
     if (!isOpen) return;
-
-    async function loadAssignments() {
-      setLoading(true);
-      setError(null);
-      
-      try {
-        // TODO: Call listAssignmentsForTeamMember API
-        // For now, use mock data
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        const mockAssignments: AssignmentWithComponent[] = [
-          {
-            assignment: { id: '1', componentId: 'c1', userId, assignedAt: new Date().toISOString() },
-            component: { id: 'c1', name: 'User Authentication', type: 'FEATURE', status: 'IN_PROGRESS', projectId: 'p1', estimatedHours: 8 },
-          },
-          {
-            assignment: { id: '2', componentId: 'c2', userId, assignedAt: new Date().toISOString() },
-            component: { id: 'c2', name: 'Fix Login Bug', type: 'BUG', status: 'BLOCKED', projectId: 'p1', estimatedHours: 2 },
-          },
-          {
-            assignment: { id: '3', componentId: 'c3', userId, assignedAt: new Date().toISOString() },
-            component: { id: 'c3', name: 'Dashboard UI', type: 'STORY', status: 'COMPLETED', projectId: 'p1', estimatedHours: 6 },
-          },
-        ];
-        
-        setAssignments(mockAssignments);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load assignments');
-      } finally {
-        setLoading(false);
-      }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const result = await listAssignmentsForTeamMember(teamId, userId);
+      setAssignments(result);
+    } catch (err) {
+      console.error('[MemberWorkloadModal] loadAssignments error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load assignments');
+    } finally {
+      setLoading(false);
     }
-
-    loadAssignments();
   }, [isOpen, teamId, userId]);
+
+  useEffect(() => {
+    loadAssignments();
+  }, [loadAssignments]);
 
   if (!isOpen) return null;
 
@@ -134,12 +101,22 @@ export function MemberWorkloadModal({
               {assignments.length} task{assignments.length !== 1 ? 's' : ''} assigned
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadAssignments}
+              disabled={loading}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -171,8 +148,14 @@ export function MemberWorkloadModal({
           )}
 
           {error && (
-            <div className="p-4 bg-red-900/30 border border-red-600/30 rounded-lg">
+            <div className="p-4 bg-red-900/30 border border-red-600/30 rounded-lg flex items-center justify-between">
               <p className="text-red-400">{error}</p>
+              <button
+                onClick={loadAssignments}
+                className="text-red-400 hover:text-red-300 text-sm underline"
+              >
+                Retry
+              </button>
             </div>
           )}
 
@@ -201,32 +184,36 @@ export function MemberWorkloadModal({
                       <span className="text-slate-500">({items.length})</span>
                     </h3>
                     <div className="space-y-2">
-                      {items.map(({ component }) => (
-                        <Link
-                          key={component.id}
-                          to={`/project/${component.projectId}`}
-                          onClick={onClose}
-                          className="flex items-center justify-between p-3 bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50 transition-colors group"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-slate-200 truncate group-hover:text-cyan-400 transition-colors">
-                                {component.name}
-                              </span>
-                              <span className={`px-1.5 py-0.5 text-xs rounded ${typeColors[component.type]}`}>
-                                {component.type}
-                              </span>
-                            </div>
-                            {component.estimatedHours && (
-                              <div className="flex items-center gap-1 mt-1 text-xs text-slate-500">
-                                <Clock className="w-3 h-3" />
-                                {component.estimatedHours}h estimated
+                      {items.map(({ component }) => {
+                        const componentType = (component.type || 'TASK') as ComponentType;
+                        
+                        return (
+                          <Link
+                            key={component.id}
+                            to={`/project/${component.projectId}`}
+                            onClick={onClose}
+                            className="flex items-center justify-between p-3 bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700/50 transition-colors group"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-slate-200 truncate group-hover:text-cyan-400 transition-colors">
+                                  {component.name}
+                                </span>
+                                <span className={`px-1.5 py-0.5 text-xs rounded ${typeColors[componentType]}`}>
+                                  {componentType}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                          <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 flex-shrink-0" />
-                        </Link>
-                      ))}
+                              {component.estimatedHours && (
+                                <div className="flex items-center gap-1 mt-1 text-xs text-slate-500">
+                                  <Clock className="w-3 h-3" />
+                                  {component.estimatedHours}h estimated
+                                </div>
+                              )}
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 flex-shrink-0" />
+                          </Link>
+                        );
+                      })}
                     </div>
                   </div>
                 );

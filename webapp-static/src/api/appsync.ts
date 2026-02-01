@@ -2487,3 +2487,391 @@ export function subscribeToAIProgress(
 
   return { unsubscribe: () => sub.unsubscribe() };
 }
+
+// ============================================
+// Share Code API Functions
+// ============================================
+
+export type ShareCode = {
+  code: string;
+  projectId: string;
+  projectName?: string | null;
+  teamId: string;
+  teamName?: string | null;
+  expiresAt: string;
+  createdAt: string;
+  createdBy: string;
+};
+
+export type ShareCodeInfo = {
+  valid: boolean;
+  projectId?: string | null;
+  projectName?: string | null;
+  teamId?: string | null;
+  teamName?: string | null;
+  expiresAt?: string | null;
+};
+
+export type GuestSession = {
+  guestId: string;
+  displayName: string;
+  projectId: string;
+  projectName?: string | null;
+  teamId: string;
+  teamName?: string | null;
+};
+
+export type GenerateShareCodeInput = {
+  projectId: string;
+  projectName?: string;
+  teamId?: string;
+  teamName?: string;
+  expiresInHours?: number;
+};
+
+export type GuestJoinInput = {
+  code: string;
+  displayName: string;
+};
+
+// GraphQL queries and mutations for share codes
+const ValidateShareCode = /* GraphQL */ `
+  query ValidateShareCode($code: String!) {
+    validateShareCode(code: $code) {
+      valid
+      projectId
+      projectName
+      teamId
+      teamName
+      expiresAt
+    }
+  }
+`;
+
+const GenerateShareCode = /* GraphQL */ `
+  mutation GenerateShareCode($input: GenerateShareCodeInput!) {
+    generateShareCode(input: $input) {
+      code
+      projectId
+      projectName
+      teamId
+      teamName
+      expiresAt
+      createdAt
+      createdBy
+    }
+  }
+`;
+
+const RevokeShareCode = /* GraphQL */ `
+  mutation RevokeShareCode($code: String!) {
+    revokeShareCode(code: $code)
+  }
+`;
+
+const ListShareCodesForProject = /* GraphQL */ `
+  query ListShareCodesForProject($projectId: ID!) {
+    listShareCodesForProject(projectId: $projectId) {
+      code
+      projectId
+      projectName
+      teamId
+      teamName
+      expiresAt
+      createdAt
+      createdBy
+    }
+  }
+`;
+
+const GuestJoinProject = /* GraphQL */ `
+  mutation GuestJoinProject($input: GuestJoinInput!) {
+    guestJoinProject(input: $input) {
+      guestId
+      displayName
+      projectId
+      projectName
+      teamId
+      teamName
+    }
+  }
+`;
+
+const GuestGetProject = /* GraphQL */ `
+  query GuestGetProject($guestId: ID!, $projectId: ID!) {
+    guestGetProject(guestId: $guestId, projectId: $projectId) {
+      id
+      name
+      description
+      teamId
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+const GuestListComponents = /* GraphQL */ `
+  query GuestListComponents($guestId: ID!, $projectId: ID!) {
+    guestListComponents(guestId: $guestId, projectId: $projectId) {
+      id
+      name
+      description
+      type
+      status
+      projectId
+      parentId
+      estimatedHours
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+const GuestListAssignments = /* GraphQL */ `
+  query GuestListAssignments($guestId: ID!, $projectId: ID!) {
+    guestListAssignments(guestId: $guestId, projectId: $projectId) {
+      assignment {
+        id
+        componentId
+        userId
+        assignedAt
+      }
+      component {
+        id
+        name
+        status
+        type
+        projectId
+      }
+    }
+  }
+`;
+
+const GuestAssignSelf = /* GraphQL */ `
+  mutation GuestAssignSelf($guestId: ID!, $componentId: ID!) {
+    guestAssignSelf(guestId: $guestId, componentId: $componentId) {
+      id
+      componentId
+      userId
+      assignedAt
+    }
+  }
+`;
+
+const GuestUnassignSelf = /* GraphQL */ `
+  mutation GuestUnassignSelf($guestId: ID!, $componentId: ID!) {
+    guestUnassignSelf(guestId: $guestId, componentId: $componentId)
+  }
+`;
+
+const GuestUpdateStatus = /* GraphQL */ `
+  mutation GuestUpdateStatus($guestId: ID!, $componentId: ID!, $status: ComponentStatus!) {
+    guestUpdateStatus(guestId: $guestId, componentId: $componentId, status: $status) {
+      id
+      status
+      updatedAt
+    }
+  }
+`;
+
+const ListAssignmentsForTeamMember = /* GraphQL */ `
+  query ListAssignmentsForTeamMember($teamId: ID!, $userId: ID!) {
+    listAssignmentsForTeamMember(teamId: $teamId, userId: $userId) {
+      assignment {
+        id
+        componentId
+        userId
+        assignedAt
+      }
+      component {
+        id
+        name
+        description
+        status
+        type
+        projectId
+        estimatedHours
+      }
+    }
+  }
+`;
+
+/**
+ * Validate a share code (unauthenticated - uses API_KEY auth).
+ * Returns project/team info if code is valid and not expired.
+ */
+export async function validateShareCode(code: string): Promise<ShareCodeInfo> {
+  const result = await getClient().graphql({
+    query: ValidateShareCode,
+    variables: { code },
+    authMode: 'apiKey',
+  });
+  extractGraphQLError(result, 'validateShareCode');
+  return (result as { data: { validateShareCode: ShareCodeInfo } }).data.validateShareCode;
+}
+
+/**
+ * Generate a share code for a project (Cognito auth required).
+ * Only project owners should call this.
+ */
+export async function generateShareCode(input: GenerateShareCodeInput): Promise<ShareCode> {
+  const result = await getClient().graphql({
+    query: GenerateShareCode,
+    variables: { input },
+  });
+  extractGraphQLError(result, 'generateShareCode');
+  const code = (result as { data: { generateShareCode: ShareCode } }).data.generateShareCode;
+  if (!code) throw new Error('generateShareCode returned null');
+  return code;
+}
+
+/**
+ * Revoke a share code (Cognito auth required).
+ * Immediately invalidates the code.
+ */
+export async function revokeShareCode(code: string): Promise<boolean> {
+  const result = await getClient().graphql({
+    query: RevokeShareCode,
+    variables: { code },
+  });
+  extractGraphQLError(result, 'revokeShareCode');
+  return (result as { data: { revokeShareCode: boolean } }).data.revokeShareCode;
+}
+
+/**
+ * List all active share codes for a project (Cognito auth required).
+ * Used by project owners to manage their share codes.
+ */
+export async function listShareCodesForProject(projectId: string): Promise<ShareCode[]> {
+  const result = await getClient().graphql({
+    query: ListShareCodesForProject,
+    variables: { projectId },
+  });
+  extractGraphQLError(result, 'listShareCodesForProject');
+  return (result as { data: { listShareCodesForProject: ShareCode[] } }).data.listShareCodesForProject || [];
+}
+
+/**
+ * Join a project as a guest using a share code (IAM auth via Identity Pool).
+ * Creates a guest session and returns guestId for subsequent operations.
+ */
+export async function guestJoinProject(input: GuestJoinInput): Promise<GuestSession> {
+  const result = await getClient().graphql({
+    query: GuestJoinProject,
+    variables: { input },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestJoinProject');
+  const session = (result as { data: { guestJoinProject: GuestSession } }).data.guestJoinProject;
+  if (!session) throw new Error('guestJoinProject returned null');
+  return session;
+}
+
+/**
+ * Get project details for a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestGetProject(guestId: string, projectId: string): Promise<Project | null> {
+  const result = await getClient().graphql({
+    query: GuestGetProject,
+    variables: { guestId, projectId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestGetProject');
+  return (result as { data: { guestGetProject: Project | null } }).data.guestGetProject;
+}
+
+/**
+ * List components for a guest's project (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestListComponents(guestId: string, projectId: string): Promise<Component[]> {
+  const result = await getClient().graphql({
+    query: GuestListComponents,
+    variables: { guestId, projectId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestListComponents');
+  return (result as { data: { guestListComponents: Component[] } }).data.guestListComponents || [];
+}
+
+/**
+ * List assignments for a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestListAssignments(guestId: string, projectId: string): Promise<AssignmentWithComponent[]> {
+  const result = await getClient().graphql({
+    query: GuestListAssignments,
+    variables: { guestId, projectId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestListAssignments');
+  return (result as { data: { guestListAssignments: AssignmentWithComponent[] } }).data.guestListAssignments || [];
+}
+
+/**
+ * Self-assign to a component as a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestAssignSelf(guestId: string, componentId: string): Promise<Assignment> {
+  const result = await getClient().graphql({
+    query: GuestAssignSelf,
+    variables: { guestId, componentId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestAssignSelf');
+  const assignment = (result as { data: { guestAssignSelf: Assignment } }).data.guestAssignSelf;
+  if (!assignment) throw new Error('guestAssignSelf returned null');
+  return assignment;
+}
+
+/**
+ * Unassign self from a component as a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestUnassignSelf(guestId: string, componentId: string): Promise<boolean> {
+  const result = await getClient().graphql({
+    query: GuestUnassignSelf,
+    variables: { guestId, componentId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestUnassignSelf');
+  return (result as { data: { guestUnassignSelf: boolean } }).data.guestUnassignSelf;
+}
+
+/**
+ * Update component status as a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ * Guest must be assigned to the component.
+ */
+export async function guestUpdateStatus(
+  guestId: string, 
+  componentId: string, 
+  status: ComponentStatus
+): Promise<Component> {
+  const result = await getClient().graphql({
+    query: GuestUpdateStatus,
+    variables: { guestId, componentId, status },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestUpdateStatus');
+  const component = (result as { data: { guestUpdateStatus: Component } }).data.guestUpdateStatus;
+  if (!component) throw new Error('guestUpdateStatus returned null');
+  return component;
+}
+
+/**
+ * List assignments for a specific team member (Cognito auth).
+ * Used by owners/admins to view member workload.
+ */
+export async function listAssignmentsForTeamMember(
+  teamId: string, 
+  userId: string
+): Promise<AssignmentWithComponent[]> {
+  const result = await getClient().graphql({
+    query: ListAssignmentsForTeamMember,
+    variables: { teamId, userId },
+  });
+  extractGraphQLError(result, 'listAssignmentsForTeamMember');
+  return (result as { data: { listAssignmentsForTeamMember: AssignmentWithComponent[] } }).data.listAssignmentsForTeamMember || [];
+}

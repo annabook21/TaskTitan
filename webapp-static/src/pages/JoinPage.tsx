@@ -9,25 +9,22 @@
  * 5. User redirected to GuestDashboard
  */
 
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Users, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useGuestAuth } from '../hooks/useGuestAuth';
+import { 
+  validateShareCode as apiValidateShareCode,
+  guestJoinProject,
+  type ShareCodeInfo,
+} from '../api/appsync';
 
 type JoinStep = 'code' | 'name' | 'joining';
 
-interface ShareCodeInfo {
-  valid: boolean;
-  projectId?: string;
-  projectName?: string;
-  teamId?: string;
-  teamName?: string;
-  expiresAt?: string;
-}
-
 export function JoinPage() {
   const navigate = useNavigate();
-  const { saveGuestSession } = useGuestAuth();
+  const [searchParams] = useSearchParams();
+  const { saveGuestSession, guestSession } = useGuestAuth();
   
   const [step, setStep] = useState<JoinStep>('code');
   const [code, setCode] = useState('');
@@ -36,6 +33,23 @@ export function JoinPage() {
   const [error, setError] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
 
+  // If already in a guest session, redirect to dashboard
+  useEffect(() => {
+    if (guestSession) {
+      navigate('/guest');
+    }
+  }, [guestSession, navigate]);
+
+  // Check for code in URL query params (e.g., /join?code=ABC123)
+  useEffect(() => {
+    const codeFromUrl = searchParams.get('code');
+    if (codeFromUrl && codeFromUrl.length === 6) {
+      setCode(codeFromUrl.toUpperCase());
+      // Auto-validate if code is in URL
+      handleValidateCodeWithValue(codeFromUrl.toUpperCase());
+    }
+  }, [searchParams]);
+
   // Format code as user types (uppercase, max 6 chars)
   const handleCodeChange = (value: string) => {
     const formatted = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
@@ -43,10 +57,9 @@ export function JoinPage() {
     setError(null);
   };
 
-  // Validate share code
-  const handleValidateCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (code.length !== 6) {
+  // Validate share code with a specific value
+  const handleValidateCodeWithValue = async (codeValue: string) => {
+    if (codeValue.length !== 6) {
       setError('Please enter a 6-character code');
       return;
     }
@@ -55,30 +68,38 @@ export function JoinPage() {
     setError(null);
 
     try {
-      // TODO: Call validateShareCode API with API_KEY auth
-      // For now, simulate validation
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Call the real API with API_KEY auth
+      const result = await apiValidateShareCode(codeValue);
       
-      // Mock response - replace with actual API call
-      const mockInfo: ShareCodeInfo = {
-        valid: true,
-        projectId: 'mock-project-id',
-        projectName: 'Demo Project',
-        teamId: 'mock-team-id',
-        teamName: 'Demo Team',
-      };
-      
-      if (mockInfo.valid) {
-        setCodeInfo(mockInfo);
+      if (result.valid) {
+        setCodeInfo(result);
         setStep('name');
       } else {
         setError('Invalid or expired share code');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to validate code');
+      console.error('[JoinPage] validateShareCode error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to validate code';
+      
+      // User-friendly error messages
+      if (message.includes('Network') || message.includes('fetch')) {
+        setError('Unable to connect. Please check your internet connection.');
+      } else if (message.includes('InvalidShareCode')) {
+        setError('This code is invalid. Please check and try again.');
+      } else if (message.includes('ExpiredShareCode')) {
+        setError('This code has expired. Please ask your project owner for a new one.');
+      } else {
+        setError(message);
+      }
     } finally {
       setIsValidating(false);
     }
+  };
+
+  // Validate share code from form
+  const handleValidateCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await handleValidateCodeWithValue(code);
   };
 
   // Join project with display name
@@ -93,24 +114,44 @@ export function JoinPage() {
     setError(null);
 
     try {
-      // TODO: Call guestJoinProject API with IAM auth
-      // For now, simulate joining
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Create guest session
-      const session = {
-        guestId: crypto.randomUUID(),
+      // Call the real API with IAM auth (Cognito Identity Pool)
+      const session = await guestJoinProject({
+        code: code,
         displayName: displayName.trim(),
-        projectId: codeInfo?.projectId || '',
-        teamId: codeInfo?.teamId || '',
-        createdAt: new Date().toISOString(),
-      };
+      });
       
-      saveGuestSession(session);
+      // Save the guest session to localStorage
+      saveGuestSession({
+        guestId: session.guestId,
+        displayName: session.displayName,
+        projectId: session.projectId,
+        projectName: session.projectName,
+        teamId: session.teamId,
+        teamName: session.teamName,
+        createdAt: new Date().toISOString(),
+      });
+      
       navigate('/guest');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to join project');
-      setStep('name');
+      console.error('[JoinPage] guestJoinProject error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to join project';
+      
+      // User-friendly error messages
+      if (message.includes('InvalidShareCode')) {
+        setError('This code is no longer valid. Please ask your project owner for a new one.');
+        setStep('code');
+        setCodeInfo(null);
+      } else if (message.includes('ExpiredShareCode')) {
+        setError('This code has expired. Please ask your project owner for a new one.');
+        setStep('code');
+        setCodeInfo(null);
+      } else if (message.includes('Unauthorized')) {
+        setError('Authentication error. Please refresh and try again.');
+        setStep('name');
+      } else {
+        setError(message);
+        setStep('name');
+      }
     }
   };
 
@@ -188,8 +229,8 @@ export function JoinPage() {
                 <span className="text-emerald-400 font-medium">Code verified</span>
               </div>
               <div className="text-sm text-slate-400">
-                <p>Project: <span className="text-white">{codeInfo.projectName}</span></p>
-                <p>Team: <span className="text-white">{codeInfo.teamName}</span></p>
+                <p>Project: <span className="text-white">{codeInfo.projectName || 'Project'}</span></p>
+                <p>Team: <span className="text-white">{codeInfo.teamName || 'Team'}</span></p>
               </div>
             </div>
 
@@ -225,6 +266,7 @@ export function JoinPage() {
                 onClick={() => {
                   setStep('code');
                   setCodeInfo(null);
+                  setError(null);
                 }}
                 className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
               >

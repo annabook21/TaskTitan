@@ -2930,11 +2930,16 @@ export function request(ctx) {
     attributeValues: util.dynamodb.toMapValues({
       code: code,
       projectId: projectId,
-      teamId: ctx.stash.teamId || '', // Will be set in pipeline if needed
+      projectName: input.projectName || null,  // Denormalized (pass from frontend)
+      teamId: input.teamId || '',
+      teamName: input.teamName || null,        // Denormalized (pass from frontend)
       createdBy: userId,
       ttl: ttl,
       expiresAt: expiresAt,
-      createdAt: createdAt
+      createdAt: createdAt,
+      // GSI1 for listing codes by project
+      gsi1pk: 'PROJECT#' + projectId,
+      gsi1sk: 'SHARE_CODE#' + code
     }),
     condition: {
       expression: 'attribute_not_exists(pk)'
@@ -2950,10 +2955,62 @@ export function response(ctx) {
   return {
     code: item.code,
     projectId: item.projectId,
+    projectName: item.projectName || null,
     teamId: item.teamId,
+    teamName: item.teamName || null,
     expiresAt: item.expiresAt,
-    createdAt: item.createdAt
+    createdAt: item.createdAt,
+    createdBy: item.createdBy
   };
+}
+`.trim()),
+    });
+
+    // Resolver: Query.listShareCodesForProject (Cognito auth) - List share codes for a project
+    // Used by project owners to manage their share codes
+    new appsync.Resolver(this, 'ListShareCodesForProjectResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'listShareCodesForProject',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const projectId = ctx.args.projectId;
+  
+  // Query GSI1 for share codes associated with this project
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'PROJECT#' + projectId,
+        ':sk': 'SHARE_CODE#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  // Filter out expired codes and return
+  const now = Math.floor(Date.now() / 1000);
+  return (ctx.result.items || [])
+    .filter(item => !item.ttl || item.ttl > now)
+    .map(item => ({
+      code: item.code,
+      projectId: item.projectId,
+      projectName: item.projectName,
+      teamId: item.teamId,
+      teamName: item.teamName,
+      expiresAt: item.expiresAt,
+      createdAt: item.createdAt,
+      createdBy: item.createdBy
+    }));
 }
 `.trim()),
     });
@@ -2985,11 +3042,16 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Resolver: Mutation.guestJoinProject (IAM auth) - Create guest user and membership
-    new appsync.Resolver(this, 'GuestJoinProjectResolver', {
+    // ============================================
+    // PIPELINE RESOLVER: guestJoinProject
+    // Step 1: Validate share code
+    // Step 2: Create GUEST# record in DynamoDB
+    // ============================================
+
+    // Function 1: Validate share code and store info in stash
+    const validateShareCodeFn = new appsync.AppsyncFunction(this, 'ValidateShareCodeFn', {
       api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestJoinProject',
+      name: 'validateShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -2997,11 +3059,20 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
   const code = input.code.toUpperCase();
-  const displayName = input.displayName;
-  const guestId = util.autoId();
-  const now = util.time.nowISO8601();
+  const displayName = input.displayName.trim();
   
-  // First, validate the code exists
+  // Get cognitoIdentityId from IAM auth
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  if (!cognitoIdentityId) {
+    util.error('Invalid authentication', 'Unauthorized');
+  }
+  
+  // Store in stash for next function
+  ctx.stash.cognitoIdentityId = cognitoIdentityId;
+  ctx.stash.displayName = displayName;
+  ctx.stash.code = code;
+  
+  // Get the share code to validate it
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
@@ -3014,27 +3085,101 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
+  
   const codeItem = ctx.result;
   if (!codeItem) {
     util.error('Invalid share code', 'InvalidShareCode');
   }
+  
   // Check expiration
-  const now = Math.floor(Date.now() / 1000);
-  if (codeItem.ttl && codeItem.ttl < now) {
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  if (codeItem.ttl && codeItem.ttl < nowEpoch) {
     util.error('Share code has expired', 'ExpiredShareCode');
   }
-  // Store info for next step (would be pipeline resolver in production)
+  
+  // Store code info for the next function in the pipeline
+  ctx.stash.projectId = codeItem.projectId;
+  ctx.stash.projectName = codeItem.projectName || null;
+  ctx.stash.teamId = codeItem.teamId;
+  ctx.stash.teamName = codeItem.teamName || null;
+  
+  return codeItem;
+}
+`.trim()),
+    });
+
+    // Function 2: Create GUEST# record in DynamoDB
+    const createGuestRecordFn = new appsync.AppsyncFunction(this, 'CreateGuestRecordFn', {
+      api: this.api,
+      name: 'createGuestRecord',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.stash.cognitoIdentityId;
+  const now = util.time.nowISO8601();
+  
+  // Create GUEST# record in DynamoDB
   return {
-    guestId: util.autoId(),
-    displayName: ctx.args.input.displayName,
-    projectId: codeItem.projectId,
-    teamId: codeItem.teamId
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: guestId,
+      cognitoIdentityId: guestId,
+      displayName: ctx.stash.displayName,
+      projectId: ctx.stash.projectId,
+      projectName: ctx.stash.projectName,
+      teamId: ctx.stash.teamId,
+      teamName: ctx.stash.teamName,
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      gsi1pk: 'PROJECT#' + ctx.stash.projectId,
+      gsi1sk: 'GUEST#' + guestId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  // Return the guest session
+  return {
+    guestId: ctx.stash.cognitoIdentityId,
+    displayName: ctx.stash.displayName,
+    projectId: ctx.stash.projectId,
+    projectName: ctx.stash.projectName,
+    teamId: ctx.stash.teamId,
+    teamName: ctx.stash.teamName
   };
 }
 `.trim()),
     });
 
+    // Pipeline Resolver: guestJoinProject
+    new appsync.Resolver(this, 'GuestJoinProjectResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestJoinProject',
+      pipelineConfig: [validateShareCodeFn, createGuestRecordFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
     // Resolver: Query.guestGetProject (IAM auth) - Get project for guest
+    // AWS Best Practice: Verify cognitoIdentityId matches the guestId
     new appsync.Resolver(this, 'GuestGetProjectResolver', {
       api: this.api,
       typeName: 'Query',
@@ -3045,7 +3190,19 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
-  // First verify guest exists and get their projectId
+  const projectId = ctx.args.projectId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
+  }
+  
+  // Store guestId for verification in response
+  ctx.stash.guestId = guestId;
+  ctx.stash.projectId = projectId;
+  
+  // First verify the guest exists and has access to this project
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
@@ -3058,33 +3215,63 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
+  
   const guest = ctx.result;
   if (!guest) {
-    util.error('Guest not found', 'GuestNotFound');
+    util.error('Guest session not found. Please rejoin the project.', 'GuestNotFound');
   }
-  // Return project info from guest record
-  // In production, would do a second query for full project data
+  
+  // Verify guest has access to the requested project
+  if (guest.projectId !== ctx.stash.projectId) {
+    util.error('Access denied: You do not have access to this project', 'Unauthorized');
+  }
+  
+  // Return project info from guest record (denormalized during join)
   return {
     id: guest.projectId,
     name: guest.projectName || 'Project',
-    teamId: guest.teamId
+    description: null,
+    teamId: guest.teamId,
+    createdAt: guest.joinedAt,
+    updatedAt: guest.updatedAt
   };
 }
 `.trim()),
     });
 
-    // Resolver: Query.guestListComponents (IAM auth) - List components for guest's project
-    new appsync.Resolver(this, 'GuestListComponentsResolver', {
+    // ============================================
+    // PIPELINE RESOLVER: guestListComponents
+    // Step 1: Verify guest has access to project
+    // Step 2: Query components for project
+    // ============================================
+
+    // Function 1: Verify guest exists and has access to the project
+    const verifyGuestAccessFn = new appsync.AppsyncFunction(this, 'VerifyGuestAccessFn', {
       api: this.api,
-      typeName: 'Query',
-      fieldName: 'guestListComponents',
+      name: 'verifyGuestAccess',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
-  // First verify guest and get projectId
+  const projectId = ctx.args.projectId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
+  }
+  
+  if (!projectId) {
+    util.error('projectId is required', 'BadRequest');
+  }
+  
+  // Store for next function
+  ctx.stash.projectId = projectId;
+  ctx.stash.guestId = guestId;
+  
+  // Verify the guest exists and has access to this project
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
@@ -3097,19 +3284,88 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
+  
   const guest = ctx.result;
   if (!guest) {
-    util.error('Guest not found', 'GuestNotFound');
+    util.error('Guest session not found. Please rejoin the project.', 'GuestNotFound');
   }
-  // Store projectId for component query
-  // In production, this would be a pipeline resolver
-  ctx.stash.projectId = guest.projectId;
-  return [];
+  
+  // Verify guest has access to the requested project
+  if (guest.projectId !== ctx.stash.projectId) {
+    util.error('Access denied: You do not have access to this project', 'Unauthorized');
+  }
+  
+  ctx.stash.guestVerified = true;
+  return guest;
+}
+`.trim()),
+    });
+
+    // Function 2: Query components for the project
+    const listComponentsForGuestFn = new appsync.AppsyncFunction(this, 'ListComponentsForGuestFn', {
+      api: this.api,
+      name: 'listComponentsForGuest',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const projectId = ctx.stash.projectId;
+  
+  // Query components for this project using GSI1
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'PROJECT#' + projectId,
+        ':sk': 'COMPONENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  // Return components list
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    name: item.name,
+    description: item.description,
+    type: item.type,
+    status: item.status,
+    projectId: item.projectId,
+    parentId: item.parentId,
+    estimatedHours: item.estimatedHours,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  }));
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: guestListComponents
+    new appsync.Resolver(this, 'GuestListComponentsResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'guestListComponents',
+      pipelineConfig: [verifyGuestAccessFn, listComponentsForGuestFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
 }
 `.trim()),
     });
 
     // Resolver: Query.guestListAssignments (IAM auth) - List guest's assignments
+    // AWS Best Practice: Verify cognitoIdentityId matches guestId
     new appsync.Resolver(this, 'GuestListAssignmentsResolver', {
       api: this.api,
       typeName: 'Query',
@@ -3120,6 +3376,13 @@ export function response(ctx) {
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own assignments', 'Unauthorized');
+  }
+  
   // Query GSI1 for guest's assignments
   return {
     operation: 'Query',
@@ -3137,6 +3400,7 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
+  
   // Map to AssignmentWithComponent format
   return (ctx.result.items || []).map(item => ({
     assignment: {
@@ -3145,17 +3409,28 @@ export function response(ctx) {
       userId: item.guestId,
       assignedAt: item.assignedAt
     },
-    component: item.component || { id: item.componentId, name: 'Component' }
+    component: {
+      id: item.componentId,
+      name: item.componentName || 'Component',
+      status: item.componentStatus,
+      type: item.componentType,
+      projectId: item.projectId
+    }
   }));
 }
 `.trim()),
     });
 
-    // Resolver: Mutation.guestAssignSelf (IAM auth) - Guest assigns self to component
-    new appsync.Resolver(this, 'GuestAssignSelfResolver', {
+    // ============================================
+    // PIPELINE RESOLVER: guestAssignSelf
+    // Step 1: Fetch component details for denormalization
+    // Step 2: Create assignment with denormalized component data
+    // ============================================
+
+    // Function 1: Fetch component details
+    const fetchComponentForAssignmentFn = new appsync.AppsyncFunction(this, 'FetchComponentForAssignmentFn', {
       api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestAssignSelf',
+      name: 'fetchComponentForAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -3163,9 +3438,64 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
   const componentId = ctx.args.componentId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller can only assign themselves
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only assign yourself', 'Unauthorized');
+  }
+  
+  // Store for next function
+  ctx.stash.guestId = guestId;
+  ctx.stash.componentId = componentId;
+  ctx.stash.cognitoIdentityId = cognitoIdentityId;
+  
+  // Fetch the component to get its details for denormalization
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const component = ctx.result;
+  if (!component) {
+    util.error('Component not found', 'ComponentNotFound');
+  }
+  
+  // Store component details for denormalization
+  ctx.stash.componentName = component.name;
+  ctx.stash.componentStatus = component.status;
+  ctx.stash.componentType = component.type;
+  ctx.stash.projectId = component.projectId;
+  
+  return component;
+}
+`.trim()),
+    });
+
+    // Function 2: Create assignment with denormalized component data
+    const createGuestAssignmentFn = new appsync.AppsyncFunction(this, 'CreateGuestAssignmentFn', {
+      api: this.api,
+      name: 'createGuestAssignment',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.stash.guestId;
+  const componentId = ctx.stash.componentId;
+  const cognitoIdentityId = ctx.stash.cognitoIdentityId;
   const assignmentId = util.autoId();
   const now = util.time.nowISO8601();
   
+  // Create assignment with denormalized component data for efficient queries
   return {
     operation: 'PutItem',
     key: util.dynamodb.toMapValues({
@@ -3176,8 +3506,15 @@ export function request(ctx) {
       id: assignmentId,
       componentId: componentId,
       guestId: guestId,
+      cognitoIdentityId: cognitoIdentityId,
       assignedAt: now,
       isGuest: true,
+      // Denormalized component data for efficient list queries
+      componentName: ctx.stash.componentName,
+      componentStatus: ctx.stash.componentStatus,
+      componentType: ctx.stash.componentType,
+      projectId: ctx.stash.projectId,
+      // GSI1 for querying guest's assignments
       gsi1pk: 'GUEST#' + guestId,
       gsi1sk: 'ASSIGNMENT#' + componentId
     }),
@@ -3193,6 +3530,7 @@ export function response(ctx) {
     }
     util.error(ctx.error.message, ctx.error.type);
   }
+  
   const item = ctx.result;
   return {
     id: item.id,
@@ -3204,7 +3542,25 @@ export function response(ctx) {
 `.trim()),
     });
 
+    // Pipeline Resolver: guestAssignSelf
+    new appsync.Resolver(this, 'GuestAssignSelfResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestAssignSelf',
+      pipelineConfig: [fetchComponentForAssignmentFn, createGuestAssignmentFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
     // Resolver: Mutation.guestUnassignSelf (IAM auth) - Guest removes self from component
+    // AWS Best Practice: Verify cognitoIdentityId matches guestId (can only unassign self)
     new appsync.Resolver(this, 'GuestUnassignSelfResolver', {
       api: this.api,
       typeName: 'Mutation',
@@ -3216,6 +3572,12 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
   const componentId = ctx.args.componentId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller can only unassign themselves
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only unassign yourself', 'Unauthorized');
+  }
   
   return {
     operation: 'DeleteItem',
@@ -3224,14 +3586,18 @@ export function request(ctx) {
       sk: 'ASSIGNEE#GUEST#' + guestId
     }),
     condition: {
-      expression: 'attribute_exists(pk)'
+      // Verify the assignment exists and belongs to this guest
+      expression: 'attribute_exists(pk) AND cognitoIdentityId = :cognitoId',
+      expressionValues: util.dynamodb.toMapValues({
+        ':cognitoId': cognitoIdentityId
+      })
     }
   };
 }
 export function response(ctx) {
   if (ctx.error) {
     if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-      util.error('Not assigned to this component', 'NotAssigned');
+      util.error('Not assigned to this component or unauthorized', 'NotAssigned');
     }
     util.error(ctx.error.message, ctx.error.type);
   }
@@ -3240,11 +3606,16 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Resolver: Mutation.guestUpdateStatus (IAM auth) - Guest updates component status
-    new appsync.Resolver(this, 'GuestUpdateStatusResolver', {
+    // ============================================
+    // PIPELINE RESOLVER: guestUpdateStatus
+    // Step 1: Verify guest is assigned to component
+    // Step 2: Update component status in DynamoDB
+    // ============================================
+
+    // Function 1: Verify guest is assigned to the component
+    const verifyGuestAssignmentFn = new appsync.AppsyncFunction(this, 'VerifyGuestAssignmentFn', {
       api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestUpdateStatus',
+      name: 'verifyGuestAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -3253,10 +3624,62 @@ export function request(ctx) {
   const guestId = ctx.args.guestId;
   const componentId = ctx.args.componentId;
   const status = ctx.args.status;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller's identity matches the guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only update status for your own assignments', 'Unauthorized');
+  }
+  
+  // Store args for next function
+  ctx.stash.componentId = componentId;
+  ctx.stash.status = status;
+  ctx.stash.guestId = guestId;
+  
+  // Verify the guest is assigned to this component
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const assignment = ctx.result;
+  if (!assignment) {
+    util.error('You must be assigned to this component to update its status', 'NotAssigned');
+  }
+  
+  // Verify the assignment belongs to this identity
+  if (assignment.cognitoIdentityId && assignment.cognitoIdentityId !== ctx.identity.cognitoIdentityId) {
+    util.error('Access denied: Assignment does not belong to you', 'Unauthorized');
+  }
+  
+  ctx.stash.assignmentVerified = true;
+  return assignment;
+}
+`.trim()),
+    });
+
+    // Function 2: Update component status in DynamoDB
+    const updateComponentStatusFn = new appsync.AppsyncFunction(this, 'UpdateComponentStatusFn', {
+      api: this.api,
+      name: 'updateComponentStatus',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  const status = ctx.stash.status;
   const now = util.time.nowISO8601();
   
-  // Update component status
-  // In production, would first verify guest is assigned to this component
+  // Update the component status in DynamoDB
   return {
     operation: 'UpdateItem',
     key: util.dynamodb.toMapValues({
@@ -3280,7 +3703,38 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-  return ctx.result;
+  
+  // Return the updated component
+  const item = ctx.result;
+  return {
+    id: item.id || ctx.stash.componentId,
+    name: item.name,
+    description: item.description,
+    type: item.type,
+    status: item.status || ctx.stash.status,
+    projectId: item.projectId,
+    parentId: item.parentId,
+    estimatedHours: item.estimatedHours,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  };
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: guestUpdateStatus
+    new appsync.Resolver(this, 'GuestUpdateStatusResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestUpdateStatus',
+      pipelineConfig: [verifyGuestAssignmentFn, updateComponentStatusFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
 }
 `.trim()),
     });

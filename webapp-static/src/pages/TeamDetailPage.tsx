@@ -441,7 +441,7 @@ export function TeamDetailPage() {
                 const displayName = member.user?.name || member.user?.email || 'Unknown User';
                 const displayEmail = member.user?.email || member.userId;
                 const initial = (member.user?.name?.[0] || member.user?.email?.[0] || 'U').toUpperCase();
-                const canViewWorkload = isOwner || isAdmin;
+                const canViewWorkload = isOwnerOrAdmin;
                 
                 return (
                   <button
@@ -486,7 +486,7 @@ export function TeamDetailPage() {
                 );
               })}
             </div>
-            {(isOwner || isAdmin) && (
+            {isOwnerOrAdmin && (
               <p className="mt-4 pt-3 border-t border-slate-700/50 text-xs text-slate-500">
                 Click a member to view their workload
               </p>

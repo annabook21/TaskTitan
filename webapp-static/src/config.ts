@@ -18,6 +18,9 @@ export const config = {
       // Identity Pool for guest (unauthenticated) access via share codes
       // AWS Best Practice: Use Identity Pool with IAM for temporary guest credentials
       identityPoolId: identityPoolId || '',
+      // Enable guest access for Amplify v6 to use unauthenticated Identity Pool credentials
+      // Reference: https://docs.amplify.aws/gen2/build-a-backend/auth/connect-your-frontend/guest-access/
+      allowGuestAccess: true,
       loginWith: {
         oauth: {
           domain: cognitoDomain || '',
