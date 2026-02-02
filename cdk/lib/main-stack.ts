@@ -65,8 +65,13 @@ export class MainStack extends Stack {
     // Guest Identity Pool for share code feature
     // AWS Best Practice: Cognito Identity Pool with unauthenticated role for guest access
     // Reference: https://docs.aws.amazon.com/cognito/latest/developerguide/identity-pools-security-best-practices.html
+    //
+    // IMPORTANT: The Identity Pool must be linked to the User Pool for Amplify v6 compatibility.
+    // This allows Amplify to properly handle both authenticated and guest flows.
     const guestIdentityPool = new GuestIdentityPool(this, 'GuestIdentityPool', {
       appSyncApi: appSyncGraphql.api,
+      userPool: auth.userPool,
+      userPoolClient: auth.client,
     });
 
     // PRESENTATION TIER: CloudFront + S3 static frontend

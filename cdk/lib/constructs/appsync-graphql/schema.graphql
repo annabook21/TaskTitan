@@ -15,7 +15,7 @@ type User {
   notificationsReadUntil: String
 }
 
-type Project {
+type Project @aws_cognito_user_pools @aws_iam {
   id: ID!
   name: String!
   description: String
@@ -82,7 +82,7 @@ type SprintWithComponents {
   components: [Component!]!
 }
 
-type Component {
+type Component @aws_cognito_user_pools @aws_iam {
   id: ID!
   name: String!
   description: String
@@ -129,7 +129,7 @@ type Dependency {
 
 # Assignment represents a user assigned to a component
 # pk=COMPONENT#componentId, sk=ASSIGNEE#userId, gsi1pk=USER#userId, gsi1sk=ASSIGNMENT#componentId
-type Assignment {
+type Assignment @aws_cognito_user_pools @aws_iam {
   id: ID!
   componentId: ID!
   userId: ID!
@@ -139,7 +139,7 @@ type Assignment {
 }
 
 # For MyTasksPage - returns assignments with full component details
-type AssignmentWithComponent {
+type AssignmentWithComponent @aws_cognito_user_pools @aws_iam {
   assignment: Assignment!
   component: Component!
 }
@@ -207,6 +207,75 @@ type Notification {
   createdAt: String!
 }
 
+# ============================================
+# Comments System
+# ============================================
+
+# Author type for comments (USER or GUEST)
+enum AuthorType {
+  USER
+  GUEST
+}
+
+# Comment on a component
+# pk=COMPONENT#componentId, sk=COMMENT#createdAt#id
+type Comment @aws_cognito_user_pools @aws_iam {
+  id: ID!
+  componentId: ID!
+  projectId: ID!
+  authorId: ID!
+  authorType: AuthorType!
+  authorName: String!
+  content: String!
+  mentions: [String!]
+  createdAt: String!
+}
+
+# Team member suggestion for @mentions autocomplete
+type TeamMemberSuggestion {
+  id: ID!
+  name: String!
+  isGuest: Boolean!
+}
+
+# ============================================
+# Guest Notifications
+# ============================================
+
+# Notification types for guests (separate from user notifications)
+enum GuestNotificationType {
+  TASK_ASSIGNED
+  TASK_UNASSIGNED
+  TASK_STATUS_CHANGED
+  TASK_MENTIONED
+}
+
+# Guest notification: notifications for guests
+# pk=GUEST#guestId, sk=NOTIFICATION#createdAt#id
+type GuestNotification @aws_iam {
+  id: ID!
+  guestId: ID!
+  type: GuestNotificationType!
+  title: String!
+  message: String!
+  componentId: String
+  projectId: String
+  read: Boolean!
+  createdAt: String!
+}
+
+# Activity with author information for guest activity feed
+type ActivityWithAuthor @aws_iam {
+  id: ID!
+  type: ActivityType!
+  projectId: String!
+  authorId: String!
+  authorName: String
+  authorType: AuthorType!
+  metadata: String
+  createdAt: String!
+}
+
 # TeamWorkflowConfig: workflow settings for a team
 # pk=TEAM#teamId, sk=WORKFLOW_CONFIG
 # Best practice: Direct DynamoDB GetItem for O(1) config reads
@@ -260,7 +329,7 @@ input SyncUserProfileInput {
   name: String!
 }
 
-type RegisterUserResult {
+type RegisterUserResult @aws_api_key @aws_cognito_user_pools {
   success: Boolean!
   message: String!
 }
@@ -308,7 +377,7 @@ type ShareCode {
 }
 
 # Result of validating a share code (unauthenticated via API_KEY)
-type ShareCodeInfo {
+type ShareCodeInfo @aws_api_key {
   valid: Boolean!
   projectId: ID
   projectName: String
@@ -319,7 +388,7 @@ type ShareCodeInfo {
 
 # Guest session after joining with share code
 # guestId is the Cognito Identity Pool identity ID for security validation
-type GuestSession {
+type GuestSession @aws_iam {
   guestId: ID!
   displayName: String!
   projectId: ID!
@@ -416,6 +485,36 @@ type Query {
   # List active share codes for a project (owner/admin only - Cognito auth)
   # Used by project owners to manage their share codes
   listShareCodesForProject(projectId: ID!): [ShareCode!]!
+
+  # ============================================
+  # Comments Queries
+  # ============================================
+
+  # List comments for a component (Cognito auth)
+  # DynamoDB: Query pk=COMPONENT#componentId, sk begins_with COMMENT#
+  listCommentsForComponent(componentId: ID!, limit: Int): [Comment!]!
+
+  # Guest: List comments for a component they can access (IAM auth)
+  # Verifies guest has access to the component's project
+  guestListComments(guestId: ID!, componentId: ID!, limit: Int): [Comment!]! @aws_iam
+
+  # Search team members for @mentions autocomplete (Cognito auth)
+  # Returns users and guests in the team matching the query
+  searchTeamMembersForMention(teamId: ID!, query: String!): [TeamMemberSuggestion!]!
+
+  # ============================================
+  # Guest Activity Feed & Notifications Queries
+  # ============================================
+
+  # Guest: List activity on assigned components (IAM auth)
+  # Returns activity where the guest is assigned to the component
+  guestListActivityFeed(guestId: ID!, projectId: ID!, limit: Int): [ActivityWithAuthor!]! @aws_iam
+
+  # Guest: List notifications (IAM auth)
+  guestListNotifications(guestId: ID!, limit: Int): [GuestNotification!]! @aws_iam
+
+  # Guest: Count unread notifications (IAM auth)
+  guestCountUnreadNotifications(guestId: ID!): Int! @aws_iam
 }
 
 input CreateProjectInput {
@@ -569,6 +668,29 @@ input RefineComponentInput {
   refinementRequest: String!
 }
 
+# Input for guest refining a component via chat (IAM auth)
+# guestId is verified against cognitoIdentityId
+# componentId is used to fetch component details and verify assignment
+input GuestRefineComponentInput {
+  guestId: ID!
+  componentId: ID!
+  refinementRequest: String!
+}
+
+# Input for guest updating a component (IAM auth)
+# Only allowed for components the guest is assigned to
+# Used to apply AI refinement suggestions
+input GuestUpdateComponentInput {
+  guestId: ID!
+  componentId: ID!
+  name: String
+  description: String
+  type: ComponentType
+  estimatedHours: Float
+  priority: Int
+  acceptanceCriteria: [String!]
+}
+
 # Component structure for natural language operations
 input NaturalLanguageComponentInput {
   name: String!
@@ -667,7 +789,7 @@ type ApplyPlanResult {
 }
 
 # Result of component refinement
-type RefineComponentResult {
+type RefineComponentResult @aws_iam @aws_cognito_user_pools {
   component: GeneratedComponentOutput!
   explanation: String!
   suggestedFollowUps: [String!]!
@@ -1002,6 +1124,40 @@ type Mutation {
   # Guest updates component status (IAM auth)
   # Only allowed on components the guest is assigned to
   guestUpdateStatus(guestId: ID!, componentId: ID!, status: ComponentStatus!): Component! @aws_iam
+
+  # Guest refines component via AI chat (IAM auth)
+  # Only allowed on components the guest is assigned to
+  # Uses existing chat-refinement-generator for AI processing
+  guestRefineComponent(input: GuestRefineComponentInput!): RefineComponentResult! @aws_iam
+
+  # Guest updates component fields (IAM auth)
+  # Only allowed on components the guest is assigned to
+  # Used to apply AI refinement suggestions
+  guestUpdateComponent(input: GuestUpdateComponentInput!): Component! @aws_iam
+
+  # ============================================
+  # Comments Mutations
+  # ============================================
+
+  # Create a comment on a component (Cognito auth)
+  # Accepts optional mentions array (user IDs) for notification creation
+  createComment(componentId: ID!, content: String!, mentions: [String!]): Comment!
+
+  # Guest: Create a comment on a component (IAM auth)
+  # Verifies guest has access to the component's project
+  # Accepts optional mentions array (user IDs) for notification creation
+  guestCreateComment(guestId: ID!, componentId: ID!, content: String!, mentions: [String!]): Comment! @aws_iam
+
+  # ============================================
+  # Guest Notification Mutations
+  # ============================================
+
+  # Guest: Mark notification as read (IAM auth)
+  guestMarkNotificationRead(guestId: ID!, notificationId: ID!): GuestNotification! @aws_iam
+
+  # Guest: Mark all notifications as read (IAM auth)
+  # Uses timestamp-based marker for O(1) operation
+  guestMarkAllNotificationsRead(guestId: ID!): Int! @aws_iam
 }
 
 type Subscription {

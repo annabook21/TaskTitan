@@ -1,8 +1,10 @@
 /**
- * AppSync Lambda Handler: refineComponent
+ * AppSync Lambda Handler: guestRefineComponent
  *
  * Refines a single component via conversational chat using AI.
  * Uses the existing chat-refinement-generator.
+ *
+ * COPIED FROM appsync-refine-component.ts with guest assignment verification added.
  */
 
 import { Logger } from '@aws-lambda-powertools/logger';
@@ -11,20 +13,11 @@ import { getDynamoDBClient, getTableName } from '@/lib/dynamodb';
 import { GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import type { ChatRefinementInput, NaturalLanguageComponentResult } from '@/lib/ai/types';
 
-const logger = new Logger({ serviceName: 'AppSyncRefineComponent' });
+const logger = new Logger({ serviceName: 'AppSyncGuestRefineComponent' });
 
-export interface RefineComponentInput {
-  projectId: string;
-  currentComponent: {
-    name: string;
-    description: string;
-    type: 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG';
-    estimatedHours: number;
-    priority: number;
-    suggestedDependencies: string[];
-    reasoning: string;
-    acceptanceCriteria?: string[] | null;
-  };
+export interface GuestRefineComponentInput {
+  guestId: string;
+  componentId: string;
   refinementRequest: string;
 }
 
@@ -44,27 +37,61 @@ export interface RefineComponentResult {
 }
 
 /**
- * Handler for refining a single component via chat
+ * Handler for guest refining a component via chat
+ * EXACT COPY of handleAppSyncRefineComponent with guest assignment check
  */
-export async function handleAppSyncRefineComponent(
-  input: RefineComponentInput,
-  identity?: { sub?: string }
+export async function handleAppSyncGuestRefineComponent(
+  input: GuestRefineComponentInput,
+  identity?: { cognitoIdentityId?: string }
 ): Promise<RefineComponentResult> {
-  logger.info('Refining component', {
-    projectId: input.projectId,
-    componentName: input.currentComponent.name,
-    userId: identity?.sub,
+  logger.info('Guest refining component', {
+    guestId: input.guestId,
+    componentId: input.componentId,
+    cognitoIdentityId: identity?.cognitoIdentityId,
   });
 
   const client = getDynamoDBClient();
   const tableName = getTableName();
 
-  // Fetch project for context
+  // GUEST-SPECIFIC: Verify guest is assigned to this component
+  const assignmentResponse = await client.send(
+    new GetCommand({
+      TableName: tableName,
+      Key: {
+        pk: `COMPONENT#${input.componentId}`,
+        sk: `ASSIGNEE#GUEST#${input.guestId}`,
+      },
+    })
+  );
+
+  if (!assignmentResponse.Item) {
+    throw new Error('You must be assigned to this component to refine it');
+  }
+
+  // Fetch the component details
+  const componentResponse = await client.send(
+    new GetCommand({
+      TableName: tableName,
+      Key: {
+        pk: `COMPONENT#${input.componentId}`,
+        sk: 'METADATA',
+      },
+    })
+  );
+
+  const component = componentResponse.Item;
+  if (!component) {
+    throw new Error('Component not found');
+  }
+
+  const projectId = component.projectId as string;
+
+  // Fetch project for context (SAME AS AUTHENTICATED)
   const projectResponse = await client.send(
     new GetCommand({
       TableName: tableName,
       Key: {
-        pk: `PROJECT#${input.projectId}`,
+        pk: `PROJECT#${projectId}`,
         sk: 'METADATA',
       },
     })
@@ -75,14 +102,14 @@ export async function handleAppSyncRefineComponent(
     throw new Error('Project not found');
   }
 
-  // Fetch existing components for context
+  // Fetch existing components for context (SAME AS AUTHENTICATED)
   const componentsResponse = await client.send(
     new QueryCommand({
       TableName: tableName,
       IndexName: 'gsi1',
       KeyConditionExpression: 'gsi1pk = :pk',
       ExpressionAttributeValues: {
-        ':pk': `PROJECT#${input.projectId}`,
+        ':pk': `PROJECT#${projectId}`,
       },
     })
   );
@@ -94,16 +121,16 @@ export async function handleAppSyncRefineComponent(
       type: item.type as string,
     }));
 
-  // Prepare input for the chat refinement generator
+  // Prepare input for the chat refinement generator (SAME AS AUTHENTICATED)
   const currentComponent: NaturalLanguageComponentResult = {
-    name: input.currentComponent.name,
-    description: input.currentComponent.description,
-    type: input.currentComponent.type,
-    estimatedHours: input.currentComponent.estimatedHours,
-    priority: input.currentComponent.priority,
-    suggestedDependencies: input.currentComponent.suggestedDependencies,
-    reasoning: input.currentComponent.reasoning,
-    acceptanceCriteria: input.currentComponent.acceptanceCriteria || undefined,
+    name: component.name as string,
+    description: (component.description as string) || '',
+    type: component.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG',
+    estimatedHours: (component.estimatedHours as number) || 0,
+    priority: (component.priority as number) || 5,
+    suggestedDependencies: (component.suggestedDependencies as string[]) || [],
+    reasoning: 'Existing component being refined',
+    acceptanceCriteria: (component.acceptanceCriteria as string[]) || undefined,
   };
 
   const refinementInput: ChatRefinementInput = {
@@ -116,22 +143,24 @@ export async function handleAppSyncRefineComponent(
     },
   };
 
-  // Call the AI refinement generator
+  // Call the AI refinement generator (SAME AS AUTHENTICATED)
   const result = await refineComponentWithChat(refinementInput);
 
   logger.info('Bedrock token usage', {
-    operation: 'refineComponent',
+    operation: 'guestRefineComponent',
+    guestId: input.guestId,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
     totalTokens: (result.inputTokens || 0) + (result.outputTokens || 0),
   });
 
   logger.info('Component refined successfully', {
-    originalName: input.currentComponent.name,
+    originalName: component.name,
     newName: result.component.name,
     explanation: result.explanation,
   });
 
+  // EXACT SAME RETURN AS AUTHENTICATED
   return {
     component: {
       name: result.component.name,

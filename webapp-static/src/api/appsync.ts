@@ -311,6 +311,53 @@ export type Notification = {
   createdAt: string;
 };
 
+// Comment types for component discussions
+export type AuthorType = 'USER' | 'GUEST';
+
+export type Comment = {
+  id: string;
+  componentId: string;
+  projectId: string;
+  authorId: string;
+  authorType: AuthorType;
+  authorName: string;
+  content: string;
+  mentions?: string[] | null;
+  createdAt: string;
+};
+
+export type CreateCommentInput = {
+  componentId: string;
+  content: string;
+  mentions?: string[];
+};
+
+// @mentions autocomplete types
+export type TeamMemberSuggestion = {
+  id: string;
+  name: string;
+  isGuest: boolean;
+};
+
+// Guest notification types
+export type GuestNotificationType =
+  | 'TASK_ASSIGNED'
+  | 'TASK_UNASSIGNED'
+  | 'TASK_STATUS_CHANGED'
+  | 'TASK_MENTIONED';
+
+export type GuestNotification = {
+  id: string;
+  guestId: string;
+  type: GuestNotificationType;
+  title: string;
+  message: string;
+  componentId?: string | null;
+  projectId?: string | null;
+  read: boolean;
+  createdAt: string;
+};
+
 // Phase 9: Workflow Config & Metrics types
 export type TeamWorkflowConfig = {
   id: string;
@@ -1084,6 +1131,39 @@ const MarkAllNotificationsRead = /* GraphQL */ `
   }
 `;
 
+// Comment queries and mutations
+const ListCommentsForComponent = /* GraphQL */ `
+  query ListCommentsForComponent($componentId: ID!, $limit: Int) {
+    listCommentsForComponent(componentId: $componentId, limit: $limit) {
+      id
+      componentId
+      projectId
+      authorId
+      authorType
+      authorName
+      content
+      mentions
+      createdAt
+    }
+  }
+`;
+
+const CreateComment = /* GraphQL */ `
+  mutation CreateComment($componentId: ID!, $content: String!, $mentions: [String!]) {
+    createComment(componentId: $componentId, content: $content, mentions: $mentions) {
+      id
+      componentId
+      projectId
+      authorId
+      authorType
+      authorName
+      content
+      mentions
+      createdAt
+    }
+  }
+`;
+
 const GetTeamWorkflowConfig = /* GraphQL */ `
   query GetTeamWorkflowConfig($teamId: ID!) {
     getTeamWorkflowConfig(teamId: $teamId) {
@@ -1630,6 +1710,358 @@ export async function markAllNotificationsRead(): Promise<number> {
     query: MarkAllNotificationsRead,
   });
   return (result as { data: { markAllNotificationsRead: number } }).data.markAllNotificationsRead ?? 0;
+}
+
+// Comment API functions
+export async function listCommentsForComponent(componentId: string, limit?: number): Promise<Comment[]> {
+  const result = await getClient().graphql({
+    query: ListCommentsForComponent,
+    variables: { componentId, limit },
+  });
+  extractGraphQLError(result, 'listCommentsForComponent');
+  return (result as { data: { listCommentsForComponent: Comment[] } }).data.listCommentsForComponent ?? [];
+}
+
+export async function createComment(input: CreateCommentInput): Promise<Comment> {
+  const result = await getClient().graphql({
+    query: CreateComment,
+    variables: {
+      componentId: input.componentId,
+      content: input.content,
+      mentions: input.mentions,
+    },
+  });
+  extractGraphQLError(result, 'createComment');
+  const comment = (result as { data: { createComment: Comment } }).data.createComment;
+  if (!comment) throw new Error('createComment returned null');
+  return comment;
+}
+
+// Guest comment API functions (IAM auth via Identity Pool)
+const GuestListComments = /* GraphQL */ `
+  query GuestListComments($guestId: ID!, $componentId: ID!, $limit: Int) {
+    guestListComments(guestId: $guestId, componentId: $componentId, limit: $limit) {
+      id
+      componentId
+      projectId
+      authorId
+      authorType
+      authorName
+      content
+      mentions
+      createdAt
+    }
+  }
+`;
+
+const GuestCreateComment = /* GraphQL */ `
+  mutation GuestCreateComment($guestId: ID!, $componentId: ID!, $content: String!, $mentions: [String!]) {
+    guestCreateComment(guestId: $guestId, componentId: $componentId, content: $content, mentions: $mentions) {
+      id
+      componentId
+      projectId
+      authorId
+      authorType
+      authorName
+      content
+      mentions
+      createdAt
+    }
+  }
+`;
+
+/**
+ * List comments for a component as a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestListComments(guestId: string, componentId: string, limit?: number): Promise<Comment[]> {
+  const result = await getClient().graphql({
+    query: GuestListComments,
+    variables: { guestId, componentId, limit },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestListComments');
+  return (result as { data: { guestListComments: Comment[] } }).data.guestListComments ?? [];
+}
+
+/**
+ * Create a comment as a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestCreateComment(guestId: string, componentId: string, content: string, mentions?: string[]): Promise<Comment> {
+  const result = await getClient().graphql({
+    query: GuestCreateComment,
+    variables: { guestId, componentId, content, mentions },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestCreateComment');
+  const comment = (result as { data: { guestCreateComment: Comment } }).data.guestCreateComment;
+  if (!comment) throw new Error('guestCreateComment returned null');
+  return comment;
+}
+
+// Guest AI refinement API (IAM auth via Identity Pool)
+export type GuestRefineComponentInput = {
+  guestId: string;
+  componentId: string;
+  refinementRequest: string;
+};
+
+const GuestRefineComponent = /* GraphQL */ `
+  mutation GuestRefineComponent($input: GuestRefineComponentInput!) {
+    guestRefineComponent(input: $input) {
+      component {
+        name
+        description
+        type
+        estimatedHours
+        priority
+        suggestedDependencies
+        parentName
+        acceptanceCriteria
+      }
+      explanation
+      suggestedFollowUps
+    }
+  }
+`;
+
+/**
+ * Refine a component via AI chat as a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ * Guest must be assigned to the component.
+ */
+export async function guestRefineComponent(input: GuestRefineComponentInput): Promise<RefineComponentResult> {
+  const result = await getClient().graphql({
+    query: GuestRefineComponent,
+    variables: { input },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestRefineComponent');
+  const refined = (result as { data: { guestRefineComponent: RefineComponentResult } }).data.guestRefineComponent;
+  if (!refined) throw new Error('guestRefineComponent returned null');
+  return refined;
+}
+
+// Guest update component (apply AI refinement)
+export type GuestUpdateComponentInput = {
+  guestId: string;
+  componentId: string;
+  name?: string;
+  description?: string;
+  type?: ComponentType;
+  estimatedHours?: number;
+  priority?: number;
+  acceptanceCriteria?: string[];
+};
+
+const GuestUpdateComponent = /* GraphQL */ `
+  mutation GuestUpdateComponent($input: GuestUpdateComponentInput!) {
+    guestUpdateComponent(input: $input) {
+      id
+      name
+      description
+      type
+      projectId
+      parentId
+      sprintId
+      status
+      priority
+      estimatedHours
+      actualHours
+      dueDate
+      owner
+      tags
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+/**
+ * Update a component as a guest (IAM auth).
+ * Used to apply AI refinement suggestions.
+ * guestId must match the caller's Cognito Identity ID.
+ * Guest must be assigned to the component.
+ */
+export async function guestUpdateComponent(input: GuestUpdateComponentInput): Promise<Component> {
+  const result = await getClient().graphql({
+    query: GuestUpdateComponent,
+    variables: { input },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestUpdateComponent');
+  const component = (result as { data: { guestUpdateComponent: Component } }).data.guestUpdateComponent;
+  if (!component) throw new Error('guestUpdateComponent returned null');
+  return component;
+}
+
+// @mentions autocomplete API
+const SearchTeamMembersForMention = /* GraphQL */ `
+  query SearchTeamMembersForMention($teamId: ID!, $query: String!) {
+    searchTeamMembersForMention(teamId: $teamId, query: $query) {
+      id
+      name
+      isGuest
+    }
+  }
+`;
+
+/**
+ * Search team members for @mention autocomplete.
+ * Returns users and guests matching the query string.
+ */
+export async function searchTeamMembersForMention(teamId: string, query: string): Promise<TeamMemberSuggestion[]> {
+  const result = await getClient().graphql({
+    query: SearchTeamMembersForMention,
+    variables: { teamId, query },
+  });
+  extractGraphQLError(result, 'searchTeamMembersForMention');
+  return (result as { data: { searchTeamMembersForMention: TeamMemberSuggestion[] } }).data.searchTeamMembersForMention ?? [];
+}
+
+// Guest notification API (IAM auth via Identity Pool)
+const GuestListNotifications = /* GraphQL */ `
+  query GuestListNotifications($guestId: ID!, $limit: Int) {
+    guestListNotifications(guestId: $guestId, limit: $limit) {
+      id
+      guestId
+      type
+      title
+      message
+      componentId
+      projectId
+      read
+      createdAt
+    }
+  }
+`;
+
+const GuestCountUnreadNotifications = /* GraphQL */ `
+  query GuestCountUnreadNotifications($guestId: ID!) {
+    guestCountUnreadNotifications(guestId: $guestId)
+  }
+`;
+
+const GuestMarkNotificationRead = /* GraphQL */ `
+  mutation GuestMarkNotificationRead($guestId: ID!, $notificationId: ID!) {
+    guestMarkNotificationRead(guestId: $guestId, notificationId: $notificationId) {
+      id
+      guestId
+      type
+      title
+      message
+      componentId
+      projectId
+      read
+      createdAt
+    }
+  }
+`;
+
+const GuestMarkAllNotificationsRead = /* GraphQL */ `
+  mutation GuestMarkAllNotificationsRead($guestId: ID!) {
+    guestMarkAllNotificationsRead(guestId: $guestId)
+  }
+`;
+
+/**
+ * List notifications for a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestListNotifications(guestId: string, limit?: number): Promise<GuestNotification[]> {
+  const result = await getClient().graphql({
+    query: GuestListNotifications,
+    variables: { guestId, limit },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestListNotifications');
+  return (result as { data: { guestListNotifications: GuestNotification[] } }).data.guestListNotifications ?? [];
+}
+
+/**
+ * Count unread notifications for a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestCountUnreadNotifications(guestId: string): Promise<number> {
+  const result = await getClient().graphql({
+    query: GuestCountUnreadNotifications,
+    variables: { guestId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestCountUnreadNotifications');
+  return (result as { data: { guestCountUnreadNotifications: number } }).data.guestCountUnreadNotifications ?? 0;
+}
+
+/**
+ * Mark a single notification as read for a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestMarkNotificationRead(guestId: string, notificationId: string): Promise<GuestNotification> {
+  const result = await getClient().graphql({
+    query: GuestMarkNotificationRead,
+    variables: { guestId, notificationId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestMarkNotificationRead');
+  const notification = (result as { data: { guestMarkNotificationRead: GuestNotification } }).data.guestMarkNotificationRead;
+  if (!notification) throw new Error('guestMarkNotificationRead returned null');
+  return notification;
+}
+
+/**
+ * Mark all notifications as read for a guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ */
+export async function guestMarkAllNotificationsRead(guestId: string): Promise<number> {
+  const result = await getClient().graphql({
+    query: GuestMarkAllNotificationsRead,
+    variables: { guestId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestMarkAllNotificationsRead');
+  return (result as { data: { guestMarkAllNotificationsRead: number } }).data.guestMarkAllNotificationsRead ?? 0;
+}
+
+// Guest activity feed API (IAM auth via Identity Pool)
+export type ActivityWithAuthor = {
+  id: string;
+  type: ActivityType;
+  projectId: string;
+  authorId: string;
+  authorName?: string | null;
+  authorType: AuthorType;
+  metadata?: string | null;
+  createdAt: string;
+};
+
+const GuestListActivityFeed = /* GraphQL */ `
+  query GuestListActivityFeed($guestId: ID!, $projectId: ID!, $limit: Int) {
+    guestListActivityFeed(guestId: $guestId, projectId: $projectId, limit: $limit) {
+      id
+      type
+      projectId
+      authorId
+      authorName
+      authorType
+      metadata
+      createdAt
+    }
+  }
+`;
+
+/**
+ * List activity feed for a guest (IAM auth).
+ * Returns recent activity on the project.
+ */
+export async function guestListActivityFeed(guestId: string, projectId: string, limit?: number): Promise<ActivityWithAuthor[]> {
+  const result = await getClient().graphql({
+    query: GuestListActivityFeed,
+    variables: { guestId, projectId, limit },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestListActivityFeed');
+  return (result as { data: { guestListActivityFeed: ActivityWithAuthor[] } }).data.guestListActivityFeed ?? [];
 }
 
 // Phase 9: Workflow Config & Metrics API functions

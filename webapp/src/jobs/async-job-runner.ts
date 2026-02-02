@@ -17,6 +17,10 @@ import {
   type RefineComponentInput,
 } from '@/jobs/async-job/appsync-refine-component';
 import {
+  handleAppSyncGuestRefineComponent,
+  type GuestRefineComponentInput,
+} from '@/jobs/async-job/appsync-guest-refine-component';
+import {
   handleAppSyncRefineBulkPlan,
   type RefineBulkPlanInput,
 } from '@/jobs/async-job/appsync-refine-bulk-plan';
@@ -135,6 +139,20 @@ function isAppSyncRefineComponent(event: unknown): event is RefineComponentInput
     'currentComponent' in event &&
     'refinementRequest' in event &&
     typeof (event as { refinementRequest: unknown }).refinementRequest === 'string'
+  );
+}
+
+/** AppSync invokes guestRefineComponent with { guestId, componentId, refinementRequest } */
+function isAppSyncGuestRefineComponent(event: unknown): event is GuestRefineComponentInput {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    'guestId' in event &&
+    'componentId' in event &&
+    'refinementRequest' in event &&
+    typeof (event as { guestId: unknown }).guestId === 'string' &&
+    typeof (event as { componentId: unknown }).componentId === 'string' &&
+    !('currentComponent' in event) // Distinguish from regular refineComponent
   );
 }
 
@@ -298,6 +316,12 @@ export const handler: Handler<unknown> = async (event, context) => {
   // Phase 10.3: AppSync mutation refineComponent (chat-based single component refinement)
   if (isAppSyncRefineComponent(event)) {
     const result = await handleAppSyncRefineComponent(event);
+    return result;
+  }
+
+  // Guest: AppSync mutation guestRefineComponent (chat-based component refinement for guests)
+  if (isAppSyncGuestRefineComponent(event)) {
+    const result = await handleAppSyncGuestRefineComponent(event);
     return result;
   }
 

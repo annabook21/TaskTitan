@@ -295,6 +295,51 @@ const GitHubTransitionConfigSchema = {
   },
 } as const;
 
+/**
+ * Comment entity for component discussions
+ * Supports both authenticated users and guests with @mentions
+ */
+const CommentSchema = {
+  model: { entity: 'Comment', version: '1', service: 'tasktitan' },
+  attributes: {
+    id: { type: 'string', required: true },
+    componentId: { type: 'string', required: true },
+    projectId: { type: 'string', required: true },
+    authorId: { type: 'string', required: true },
+    authorType: { type: ['USER', 'GUEST'] as const, required: true },
+    authorName: { type: 'string', required: true },
+    content: { type: 'string', required: true },
+    mentions: { type: 'list', items: { type: 'string' }, default: [] as string[] },
+    createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
+  },
+  indexes: {
+    primary: { pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' }, sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'COMMENT#${createdAt}#${id}' } },
+    byAuthor: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['authorId'], template: 'AUTHOR#${authorId}' }, sk: { field: 'gsi1sk', composite: ['createdAt', 'id'], template: 'COMMENT#${createdAt}#${id}' } },
+  },
+} as const;
+
+/**
+ * GuestNotification entity - separate from User notifications
+ * Guests use cognitoIdentityId as guestId (different from USER# prefix)
+ */
+const GuestNotificationSchema = {
+  model: { entity: 'GuestNotification', version: '1', service: 'tasktitan' },
+  attributes: {
+    id: { type: 'string', required: true },
+    guestId: { type: 'string', required: true },
+    type: { type: ['TASK_ASSIGNED', 'TASK_UNASSIGNED', 'TASK_STATUS_CHANGED', 'TASK_MENTIONED'] as const, required: true },
+    title: { type: 'string', required: true },
+    message: { type: 'string', required: true },
+    componentId: { type: 'string' },
+    projectId: { type: 'string' },
+    read: { type: 'boolean', required: true, default: false },
+    createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
+  },
+  indexes: {
+    primary: { pk: { field: 'pk', composite: ['guestId'], template: 'GUEST#${guestId}' }, sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'NOTIFICATION#${createdAt}#${id}' } },
+  },
+} as const;
+
 // Lazy-initialized entities (singleton pattern)
 let _entities: ReturnType<typeof createEntities> | null = null;
 
@@ -316,6 +361,8 @@ function createEntities() {
     componentPreview: new Entity(ComponentPreviewSchema, config),
     teamWorkflowConfig: new Entity(TeamWorkflowConfigSchema, config),
     githubTransitionConfig: new Entity(GitHubTransitionConfigSchema, config),
+    comment: new Entity(CommentSchema, config),
+    guestNotification: new Entity(GuestNotificationSchema, config),
   };
 }
 
@@ -361,6 +408,8 @@ const _ComponentStatusHistoryEntity = new Entity(ComponentStatusHistorySchema);
 const _ComponentPreviewEntity = new Entity(ComponentPreviewSchema);
 const _TeamWorkflowConfigEntity = new Entity(TeamWorkflowConfigSchema);
 const _GitHubTransitionConfigEntity = new Entity(GitHubTransitionConfigSchema);
+const _CommentEntity = new Entity(CommentSchema);
+const _GuestNotificationEntity = new Entity(GuestNotificationSchema);
 
 // Export entity types for type-safe usage
 export type UserItem = EntityItem<typeof _UserEntity>;
@@ -391,6 +440,10 @@ export type TeamWorkflowConfigItem = EntityItem<typeof _TeamWorkflowConfigEntity
 export type CreateTeamWorkflowConfigInput = CreateEntityItem<typeof _TeamWorkflowConfigEntity>;
 export type GitHubTransitionConfigItem = EntityItem<typeof _GitHubTransitionConfigEntity>;
 export type CreateGitHubTransitionConfigInput = CreateEntityItem<typeof _GitHubTransitionConfigEntity>;
+export type CommentItem = EntityItem<typeof _CommentEntity>;
+export type CreateCommentInput = CreateEntityItem<typeof _CommentEntity>;
+export type GuestNotificationItem = EntityItem<typeof _GuestNotificationEntity>;
+export type CreateGuestNotificationInput = CreateEntityItem<typeof _GuestNotificationEntity>;
 
 // Export schemas for testing and extension
 export {
@@ -408,4 +461,6 @@ export {
   ComponentPreviewSchema,
   TeamWorkflowConfigSchema,
   GitHubTransitionConfigSchema,
+  CommentSchema,
+  GuestNotificationSchema,
 };

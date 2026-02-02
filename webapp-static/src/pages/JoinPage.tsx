@@ -12,8 +12,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Users, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import { useGuestAuth } from '../hooks/useGuestAuth';
-import { 
+import {
   validateShareCode as apiValidateShareCode,
   guestJoinProject,
   type ShareCodeInfo,
@@ -114,6 +115,29 @@ export function JoinPage() {
     setError(null);
 
     try {
+      // Explicitly fetch guest credentials from Identity Pool before making IAM API call
+      // Amplify v6 requires this to ensure unauthenticated credentials are available
+      console.log('[JoinPage] Fetching guest credentials...');
+      const authSession = await fetchAuthSession();
+      console.log('[JoinPage] Auth session:', {
+        hasCredentials: !!authSession.credentials,
+        identityId: authSession.identityId,
+        credentials: authSession.credentials ? {
+          accessKeyId: authSession.credentials.accessKeyId?.substring(0, 10) + '...',
+          expiration: authSession.credentials.expiration,
+        } : null,
+        tokens: authSession.tokens ? 'present (authenticated)' : 'none (guest)',
+        userSub: authSession.userSub || 'none (guest)',
+      });
+
+      if (!authSession.credentials) {
+        throw new Error('Unable to obtain guest credentials. Please refresh and try again.');
+      }
+
+      // Log if we're in authenticated or unauthenticated mode
+      const isAuthenticated = !!authSession.tokens;
+      console.log('[JoinPage] Auth mode:', isAuthenticated ? 'AUTHENTICATED (User Pool)' : 'UNAUTHENTICATED (Guest)');
+
       // Call the real API with IAM auth (Cognito Identity Pool)
       const session = await guestJoinProject({
         code: code,

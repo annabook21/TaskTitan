@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, Loader2, Copy, Check, RefreshCw, Clock, Users, AlertTriangle, Trash2 } from 'lucide-react';
+import { X, Loader2, Copy, Check, Clock, Users, AlertTriangle, Trash2, Link2, MessageSquare } from 'lucide-react';
 import {
   generateShareCode as apiGenerateShareCode,
   revokeShareCode as apiRevokeShareCode,
@@ -177,36 +177,40 @@ export function ShareCodeModal({
 
           {!loading && (
             <div className="space-y-6">
-              {/* Generate new code section */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-medium text-slate-300">Generate New Code</h3>
-                
-                {/* Expiry selector */}
-                <div className="flex gap-3">
-                  <select
-                    value={expiryHours}
-                    onChange={(e) => setExpiryHours(Number(e.target.value))}
-                    className="flex-1 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm"
-                  >
-                    <option value={24}>1 day</option>
-                    <option value={72}>3 days</option>
-                    <option value={168}>1 week</option>
-                    <option value={336}>2 weeks</option>
-                    <option value={720}>30 days</option>
-                  </select>
+              {/* Generate new invite link section */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-slate-300">Create Invite Link</h3>
 
-                  <button
-                    onClick={handleGenerate}
-                    disabled={generating}
-                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {generating ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-4 h-4" />
-                    )}
-                    Generate
-                  </button>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs text-slate-500 mb-1 block">Link expires in</label>
+                    <select
+                      value={expiryHours}
+                      onChange={(e) => setExpiryHours(Number(e.target.value))}
+                      className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    >
+                      <option value={24}>1 day</option>
+                      <option value={72}>3 days</option>
+                      <option value={168}>1 week</option>
+                      <option value={336}>2 weeks</option>
+                      <option value={720}>30 days</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <button
+                      onClick={handleGenerate}
+                      disabled={generating}
+                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {generating ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Link2 className="w-4 h-4" />
+                      )}
+                      Generate Link
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -214,35 +218,32 @@ export function ShareCodeModal({
               {codes.length > 0 && (
                 <div className="space-y-4">
                   <h3 className="text-sm font-medium text-slate-300">
-                    Active Codes ({codes.length})
+                    Active Invite Links ({codes.length})
                   </h3>
-                  
+
                   <div className="space-y-3">
-                    {codes.map((shareCode) => (
-                      <div 
-                        key={shareCode.code}
-                        className="bg-slate-800 rounded-lg p-4"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xl font-mono font-bold tracking-wider text-cyan-400">
-                            {shareCode.code}
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleCopy(shareCode.code)}
-                              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
-                              title="Copy link"
-                            >
-                              {copiedCode === shareCode.code ? (
-                                <Check className="w-4 h-4 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-4 h-4" />
-                              )}
-                            </button>
+                    {codes.map((shareCode) => {
+                      const shareUrl = `${window.location.origin}/join?code=${shareCode.code}`;
+                      return (
+                        <div
+                          key={shareCode.code}
+                          className="bg-slate-800 rounded-lg p-4 space-y-3"
+                        >
+                          {/* Code display */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xl font-mono font-bold tracking-wider text-cyan-400">
+                                {shareCode.code}
+                              </span>
+                              <span className="text-xs text-slate-500 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {formatExpiry(shareCode.expiresAt)}
+                              </span>
+                            </div>
                             <button
                               onClick={() => handleRevoke(shareCode.code)}
                               disabled={revokingCode === shareCode.code}
-                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-colors disabled:opacity-50"
+                              className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors disabled:opacity-50"
                               title="Revoke code"
                             >
                               {revokingCode === shareCode.code ? (
@@ -252,13 +253,49 @@ export function ShareCodeModal({
                               )}
                             </button>
                           </div>
+
+                          {/* Shareable URL with copy button */}
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-slate-900 rounded-lg border border-slate-700 overflow-hidden">
+                              <Link2 className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                              <span className="text-sm text-slate-400 truncate font-mono">
+                                {shareUrl}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleCopy(shareCode.code)}
+                              className={`px-3 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 ${
+                                copiedCode === shareCode.code
+                                  ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-600/30'
+                                  : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                              }`}
+                            >
+                              {copiedCode === shareCode.code ? (
+                                <>
+                                  <Check className="w-4 h-4" />
+                                  Copied!
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-4 h-4" />
+                                  Copy
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Quick tip on first code */}
+                          {codes.indexOf(shareCode) === 0 && copiedCode === shareCode.code && (
+                            <div className="flex items-start gap-2 p-2 bg-emerald-900/20 rounded-lg border border-emerald-600/20">
+                              <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                              <span className="text-xs text-emerald-300">
+                                Link copied! Paste it in Slack, email, or any messaging app to invite your team.
+                              </span>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1 text-xs text-slate-500">
-                          <Clock className="w-3 h-3" />
-                          {formatExpiry(shareCode.expiresAt)}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -267,22 +304,37 @@ export function ShareCodeModal({
               {codes.length === 0 && (
                 <div className="text-center py-6">
                   <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mx-auto mb-3">
-                    <Users className="w-6 h-6 text-slate-500" />
+                    <Link2 className="w-6 h-6 text-slate-500" />
                   </div>
-                  <p className="text-sm text-slate-400">
-                    No active share codes. Generate one to invite team members.
+                  <p className="text-sm text-slate-400 mb-1">
+                    No active invite links yet
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Generate a link above to invite team members
                   </p>
                 </div>
               )}
 
-              {/* Instructions */}
-              <div className="text-sm text-slate-500 pt-4 border-t border-slate-800">
-                <p className="mb-2">Share codes allow team members to:</p>
-                <ul className="list-disc list-inside space-y-1 text-slate-400">
-                  <li>View all project components</li>
-                  <li>Assign themselves to tasks</li>
-                  <li>Update status on their tasks</li>
-                </ul>
+              {/* How it works */}
+              <div className="text-sm pt-4 border-t border-slate-800">
+                <p className="font-medium text-slate-300 mb-3">How it works</p>
+                <div className="space-y-2">
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">1</div>
+                    <p className="text-slate-400">Generate an invite link and set how long it stays valid</p>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">2</div>
+                    <p className="text-slate-400">Copy and share the link via Slack, email, or any chat</p>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">3</div>
+                    <p className="text-slate-400">Team members click the link, enter their name, and join instantly</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 mt-3">
+                  Guests can view tasks, assign themselves, and update their status. Revoke access anytime.
+                </p>
               </div>
             </div>
           )}

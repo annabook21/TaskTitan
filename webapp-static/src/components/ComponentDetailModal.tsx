@@ -12,6 +12,7 @@ import {
 } from '../api/appsync';
 import { Loader2 } from 'lucide-react';
 import { AssigneeSelector } from './AssigneeSelector';
+import { CommentSection } from './CommentSection';
 
 const COMPONENT_TYPES: ComponentType[] = ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'];
 const COMPONENT_STATUSES: ComponentStatus[] = ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'];
@@ -58,6 +59,14 @@ export function ComponentDetailModal({
   const [refineInput, setRefineInput] = useState('');
   const [refineExplanation, setRefineExplanation] = useState('');
   const [refineSuggestions, setRefineSuggestions] = useState<string[]>([]);
+  const [refinedPreview, setRefinedPreview] = useState<{
+    name: string;
+    description: string;
+    type: ComponentType;
+    estimatedHours: number;
+    priority: number;
+    acceptanceCriteria?: string[];
+  } | null>(null);
   const lastRefineTime = useRef<number>(0);
 
   // Editable form state
@@ -121,12 +130,15 @@ export function ComponentDetailModal({
         refinementRequest: request.trim(),
       });
 
-      // Update form fields with refined values
-      setName(result.component.name);
-      setDescription(result.component.description);
-      setType(result.component.type);
-      setEstimatedHours(String(result.component.estimatedHours));
-      setPriority(String(result.component.priority));
+      // Store preview instead of directly applying (same UX as guest mode)
+      setRefinedPreview({
+        name: result.component.name,
+        description: result.component.description,
+        type: result.component.type,
+        estimatedHours: result.component.estimatedHours,
+        priority: result.component.priority,
+        acceptanceCriteria: result.component.acceptanceCriteria ?? undefined,
+      });
 
       // Show explanation and suggestions
       setRefineExplanation(result.explanation);
@@ -494,8 +506,74 @@ export function ComponentDetailModal({
                       <p className="text-sm text-violet-200">{refineExplanation}</p>
                     </div>
                   )}
+
+                  {/* Refined Preview (same UX as guest mode) */}
+                  {refinedPreview && (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-slate-300">Suggested Changes:</h4>
+                      <div className="p-3 bg-slate-800 border border-slate-600 rounded-lg space-y-2 max-h-48 overflow-y-auto">
+                        <p className="text-sm">
+                          <span className="text-slate-500">Name:</span>{' '}
+                          <span className="text-white">{refinedPreview.name}</span>
+                        </p>
+                        <p className="text-sm">
+                          <span className="text-slate-500">Type:</span>{' '}
+                          <span className="text-white">{refinedPreview.type}</span>
+                        </p>
+                        <p className="text-sm">
+                          <span className="text-slate-500">Hours:</span>{' '}
+                          <span className="text-white">{refinedPreview.estimatedHours}h</span>
+                        </p>
+                        <p className="text-sm">
+                          <span className="text-slate-500">Description:</span>{' '}
+                          <span className="text-slate-300">{refinedPreview.description}</span>
+                        </p>
+                        {refinedPreview.acceptanceCriteria && refinedPreview.acceptanceCriteria.length > 0 && (
+                          <div className="text-sm">
+                            <span className="text-slate-500">Acceptance Criteria:</span>
+                            <ul className="list-disc list-inside text-slate-300 mt-1">
+                              {refinedPreview.acceptanceCriteria.map((ac, i) => (
+                                <li key={i}>{ac}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRefinedPreview(null)}
+                          disabled={refining}
+                          className="px-3 py-1.5 text-sm text-slate-400 hover:text-white transition-colors"
+                        >
+                          Discard
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Apply preview to form fields
+                            setName(refinedPreview.name);
+                            setDescription(refinedPreview.description);
+                            setType(refinedPreview.type);
+                            setEstimatedHours(String(refinedPreview.estimatedHours));
+                            setPriority(String(refinedPreview.priority));
+                            setRefinedPreview(null);
+                          }}
+                          disabled={refining}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded font-medium transition-colors"
+                        >
+                          Apply Changes
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Comments Section */}
+              <div className="border-t border-slate-700 pt-4 mt-4">
+                <CommentSection componentId={displayComponent.id} />
+              </div>
             </div>
 
             <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-700">

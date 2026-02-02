@@ -943,7 +943,7 @@ type User {
   notificationsReadUntil: String
 }
 
-type Project {
+type Project @aws_cognito_user_pools @aws_iam {
   id: ID!
   name: String!
   description: String
@@ -1010,7 +1010,7 @@ type SprintWithComponents {
   components: [Component!]!
 }
 
-type Component {
+type Component @aws_cognito_user_pools @aws_iam {
   id: ID!
   name: String!
   description: String
@@ -1057,7 +1057,7 @@ type Dependency {
 
 # Assignment represents a user assigned to a component
 # pk=COMPONENT#componentId, sk=ASSIGNEE#userId, gsi1pk=USER#userId, gsi1sk=ASSIGNMENT#componentId
-type Assignment {
+type Assignment @aws_cognito_user_pools @aws_iam {
   id: ID!
   componentId: ID!
   userId: ID!
@@ -1067,7 +1067,7 @@ type Assignment {
 }
 
 # For MyTasksPage - returns assignments with full component details
-type AssignmentWithComponent {
+type AssignmentWithComponent @aws_cognito_user_pools @aws_iam {
   assignment: Assignment!
   component: Component!
 }
@@ -1132,6 +1132,75 @@ type Notification {
   componentId: String
   projectId: String
   read: Boolean!
+  createdAt: String!
+}
+
+# ============================================
+# Comments System
+# ============================================
+
+# Author type for comments (USER or GUEST)
+enum AuthorType {
+  USER
+  GUEST
+}
+
+# Comment on a component
+# pk=COMPONENT#componentId, sk=COMMENT#createdAt#id
+type Comment @aws_cognito_user_pools @aws_iam {
+  id: ID!
+  componentId: ID!
+  projectId: ID!
+  authorId: ID!
+  authorType: AuthorType!
+  authorName: String!
+  content: String!
+  mentions: [String!]
+  createdAt: String!
+}
+
+# Team member suggestion for @mentions autocomplete
+type TeamMemberSuggestion {
+  id: ID!
+  name: String!
+  isGuest: Boolean!
+}
+
+# ============================================
+# Guest Notifications
+# ============================================
+
+# Notification types for guests (separate from user notifications)
+enum GuestNotificationType {
+  TASK_ASSIGNED
+  TASK_UNASSIGNED
+  TASK_STATUS_CHANGED
+  TASK_MENTIONED
+}
+
+# Guest notification: notifications for guests
+# pk=GUEST#guestId, sk=NOTIFICATION#createdAt#id
+type GuestNotification @aws_iam {
+  id: ID!
+  guestId: ID!
+  type: GuestNotificationType!
+  title: String!
+  message: String!
+  componentId: String
+  projectId: String
+  read: Boolean!
+  createdAt: String!
+}
+
+# Activity with author information for guest activity feed
+type ActivityWithAuthor @aws_iam {
+  id: ID!
+  type: ActivityType!
+  projectId: String!
+  authorId: String!
+  authorName: String
+  authorType: AuthorType!
+  metadata: String
   createdAt: String!
 }
 
@@ -1236,7 +1305,7 @@ type ShareCode {
 }
 
 # Result of validating a share code (unauthenticated via API_KEY)
-type ShareCodeInfo {
+type ShareCodeInfo @aws_api_key {
   valid: Boolean!
   projectId: ID
   projectName: String
@@ -1247,7 +1316,7 @@ type ShareCodeInfo {
 
 # Guest session after joining with share code
 # guestId is the Cognito Identity Pool identity ID for security validation
-type GuestSession {
+type GuestSession @aws_iam {
   guestId: ID!
   displayName: String!
   projectId: ID!
@@ -1344,6 +1413,36 @@ type Query {
   # List active share codes for a project (owner/admin only - Cognito auth)
   # Used by project owners to manage their share codes
   listShareCodesForProject(projectId: ID!): [ShareCode!]!
+
+  # ============================================
+  # Comments Queries
+  # ============================================
+
+  # List comments for a component (Cognito auth)
+  # DynamoDB: Query pk=COMPONENT#componentId, sk begins_with COMMENT#
+  listCommentsForComponent(componentId: ID!, limit: Int): [Comment!]!
+
+  # Guest: List comments for a component they can access (IAM auth)
+  # Verifies guest has access to the component's project
+  guestListComments(guestId: ID!, componentId: ID!, limit: Int): [Comment!]! @aws_iam
+
+  # Search team members for @mentions autocomplete (Cognito auth)
+  # Returns users and guests in the team matching the query
+  searchTeamMembersForMention(teamId: ID!, query: String!): [TeamMemberSuggestion!]!
+
+  # ============================================
+  # Guest Activity Feed & Notifications Queries
+  # ============================================
+
+  # Guest: List activity on assigned components (IAM auth)
+  # Returns activity where the guest is assigned to the component
+  guestListActivityFeed(guestId: ID!, projectId: ID!, limit: Int): [ActivityWithAuthor!]! @aws_iam
+
+  # Guest: List notifications (IAM auth)
+  guestListNotifications(guestId: ID!, limit: Int): [GuestNotification!]! @aws_iam
+
+  # Guest: Count unread notifications (IAM auth)
+  guestCountUnreadNotifications(guestId: ID!): Int! @aws_iam
 }
 
 input CreateProjectInput {
@@ -1495,6 +1594,29 @@ input RefineComponentInput {
   projectId: ID!
   currentComponent: NaturalLanguageComponentInput!
   refinementRequest: String!
+}
+
+# Input for guest refining a component via chat (IAM auth)
+# guestId is verified against cognitoIdentityId
+# componentId is used to fetch component details and verify assignment
+input GuestRefineComponentInput {
+  guestId: ID!
+  componentId: ID!
+  refinementRequest: String!
+}
+
+# Input for guest updating a component (IAM auth)
+# Only allowed for components the guest is assigned to
+# Used to apply AI refinement suggestions
+input GuestUpdateComponentInput {
+  guestId: ID!
+  componentId: ID!
+  name: String
+  description: String
+  type: ComponentType
+  estimatedHours: Float
+  priority: Int
+  acceptanceCriteria: [String!]
 }
 
 # Component structure for natural language operations
@@ -1930,6 +2052,40 @@ type Mutation {
   # Guest updates component status (IAM auth)
   # Only allowed on components the guest is assigned to
   guestUpdateStatus(guestId: ID!, componentId: ID!, status: ComponentStatus!): Component! @aws_iam
+
+  # Guest refines component via AI chat (IAM auth)
+  # Only allowed on components the guest is assigned to
+  # Uses existing chat-refinement-generator for AI processing
+  guestRefineComponent(input: GuestRefineComponentInput!): RefineComponentResult! @aws_iam
+
+  # Guest updates component fields (IAM auth)
+  # Only allowed on components the guest is assigned to
+  # Used to apply AI refinement suggestions
+  guestUpdateComponent(input: GuestUpdateComponentInput!): Component! @aws_iam
+
+  # ============================================
+  # Comments Mutations
+  # ============================================
+
+  # Create a comment on a component (Cognito auth)
+  # Accepts optional mentions array (user IDs) for notification creation
+  createComment(componentId: ID!, content: String!, mentions: [String!]): Comment!
+
+  # Guest: Create a comment on a component (IAM auth)
+  # Verifies guest has access to the component's project
+  # Accepts optional mentions array (user IDs) for notification creation
+  guestCreateComment(guestId: ID!, componentId: ID!, content: String!, mentions: [String!]): Comment! @aws_iam
+
+  # ============================================
+  # Guest Notification Mutations
+  # ============================================
+
+  # Guest: Mark notification as read (IAM auth)
+  guestMarkNotificationRead(guestId: ID!, notificationId: ID!): GuestNotification! @aws_iam
+
+  # Guest: Mark all notifications as read (IAM auth)
+  # Uses timestamp-based marker for O(1) operation
+  guestMarkAllNotificationsRead(guestId: ID!): Int! @aws_iam
 }
 
 type Subscription {
@@ -2450,6 +2606,97 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlBatchGetUsersForMentionFnF6BC4F45": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": {
+          "Fn::Join": [
+            "",
+            [
+              "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userIds = ctx.stash.userIds || [];
+
+  if (userIds.length === 0) {
+    return { operation: 'GetItem', key: util.dynamodb.toMapValues({ pk: 'NONE', sk: 'NONE' }) };
+  }
+
+  // Batch get up to 100 users (DynamoDB limit)
+  const keys = userIds.slice(0, 100).map(userId =>
+    util.dynamodb.toMapValues({ pk: 'USER#' + userId, sk: 'METADATA' })
+  );
+
+  return {
+    operation: 'BatchGetItem',
+    tables: {
+      '",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "': { keys: keys }
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+
+  // Build map of userId -> user info
+  const userMap = {};
+  const items = ctx.result?.data?.['",
+              {
+                "Ref": "DynamoTableE5532DA8",
+              },
+              "'] || [];
+  for (const item of items) {
+    if (item && item.id) {
+      userMap[item.id] = { name: item.name || item.email || 'User', email: item.email };
+    }
+  }
+  ctx.stash.userMap = userMap;
+
+  // Filter members by query and build suggestions
+  const query = ctx.stash.query;
+  const suggestions = [];
+
+  for (const member of ctx.stash.members) {
+    const user = userMap[member.userId] || {};
+    const name = user.name || member.title || 'Team Member';
+    const nameMatch = name.toLowerCase().indexOf(query) !== -1;
+    const emailMatch = user.email && user.email.toLowerCase().indexOf(query) !== -1;
+
+    if (nameMatch || emailMatch) {
+      suggestions.push({
+        id: member.userId,
+        name: name,
+        isGuest: false
+      });
+    }
+  }
+
+  return suggestions;
+}",
+            ],
+          ],
+        },
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "batchGetUsersForMention",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlCleanupImportDataResolver07095877": {
       "DependsOn": [
         "AppSyncGraphqlApiBedrockLambda55C98CBB",
@@ -2600,6 +2847,186 @@ export function response(ctx) { return ctx.prev.result; }",
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlCreateActivityFn4E5FD306": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  // Skip if no activity data provided
+  if (!ctx.stash.activityType) {
+    return { payload: null };
+  }
+
+  const activityId = util.autoId();
+  const now = util.time.nowISO8601();
+  const projectId = ctx.stash.projectId;
+  const activityType = ctx.stash.activityType;
+  const authorId = ctx.stash.authorId || ctx.stash.guestId;
+  const metadata = ctx.stash.activityMetadata || {};
+
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + projectId,
+      sk: 'ACTIVITY#' + now + '#' + activityId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + projectId,
+      sk: 'ACTIVITY#' + now + '#' + activityId,
+      id: activityId,
+      type: activityType,
+      projectId: projectId,
+      userId: authorId,
+      metadata: JSON.stringify(metadata),
+      createdAt: now,
+      gsi1pk: 'USER#' + authorId,
+      gsi1sk: 'ACTIVITY#' + now + '#' + activityId,
+      gsi2pk: 'PROJECT#' + projectId + '#TYPE#' + activityType,
+      gsi2sk: 'ACTIVITY#' + now + '#' + activityId
+    })
+  };
+}
+export function response(ctx) {
+  // Return the main result regardless of activity creation outcome
+  // Activity creation is a side effect and should not fail the main operation
+  return ctx.stash.mainResult || ctx.prev.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createActivity",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCreateCommentItemFnCFA97C3E": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const id = util.autoId();
+  const now = util.time.nowISO8601();
+  const content = ctx.args.content;
+  const mentions = ctx.args.mentions || [];
+
+  const item = {
+    pk: 'COMPONENT#' + ctx.args.componentId,
+    sk: 'COMMENT#' + now + '#' + id,
+    id: id,
+    componentId: ctx.args.componentId,
+    projectId: ctx.stash.projectId,
+    authorId: ctx.stash.authorId,
+    authorType: ctx.stash.authorType,
+    authorName: ctx.stash.authorName,
+    content: content,
+    mentions: mentions,
+    createdAt: now,
+    gsi1pk: 'AUTHOR#' + ctx.stash.authorId,
+    gsi1sk: 'COMMENT#' + now + '#' + id
+  };
+
+  ctx.stash.comment = item;
+  ctx.stash.mentions = mentions;
+
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: item.pk,
+      sk: item.sk
+    }),
+    attributeValues: util.dynamodb.toMapValues(item)
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const comment = ctx.stash.comment;
+  return {
+    id: comment.id,
+    componentId: comment.componentId,
+    projectId: comment.projectId,
+    authorId: comment.authorId,
+    authorType: comment.authorType,
+    authorName: comment.authorName,
+    content: comment.content,
+    mentions: comment.mentions || [],
+    createdAt: comment.createdAt
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createCommentItem",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCreateCommentResolverB069BC25": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "createComment",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetComponentForCommentFnB9253571",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetUserForCommentFnE86F1CA1",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateCommentItemFnCFA97C3E",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlCreateComponentResolverC4F82584": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -2741,18 +3168,115 @@ export function response(ctx) {
     }
     util.error(ctx.error.message, ctx.error.type);
   }
-  
+
   const item = ctx.result;
-  return {
+  const result = {
     id: item.id,
     componentId: item.componentId,
     userId: item.guestId,
     assignedAt: item.assignedAt
   };
+
+  // Set activity data for createActivityFn
+  ctx.stash.mainResult = result;
+  ctx.stash.activityType = 'MEMBER_ASSIGNED';
+  ctx.stash.authorId = ctx.stash.guestId;
+  ctx.stash.activityMetadata = {
+    componentId: ctx.stash.componentId,
+    componentName: ctx.stash.componentName,
+    guestId: ctx.stash.guestId,
+    authorType: 'GUEST'
+  };
+
+  return result;
 }",
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "createGuestAssignment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCreateGuestCommentItemFn92D09677": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const id = util.autoId();
+  const now = util.time.nowISO8601();
+  const content = ctx.stash.content;
+  const mentions = ctx.stash.mentions || [];
+
+  const item = {
+    pk: 'COMPONENT#' + ctx.stash.componentId,
+    sk: 'COMMENT#' + now + '#' + id,
+    id: id,
+    componentId: ctx.stash.componentId,
+    projectId: ctx.stash.projectId,
+    authorId: ctx.stash.authorId,
+    authorType: ctx.stash.authorType,
+    authorName: ctx.stash.authorName,
+    content: content,
+    mentions: mentions,
+    createdAt: now,
+    gsi1pk: 'AUTHOR#' + ctx.stash.authorId,
+    gsi1sk: 'COMMENT#' + now + '#' + id
+  };
+
+  ctx.stash.comment = item;
+
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: item.pk,
+      sk: item.sk
+    }),
+    attributeValues: util.dynamodb.toMapValues(item)
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  const comment = ctx.stash.comment;
+  const result = {
+    id: comment.id,
+    componentId: comment.componentId,
+    projectId: comment.projectId,
+    authorId: comment.authorId,
+    authorType: comment.authorType,
+    authorName: comment.authorName,
+    content: comment.content,
+    mentions: comment.mentions || [],
+    createdAt: comment.createdAt
+  };
+
+  // Set activity data for createActivityFn
+  ctx.stash.mainResult = result;
+  ctx.stash.activityType = 'COMMENT_ADDED';
+  ctx.stash.authorId = ctx.stash.guestId;
+  ctx.stash.activityMetadata = {
+    componentId: comment.componentId,
+    componentName: ctx.stash.componentName,
+    authorType: 'GUEST',
+    authorName: comment.authorName
+  };
+
+  return result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createGuestCommentItem",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -3108,6 +3632,56 @@ export function response(ctx) { return ctx.prev.result; }",
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlDeleteGuestAssignmentFn7D55DEE9": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + ctx.stash.componentId,
+      sk: 'ASSIGNEE#GUEST#' + ctx.stash.guestId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  // Set activity data for createActivityFn
+  ctx.stash.mainResult = true;
+  ctx.stash.activityType = 'MEMBER_UNASSIGNED';
+  ctx.stash.authorId = ctx.stash.guestId;
+  ctx.stash.activityMetadata = {
+    componentId: ctx.stash.componentId,
+    componentName: ctx.stash.componentName,
+    guestId: ctx.stash.guestId,
+    authorType: 'GUEST'
+  };
+
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "deleteGuestAssignment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlDeleteProjectResolverDDDBE7F8": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -3194,6 +3768,73 @@ export function response(ctx) {
         "TypeName": "Mutation",
       },
       "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlFetchAssignmentForUnassignFnE9C8BEB0": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.componentId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller can only unassign themselves
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only unassign yourself', 'Unauthorized');
+  }
+
+  ctx.stash.guestId = guestId;
+  ctx.stash.componentId = componentId;
+  ctx.stash.cognitoIdentityId = cognitoIdentityId;
+
+  // Fetch assignment to get component details
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const assignment = ctx.result;
+  if (!assignment) {
+    util.error('Not assigned to this component', 'NotAssigned');
+  }
+
+  // Verify ownership
+  if (assignment.cognitoIdentityId !== ctx.stash.cognitoIdentityId) {
+    util.error('Access denied: Assignment does not belong to you', 'Unauthorized');
+  }
+
+  // Store for activity creation
+  ctx.stash.componentName = assignment.componentName;
+  ctx.stash.projectId = assignment.projectId;
+
+  return assignment;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "fetchAssignmentForUnassign",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlFetchComponentForAssignmentFnC5DB1370": {
       "DependsOn": [
@@ -3386,68 +4027,7 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "Code": "import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const userId = ctx.identity.sub;
-  const input = ctx.args.input;
-  const projectId = input.projectId;
-  
-  // Generate 6-character alphanumeric code
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I, O, 0, 1 to avoid confusion
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  
-  // Calculate expiration (default 7 days, max 30 days)
-  const expiresInHours = Math.min(input.expiresInHours || 168, 720);
-  const now = util.time.nowEpochSeconds();
-  const ttl = now + (expiresInHours * 3600);
-  const expiresAt = util.time.epochSecondsToISO8601(ttl);
-  const createdAt = util.time.nowISO8601();
-  
-  return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'SHARE_CODE#' + code,
-      sk: 'METADATA'
-    }),
-    attributeValues: util.dynamodb.toMapValues({
-      code: code,
-      projectId: projectId,
-      projectName: input.projectName || null,  // Denormalized (pass from frontend)
-      teamId: input.teamId || '',
-      teamName: input.teamName || null,        // Denormalized (pass from frontend)
-      createdBy: userId,
-      ttl: ttl,
-      expiresAt: expiresAt,
-      createdAt: createdAt,
-      // GSI1 for listing codes by project
-      gsi1pk: 'PROJECT#' + projectId,
-      gsi1sk: 'SHARE_CODE#' + code
-    }),
-    condition: {
-      expression: 'attribute_not_exists(pk)'
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    // Code collision - retry would be needed in production
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  const item = ctx.result;
-  return {
-    code: item.code,
-    projectId: item.projectId,
-    projectName: item.projectName || null,
-    teamId: item.teamId,
-    teamName: item.teamName || null,
-    expiresAt: item.expiresAt,
-    createdAt: item.createdAt,
-    createdBy: item.createdBy
-  };
-}",
+        "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/8793c3f68d4a3d81572ac6f2b3ff06c0c64ac5925b7ee43208f8e7c836b96911.js",
         "DataSourceName": "DynamoDB",
         "FieldName": "generateShareCode",
         "Kind": "UNIT",
@@ -3518,6 +4098,89 @@ export function response(ctx) { return ctx.prev.result; }",
         "TypeName": "Query",
       },
       "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGetComponentForCommentFnB9253571": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + ctx.args.componentId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Component not found', 'NotFoundError');
+  ctx.stash.component = ctx.result;
+  ctx.stash.projectId = ctx.result.projectId;
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getComponentForComment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlGetComponentForGuestCommentFn0A0CD89F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + ctx.stash.componentId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Component not found', 'NotFoundError');
+
+  // Verify guest has access to this component's project
+  if (ctx.result.projectId !== ctx.stash.guest.projectId) {
+    util.error('Access denied: You do not have access to this component', 'Unauthorized');
+  }
+
+  ctx.stash.projectId = ctx.result.projectId;
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getComponentForGuestComment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlGetComponentResolverE779C157": {
       "DependsOn": [
@@ -4182,6 +4845,46 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlGetUserForCommentFnE86F1CA1": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  ctx.stash.authorId = userId;
+  ctx.stash.authorType = 'USER';
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'USER#' + userId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  ctx.stash.authorName = ctx.result?.name || ctx.result?.email || 'Unknown User';
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getUserForComment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlGetUserReadUntilFn62CEDA5E": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -4252,6 +4955,117 @@ export function response(ctx) {
             {
               "Fn::GetAtt": [
                 "AppSyncGraphqlCreateGuestAssignmentFnECB46401",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateActivityFn4E5FD306",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestCountUnreadNotificationsResolver091F777C": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own notifications', 'Unauthorized');
+  }
+
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'GUEST#' + guestId,
+        ':sk': 'NOTIFICATION#'
+      })
+    },
+    filter: {
+      expression: '#read = :false',
+      expressionNames: { '#read': 'read' },
+      expressionValues: util.dynamodb.toMapValues({ ':false': false })
+    },
+    select: 'COUNT'
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result.scannedCount || 0;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestCountUnreadNotifications",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestCreateCommentResolverACCC2DEF": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "guestCreateComment",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyGuestAndGetComponentFnFB1D7CFD",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlGetComponentForGuestCommentFn0A0CD89F",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateGuestCommentItemFn92D09677",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateActivityFn4E5FD306",
                 "FunctionId",
               ],
             },
@@ -4380,6 +5194,70 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlGuestListActivityFeedResolverA54ACB7F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const projectId = ctx.args.projectId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own activity feed', 'Unauthorized');
+  }
+
+  const limit = ctx.args.limit || 20;
+
+  // Query activities for the project
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'PROJECT#' + projectId,
+        ':sk': 'ACTIVITY#'
+      })
+    },
+    scanIndexForward: false,
+    limit: limit
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    type: item.type,
+    projectId: item.projectId,
+    authorId: item.userId || item.authorId || 'Unknown',
+    authorName: item.userName || item.authorName || null,
+    authorType: item.authorType || 'USER',
+    metadata: item.metadata ? JSON.stringify(item.metadata) : null,
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestListActivityFeed",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlGuestListAssignmentsResolverF01366D6": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -4448,6 +5326,45 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlGuestListCommentsResolver3AE17F0F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }",
+        "FieldName": "guestListComments",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyGuestForListCommentsFn00BF9833",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryCommentsForGuestFn0B09556A",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlGuestListComponentsResolverD0E67493": {
       "DependsOn": [
         "AppSyncGraphqlApiSchemaC2E94F39",
@@ -4491,7 +5408,7 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
-    "AppSyncGraphqlGuestUnassignSelfResolverCB6CA95C": {
+    "AppSyncGraphqlGuestListNotificationsResolverDCE80E18": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
         "AppSyncGraphqlApiSchemaC2E94F39",
@@ -4506,41 +5423,285 @@ export function response(ctx) {
         "Code": "import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
-  const componentId = ctx.args.componentId;
   const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-  
-  // Security: Verify the caller can only unassign themselves
+
+  // Security: Verify the caller's identity matches the requested guestId
   if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only unassign yourself', 'Unauthorized');
+    util.error('Access denied: You can only access your own notifications', 'Unauthorized');
   }
-  
+
+  const limit = ctx.args.limit || 20;
+
   return {
-    operation: 'DeleteItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + componentId,
-      sk: 'ASSIGNEE#GUEST#' + guestId
-    }),
-    condition: {
-      // Verify the assignment exists and belongs to this guest
-      expression: 'attribute_exists(pk) AND cognitoIdentityId = :cognitoId',
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
       expressionValues: util.dynamodb.toMapValues({
-        ':cognitoId': cognitoIdentityId
+        ':pk': 'GUEST#' + guestId,
+        ':sk': 'NOTIFICATION#'
+      })
+    },
+    scanIndexForward: false,
+    limit: limit
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    guestId: item.guestId,
+    type: item.type,
+    title: item.title,
+    message: item.message,
+    componentId: item.componentId || null,
+    projectId: item.projectId || null,
+    read: item.read || false,
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestListNotifications",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestMarkAllNotificationsReadResolver66BE5402": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only modify your own notifications', 'Unauthorized');
+  }
+
+  const now = util.time.nowISO8601();
+
+  // Update the guest record with notificationsReadUntil timestamp
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET #notificationsReadUntil = :now, #updatedAt = :now',
+      expressionNames: {
+        '#notificationsReadUntil': 'notificationsReadUntil',
+        '#updatedAt': 'updatedAt'
+      },
+      expressionValues: util.dynamodb.toMapValues({
+        ':now': now
       })
     }
   };
 }
 export function response(ctx) {
-  if (ctx.error) {
-    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-      util.error('Not assigned to this component or unauthorized', 'NotAssigned');
-    }
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  return true;
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return 0;
 }",
         "DataSourceName": "DynamoDB",
-        "FieldName": "guestUnassignSelf",
+        "FieldName": "guestMarkAllNotificationsRead",
         "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestMarkNotificationReadResolver1ADADE5C": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const notificationId = ctx.args.notificationId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only modify your own notifications', 'Unauthorized');
+  }
+
+  ctx.stash.guestId = guestId;
+  ctx.stash.notificationId = notificationId;
+
+  // First get the notification to find its sk (which includes createdAt)
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'GUEST#' + guestId,
+        ':sk': 'NOTIFICATION#'
+      })
+    },
+    filter: {
+      expression: '#id = :id',
+      expressionNames: { '#id': 'id' },
+      expressionValues: util.dynamodb.toMapValues({ ':id': notificationId })
+    },
+    limit: 1
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+
+  const items = ctx.result.items || [];
+  if (items.length === 0) {
+    util.error('Notification not found', 'NotFoundError');
+  }
+
+  const notification = items[0];
+  notification.read = true;
+
+  return notification;
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "guestMarkNotificationRead",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestRefineComponentResolver07445840": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "guestRefineComponent",
+        "Kind": "UNIT",
+        "RequestMappingTemplate": "{"version": "2017-02-28", "operation": "Invoke", "payload": $util.toJson($ctx.arguments.input)}",
+        "ResponseMappingTemplate": "$util.toJson($ctx.result)",
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestUnassignSelfResolverCB6CA95C": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
+        "FieldName": "guestUnassignSelf",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlFetchAssignmentForUnassignFnE9C8BEB0",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlDeleteGuestAssignmentFn7D55DEE9",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateActivityFn4E5FD306",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGuestUpdateComponentResolverA384D0F1": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
+        "FieldName": "guestUpdateComponent",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyGuestComponentUpdateFn4EDDA7CE",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlUpdateComponentFieldsFnE2B9F03C",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -4579,6 +5740,12 @@ export function response(ctx) {
             {
               "Fn::GetAtt": [
                 "AppSyncGraphqlUpdateComponentStatusFnF798E8F4",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateActivityFn4E5FD306",
                 "FunctionId",
               ],
             },
@@ -4779,6 +5946,59 @@ export function response(ctx) { return ctx.prev.result; }",
             },
           ],
         },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlListCommentsForComponentResolverFC5C85FC": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const limit = ctx.args.limit || 50;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'COMPONENT#' + ctx.args.componentId,
+        ':sk': 'COMMENT#'
+      })
+    },
+    scanIndexForward: true,
+    limit: limit
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    componentId: item.componentId,
+    projectId: item.projectId,
+    authorId: item.authorId,
+    authorType: item.authorType,
+    authorName: item.authorName,
+    content: item.content,
+    mentions: item.mentions || [],
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "listCommentsForComponent",
+        "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -5062,43 +6282,7 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "Code": "import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const projectId = ctx.args.projectId;
-  
-  // Query GSI1 for share codes associated with this project
-  return {
-    operation: 'Query',
-    index: 'gsi1',
-    query: {
-      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'PROJECT#' + projectId,
-        ':sk': 'SHARE_CODE#'
-      })
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  
-  // Filter out expired codes and return
-  const now = Math.floor(Date.now() / 1000);
-  return (ctx.result.items || [])
-    .filter(item => !item.ttl || item.ttl > now)
-    .map(item => ({
-      code: item.code,
-      projectId: item.projectId,
-      projectName: item.projectName,
-      teamId: item.teamId,
-      teamName: item.teamName,
-      expiresAt: item.expiresAt,
-      createdAt: item.createdAt,
-      createdBy: item.createdBy
-    }));
-}",
+        "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/7890327d86cdcfca05315f3808c30b728af6fb8a639317b408e9080b5ddb00d2.js",
         "DataSourceName": "DynamoDB",
         "FieldName": "listShareCodesForProject",
         "Kind": "UNIT",
@@ -5444,6 +6628,58 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlQueryCommentsForGuestFn0B09556A": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const limit = ctx.args.limit || 50;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'COMPONENT#' + ctx.stash.componentId,
+        ':sk': 'COMMENT#'
+      })
+    },
+    scanIndexForward: true,
+    limit: limit
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    componentId: item.componentId,
+    projectId: item.projectId,
+    authorId: item.authorId,
+    authorType: item.authorType,
+    authorName: item.authorName,
+    content: item.content,
+    mentions: item.mentions || [],
+    createdAt: item.createdAt
+  }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryCommentsForGuest",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlQueryDependenciesForDeleteFn71B765B4": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -5635,6 +6871,56 @@ export function response(ctx) {
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "querySprintComponents",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlQueryTeamMembersForMentionFnCE2BB236": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  ctx.stash.query = ctx.args.query.toLowerCase();
+  ctx.stash.teamId = ctx.args.teamId;
+
+  // Query all team members
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + ctx.args.teamId,
+        ':sk': 'MEMBER#'
+      })
+    },
+    limit: 100
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+
+  // Store member user IDs for batch get
+  const members = ctx.result.items || [];
+  ctx.stash.members = members;
+  ctx.stash.userIds = members.map(m => m.userId);
+
+  return members;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryTeamMembersForMention",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -5952,22 +7238,7 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "Code": "import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  return {
-    operation: 'DeleteItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'SHARE_CODE#' + ctx.args.code.toUpperCase(),
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  return true;
-}",
+        "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/ca6a9991dd1eb766d4771d5b557aead6075694ff58c836f558728ac21f008eaa.js",
         "DataSourceName": "DynamoDB",
         "FieldName": "revokeShareCode",
         "Kind": "UNIT",
@@ -5976,6 +7247,45 @@ export function response(ctx) {
           "RuntimeVersion": "1.0.0",
         },
         "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlSearchTeamMembersForMentionResolver06CA3A74": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result || []; }",
+        "FieldName": "searchTeamMembersForMention",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryTeamMembersForMentionFnCE2BB236",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlBatchGetUsersForMentionFnF6BC4F45",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
       },
       "Type": "AWS::AppSync::Resolver",
     },
@@ -6220,6 +7530,94 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlUpdateComponentFieldsFnE2B9F03C": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.stash.input;
+  const componentId = ctx.stash.componentId;
+  const now = util.time.nowISO8601();
+
+  // Build dynamic update expression for provided fields only
+  const expressionParts = ['#updatedAt = :now'];
+  const expressionNames = { '#updatedAt': 'updatedAt' };
+  const expressionValues = { ':now': now };
+
+  if (input.name !== undefined && input.name !== null) {
+    expressionParts.push('#name = :name');
+    expressionNames['#name'] = 'name';
+    expressionValues[':name'] = input.name;
+  }
+
+  if (input.description !== undefined && input.description !== null) {
+    expressionParts.push('#description = :description');
+    expressionNames['#description'] = 'description';
+    expressionValues[':description'] = input.description;
+  }
+
+  if (input.type !== undefined && input.type !== null) {
+    expressionParts.push('#type = :type');
+    expressionNames['#type'] = 'type';
+    expressionValues[':type'] = input.type;
+  }
+
+  if (input.estimatedHours !== undefined && input.estimatedHours !== null) {
+    expressionParts.push('#estimatedHours = :estimatedHours');
+    expressionNames['#estimatedHours'] = 'estimatedHours';
+    expressionValues[':estimatedHours'] = input.estimatedHours;
+  }
+
+  if (input.priority !== undefined && input.priority !== null) {
+    expressionParts.push('#priority = :priority');
+    expressionNames['#priority'] = 'priority';
+    expressionValues[':priority'] = input.priority;
+  }
+
+  if (input.acceptanceCriteria !== undefined && input.acceptanceCriteria !== null) {
+    expressionParts.push('#acceptanceCriteria = :acceptanceCriteria');
+    expressionNames['#acceptanceCriteria'] = 'acceptanceCriteria';
+    expressionValues[':acceptanceCriteria'] = input.acceptanceCriteria;
+  }
+
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET ' + expressionParts.join(', '),
+      expressionNames: expressionNames,
+      expressionValues: util.dynamodb.toMapValues(expressionValues)
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "updateComponentFields",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlUpdateComponentResolver1E6D8633": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -6331,10 +7729,10 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-  
+
   // Return the updated component
   const item = ctx.result;
-  return {
+  const result = {
     id: item.id || ctx.stash.componentId,
     name: item.name,
     description: item.description,
@@ -6346,6 +7744,21 @@ export function response(ctx) {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt
   };
+
+  // Set activity data for createActivityFn
+  ctx.stash.mainResult = result;
+  ctx.stash.projectId = item.projectId;
+  ctx.stash.activityType = 'COMPONENT_STATUS_CHANGED';
+  ctx.stash.authorId = ctx.stash.guestId;
+  ctx.stash.activityMetadata = {
+    componentId: ctx.stash.componentId,
+    componentName: item.name,
+    oldStatus: item.status,
+    newStatus: ctx.stash.status,
+    authorType: 'GUEST'
+  };
+
+  return result;
 }",
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
@@ -6796,7 +8209,7 @@ export function response(ctx) {
   }
   
   // Check expiration
-  const nowEpoch = Math.floor(Date.now() / 1000);
+  const nowEpoch = util.time.nowEpochSeconds();
   if (codeItem.ttl && codeItem.ttl < nowEpoch) {
     util.error('Share code has expired', 'ExpiredShareCode');
   }
@@ -6831,38 +8244,7 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "Code": "import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'SHARE_CODE#' + ctx.args.code.toUpperCase(),
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  const item = ctx.result;
-  if (!item) {
-    return { valid: false };
-  }
-  // Check if code has expired (TTL is in Unix seconds)
-  const now = Math.floor(Date.now() / 1000);
-  if (item.ttl && item.ttl < now) {
-    return { valid: false };
-  }
-  return {
-    valid: true,
-    projectId: item.projectId,
-    projectName: item.projectName || null,
-    teamId: item.teamId,
-    teamName: item.teamName || null,
-    expiresAt: item.expiresAt
-  };
-}",
+        "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/b160591e4f4b1dcdcf0fc5b8acaf7a63ba827c4b079b45e3c96ac63b65514b90.js",
         "DataSourceName": "DynamoDB",
         "FieldName": "validateShareCode",
         "Kind": "UNIT",
@@ -6942,6 +8324,67 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlVerifyGuestAndGetComponentFnFB1D7CFD": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
+  }
+
+  ctx.stash.guestId = guestId;
+  ctx.stash.componentId = ctx.args.componentId;
+  ctx.stash.content = ctx.args.content;
+  ctx.stash.mentions = ctx.args.mentions || [];
+
+  // Get the guest record
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+
+  const guest = ctx.result;
+  if (!guest) {
+    util.error('Guest session not found. Please rejoin the project.', 'GuestNotFound');
+  }
+
+  ctx.stash.guest = guest;
+  ctx.stash.authorId = guest.cognitoIdentityId;
+  ctx.stash.authorType = 'GUEST';
+  ctx.stash.authorName = guest.displayName || 'Guest';
+
+  return guest;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyGuestAndGetComponent",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlVerifyGuestAssignmentFn3C48DF17": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -7001,6 +8444,130 @@ export function response(ctx) {
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "verifyGuestAssignment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlVerifyGuestComponentUpdateFn4EDDA7CE": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const guestId = input.guestId;
+  const componentId = input.componentId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only update components for your own assignments', 'Unauthorized');
+  }
+
+  // Store input for next function
+  ctx.stash.input = input;
+  ctx.stash.componentId = componentId;
+  ctx.stash.guestId = guestId;
+
+  // Verify the guest is assigned to this component
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const assignment = ctx.result;
+  if (!assignment) {
+    util.error('You must be assigned to this component to update it', 'NotAssigned');
+  }
+
+  // Verify the assignment belongs to this identity
+  if (assignment.cognitoIdentityId && assignment.cognitoIdentityId !== ctx.identity.cognitoIdentityId) {
+    util.error('Access denied: Assignment does not belong to you', 'Unauthorized');
+  }
+
+  ctx.stash.assignmentVerified = true;
+  return assignment;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyGuestComponentUpdate",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlVerifyGuestForListCommentsFn00BF9833": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
+  }
+
+  // Store componentId for response
+  ctx.stash.componentId = ctx.args.componentId;
+  ctx.stash.guestId = guestId;
+  ctx.stash.limit = ctx.args.limit || 50;
+
+  // First verify the guest exists
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+
+  const guest = ctx.result;
+  if (!guest) {
+    util.error('Guest session not found. Please rejoin the project.', 'GuestNotFound');
+  }
+
+  // Store guest info for the next step
+  ctx.stash.guest = guest;
+  return guest;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyGuestForListComments",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -7806,119 +9373,12 @@ Welcome to intelligent project planning!
       },
       "Type": "AWS::AppSync::ChannelNamespace",
     },
-    "GuestIdentityPoolAuthenticatedRoleE68C462F": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "ForAnyValue:StringLike": {
-                  "cognito-identity.amazonaws.com:amr": "authenticated",
-                },
-                "StringEquals": {
-                  "cognito-identity.amazonaws.com:aud": {
-                    "Ref": "GuestIdentityPoolC2EBF60C",
-                  },
-                },
-              },
-              "Effect": "Allow",
-              "Principal": {
-                "Federated": "cognito-identity.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "Description": {
-          "Fn::Join": [
-            "",
-            [
-              "Default Authenticated Role for Identity Pool ",
-              {
-                "Fn::GetAtt": [
-                  "GuestIdentityPoolC2EBF60C",
-                  "Name",
-                ],
-              },
-            ],
-          ],
-        },
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "GuestIdentityPoolC2EBF60C": {
-      "Properties": {
-        "AllowUnauthenticatedIdentities": true,
-        "CognitoIdentityProviders": [],
-        "IdentityPoolName": "TaskTitanForgeStack-GuestPool",
-      },
-      "Type": "AWS::Cognito::IdentityPool",
-    },
-    "GuestIdentityPoolDefaultRoleAttachmentBD645224": {
-      "Properties": {
-        "IdentityPoolId": {
-          "Ref": "GuestIdentityPoolC2EBF60C",
-        },
-        "Roles": {
-          "authenticated": {
-            "Fn::GetAtt": [
-              "GuestIdentityPoolAuthenticatedRoleE68C462F",
-              "Arn",
-            ],
-          },
-          "unauthenticated": {
-            "Fn::GetAtt": [
-              "GuestIdentityPoolUnauthenticatedRole22647100",
-              "Arn",
-            ],
-          },
-        },
-      },
-      "Type": "AWS::Cognito::IdentityPoolRoleAttachment",
-    },
-    "GuestIdentityPoolUnauthenticatedRole22647100": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "ForAnyValue:StringLike": {
-                  "cognito-identity.amazonaws.com:amr": "unauthenticated",
-                },
-                "StringEquals": {
-                  "cognito-identity.amazonaws.com:aud": {
-                    "Ref": "GuestIdentityPoolC2EBF60C",
-                  },
-                },
-              },
-              "Effect": "Allow",
-              "Principal": {
-                "Federated": "cognito-identity.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "Description": {
-          "Fn::Join": [
-            "",
-            [
-              "Default Unauthenticated Role for Identity Pool ",
-              {
-                "Fn::GetAtt": [
-                  "GuestIdentityPoolC2EBF60C",
-                  "Name",
-                ],
-              },
-            ],
-          ],
-        },
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "GuestIdentityPoolUnauthenticatedRoleDefaultPolicy7DDD6F5E": {
+    "GuestIdentityPoolAuthenticatedRoleDefaultPolicyBE3AA2D3": {
+      "DependsOn": [
+        "AuthUserPoolClientC635291F",
+        "AuthUserPoolCognitoDomainAD9D79E1",
+        "AuthUserPool8115E87F",
+      ],
       "Properties": {
         "PolicyDocument": {
           "Statement": [
@@ -7978,6 +9438,62 @@ Welcome to intelligent project planning!
                           "Arn",
                         ],
                       },
+                      "/types/Query/fields/guestListComments",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListNotifications",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestCountUnreadNotifications",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListActivityFeed",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
                       "/types/Mutation/fields/guestJoinProject",
                     ],
                   ],
@@ -8021,6 +9537,482 @@ Welcome to intelligent project planning!
                         ],
                       },
                       "/types/Mutation/fields/guestUpdateStatus",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestRefineComponent",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestUpdateComponent",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestCreateComment",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestMarkNotificationRead",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestMarkAllNotificationsRead",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "AllowGuestAppSyncOperations",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "GuestIdentityPoolAuthenticatedRoleDefaultPolicyBE3AA2D3",
+        "Roles": [
+          {
+            "Ref": "GuestIdentityPoolAuthenticatedRoleE68C462F",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "GuestIdentityPoolAuthenticatedRoleE68C462F": {
+      "DependsOn": [
+        "AuthUserPoolClientC635291F",
+        "AuthUserPoolCognitoDomainAD9D79E1",
+        "AuthUserPool8115E87F",
+      ],
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "ForAnyValue:StringLike": {
+                  "cognito-identity.amazonaws.com:amr": "authenticated",
+                },
+                "StringEquals": {
+                  "cognito-identity.amazonaws.com:aud": {
+                    "Ref": "GuestIdentityPoolC2EBF60C",
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "cognito-identity.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Default Authenticated Role for Identity Pool ",
+              {
+                "Fn::GetAtt": [
+                  "GuestIdentityPoolC2EBF60C",
+                  "Name",
+                ],
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "GuestIdentityPoolC2EBF60C": {
+      "DependsOn": [
+        "AuthUserPoolClientC635291F",
+        "AuthUserPoolCognitoDomainAD9D79E1",
+        "AuthUserPool8115E87F",
+      ],
+      "Properties": {
+        "AllowUnauthenticatedIdentities": true,
+        "CognitoIdentityProviders": [
+          {
+            "ClientId": {
+              "Ref": "AuthUserPoolClientC635291F",
+            },
+            "ProviderName": {
+              "Fn::Join": [
+                "",
+                [
+                  "cognito-idp.us-east-2.",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Ref": "AuthUserPool8115E87F",
+                  },
+                ],
+              ],
+            },
+            "ServerSideTokenCheck": true,
+          },
+        ],
+        "IdentityPoolName": "TaskTitanForgeStack-GuestPool",
+      },
+      "Type": "AWS::Cognito::IdentityPool",
+    },
+    "GuestIdentityPoolDefaultRoleAttachmentBD645224": {
+      "DependsOn": [
+        "AuthUserPoolClientC635291F",
+        "AuthUserPoolCognitoDomainAD9D79E1",
+        "AuthUserPool8115E87F",
+      ],
+      "Properties": {
+        "IdentityPoolId": {
+          "Ref": "GuestIdentityPoolC2EBF60C",
+        },
+        "Roles": {
+          "authenticated": {
+            "Fn::GetAtt": [
+              "GuestIdentityPoolAuthenticatedRoleE68C462F",
+              "Arn",
+            ],
+          },
+          "unauthenticated": {
+            "Fn::GetAtt": [
+              "GuestIdentityPoolUnauthenticatedRole22647100",
+              "Arn",
+            ],
+          },
+        },
+      },
+      "Type": "AWS::Cognito::IdentityPoolRoleAttachment",
+    },
+    "GuestIdentityPoolUnauthenticatedRole22647100": {
+      "DependsOn": [
+        "AuthUserPoolClientC635291F",
+        "AuthUserPoolCognitoDomainAD9D79E1",
+        "AuthUserPool8115E87F",
+      ],
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "ForAnyValue:StringLike": {
+                  "cognito-identity.amazonaws.com:amr": "unauthenticated",
+                },
+                "StringEquals": {
+                  "cognito-identity.amazonaws.com:aud": {
+                    "Ref": "GuestIdentityPoolC2EBF60C",
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "cognito-identity.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Default Unauthenticated Role for Identity Pool ",
+              {
+                "Fn::GetAtt": [
+                  "GuestIdentityPoolC2EBF60C",
+                  "Name",
+                ],
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "GuestIdentityPoolUnauthenticatedRoleDefaultPolicy7DDD6F5E": {
+      "DependsOn": [
+        "AuthUserPoolClientC635291F",
+        "AuthUserPoolCognitoDomainAD9D79E1",
+        "AuthUserPool8115E87F",
+      ],
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "appsync:GraphQL",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestGetProject",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListComponents",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListAssignments",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListComments",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListNotifications",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestCountUnreadNotifications",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Query/fields/guestListActivityFeed",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestJoinProject",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestAssignSelf",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestUnassignSelf",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestUpdateStatus",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestRefineComponent",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestUpdateComponent",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestCreateComment",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestMarkNotificationRead",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppSyncGraphqlApi48248BEB",
+                          "Arn",
+                        ],
+                      },
+                      "/types/Mutation/fields/guestMarkAllNotificationsRead",
                     ],
                   ],
                 },
