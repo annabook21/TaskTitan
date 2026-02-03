@@ -14,10 +14,7 @@ import { handleAppSyncPlanSprint } from '@/jobs/async-job/appsync-plan-sprint';
 import { handleAppSyncApplyTemplate } from '@/jobs/async-job/appsync-apply-template';
 import { handleAppSyncSuggestBreakdown } from '@/jobs/async-job/appsync-suggest-breakdown';
 import { handleAppSyncGenerateWireframe } from '@/jobs/async-job/appsync-generate-wireframe';
-import {
-  handleAppSyncAnalyzeImport,
-  handleAppSyncCleanupImport,
-} from '@/jobs/async-job/appsync-import-analysis';
+import { handleAppSyncAnalyzeImport, handleAppSyncCleanupImport } from '@/jobs/async-job/appsync-import-analysis';
 import { handleAppSyncGenerateRetrospective } from '@/jobs/async-job/appsync-generate-retrospective';
 import { handleStartAIGeneration } from '@/jobs/async-job/appsync-ai-progress';
 import { handleAppSyncMigrateGuestToUser } from '@/jobs/async-job/appsync-migrate-guest';

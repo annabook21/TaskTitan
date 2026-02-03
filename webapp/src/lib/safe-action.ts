@@ -51,7 +51,7 @@ export const authActionClient = actionClient.use(async ({ next }) => {
   // Local development mode - use mock user
   if (IS_LOCAL_DEV) {
     const entities = getEntities();
-    
+
     // Ensure local dev user exists using conditional create to avoid TOCTOU race condition
     // Instead of check-then-create, we try to create with a condition that fails if exists
     const now = new Date().toISOString();

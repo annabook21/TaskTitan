@@ -19,7 +19,7 @@ export const assignComponent = authActionClient
       // Use min(1) instead of cuid() to allow demo IDs like 'demo-component-001'
       componentId: z.string().min(1),
       assigneeId: z.string().min(1),
-    })
+    }),
   )
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, assigneeId } = parsedInput;
@@ -87,7 +87,7 @@ export const assignComponent = authActionClient
                     projectId,
                     read: false,
                   })
-                  .commit()
+                  .commit(),
               );
             }
 
@@ -97,7 +97,7 @@ export const assignComponent = authActionClient
 
         return { id: assignmentId, componentId, userId: assigneeId };
       },
-      { context: { action: 'assignComponent', componentId, assigneeId } }
+      { context: { action: 'assignComponent', componentId, assigneeId } },
     );
 
     revalidatePath(`/projects/${projectId}`);
@@ -115,7 +115,7 @@ export const unassignComponent = authActionClient
       // Use min(1) instead of cuid() to allow demo IDs like 'demo-component-001'
       componentId: z.string().min(1),
       assigneeId: z.string().min(1),
-    })
+    }),
   )
   .action(async ({ parsedInput, ctx }) => {
     const { componentId, assigneeId } = parsedInput;
@@ -160,7 +160,7 @@ export const unassignComponent = authActionClient
 
         return { success: true };
       },
-      { context: { action: 'unassignComponent', componentId, assigneeId } }
+      { context: { action: 'unassignComponent', componentId, assigneeId } },
     );
 
     revalidatePath(`/projects/${projectId}`);

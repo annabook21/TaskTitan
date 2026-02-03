@@ -92,7 +92,9 @@ export const refineExistingComponent = authActionClient
         throw new MyCustomError('Component not found or access denied');
       }
 
-      const projectComponents = await entities.component.query.byProject({ projectId: access.component.projectId }).go();
+      const projectComponents = await entities.component.query
+        .byProject({ projectId: access.component.projectId })
+        .go();
 
       currentComponent = {
         name: access.component.name,
@@ -163,7 +165,7 @@ export const refineExistingComponent = authActionClient
           .go({ response: 'all_new' });
         return updated.data;
       },
-      { context: { action: 'refineExistingComponent', componentId, projectId } }
+      { context: { action: 'refineExistingComponent', componentId, projectId } },
     );
 
     // Log activity
@@ -188,7 +190,7 @@ export const refineExistingComponent = authActionClient
           .go();
         return created.data;
       },
-      { context: { action: 'refineExistingComponent', componentId, projectId } }
+      { context: { action: 'refineExistingComponent', componentId, projectId } },
     );
 
     revalidatePath(`/projects/${projectId}`);

@@ -63,7 +63,7 @@ export interface BatchWriteResult<T> {
 export async function batchWrite<T>(
   items: T[],
   writer: (item: T) => Promise<unknown>,
-  options: BatchWriteOptions = {}
+  options: BatchWriteOptions = {},
 ): Promise<BatchWriteResult<T>> {
   const { batchSize = DYNAMODB_BATCH_LIMIT, continueOnError = false, batchDelayMs = 0 } = options;
 
@@ -157,7 +157,7 @@ export interface BatchDeleteResult {
  */
 export async function batchDelete(
   keys: Array<{ pk: string; sk: string }>,
-  options: BatchDeleteOptions = {}
+  options: BatchDeleteOptions = {},
 ): Promise<BatchDeleteResult> {
   const { batchSize = DYNAMODB_BATCH_LIMIT, batchDelayMs = 0, maxRetries = 3 } = options;
 
@@ -271,7 +271,7 @@ export interface BatchGetOptions {
  */
 export async function batchGet(
   keys: Array<{ pk: string; sk: string }>,
-  options: BatchGetOptions = {}
+  options: BatchGetOptions = {},
 ): Promise<Record<string, unknown>[]> {
   const { batchSize = 100, projectionExpression, expressionAttributeNames } = options;
 
@@ -357,7 +357,7 @@ export async function batchGet(
 export async function parallelUpdate<T>(
   items: T[],
   updater: (item: T) => Promise<unknown>,
-  options: BatchWriteOptions = {}
+  options: BatchWriteOptions = {},
 ): Promise<BatchWriteResult<T>> {
   const { batchSize = DYNAMODB_BATCH_LIMIT, continueOnError = false, batchDelayMs = 50 } = options;
 
@@ -392,14 +392,9 @@ export async function withRetry<T>(
     initialDelayMs?: number;
     maxDelayMs?: number;
     shouldRetry?: (error: unknown) => boolean;
-  } = {}
+  } = {},
 ): Promise<T> {
-  const {
-    maxRetries = 3,
-    initialDelayMs = 100,
-    maxDelayMs = 1000,
-    shouldRetry = isRetryableError,
-  } = options;
+  const { maxRetries = 3, initialDelayMs = 100, maxDelayMs = 1000, shouldRetry = isRetryableError } = options;
 
   let lastError: Error | undefined;
 

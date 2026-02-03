@@ -81,11 +81,7 @@ export class TaskTitanTable extends Construct {
   constructor(scope: Construct, id: string, props: TaskTitanTableProps = {}) {
     super(scope, id);
 
-    const {
-      pointInTimeRecovery = true,
-      removalPolicy = RemovalPolicy.RETAIN,
-      enableStreams = true,
-    } = props;
+    const { pointInTimeRecovery = true, removalPolicy = RemovalPolicy.RETAIN, enableStreams = true } = props;
 
     // AWS Best Practice: Single table with on-demand billing
     // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html

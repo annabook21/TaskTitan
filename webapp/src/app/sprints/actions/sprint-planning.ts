@@ -50,7 +50,7 @@ export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).ac
   // Get all components NOT in any active/planning sprint (the backlog)
   const projects = await entities.project.query.byTeam({ teamId: sprint.teamId }).go();
   const projectIds = projects.data.map((p) => p.id);
-  
+
   if (projectIds.length === 0) {
     return {
       selectedComponentIds: [],
@@ -61,7 +61,7 @@ export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).ac
   }
 
   const componentResults = await Promise.all(
-    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
   );
   const allComponents = componentResults.flatMap((r) => r.data);
   const backlogComponents = allComponents.filter((c) => !c.sprintId && c.status !== 'COMPLETED');
@@ -77,7 +77,7 @@ export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).ac
 
   // Fetch dependencies for each backlog component
   const depsByComponent = await Promise.all(
-    backlogComponents.map((c) => entities.dependency.query.primary({ dependentComponentId: c.id }).go())
+    backlogComponents.map((c) => entities.dependency.query.primary({ dependentComponentId: c.id }).go()),
   );
 
   const requiredNameCache = new Map<string, string>();
@@ -104,7 +104,7 @@ export const aiPlanSprintAction = authActionClient.schema(aiPlanSprintSchema).ac
           Component_Dependency_requiredComponentIdToComponent: { name },
         })),
       };
-    })
+    }),
   );
 
   // Map to AI planning format
@@ -149,14 +149,10 @@ export const applySprintPlan = authActionClient.schema(applySprintPlanSchema).ac
     'update',
     async () => null, // Prisma removed - DynamoDB only
     async () => {
-      await Promise.all(
-        componentIds.map((id) =>
-          entities.component.update({ id }).set({ sprintId }).go()
-        )
-      );
+      await Promise.all(componentIds.map((id) => entities.component.update({ id }).set({ sprintId }).go()));
       return { success: true };
     },
-    { context: { action: 'applySprintPlan', sprintId, componentCount: componentIds.length } }
+    { context: { action: 'applySprintPlan', sprintId, componentCount: componentIds.length } },
   );
 
   revalidatePath(`/team/${teamId}`);
@@ -197,7 +193,7 @@ export const aiSuggestSprint = authActionClient.schema(suggestSprintSchema).acti
 
   if (projectIds.length > 0) {
     const componentResults = await Promise.all(
-      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
     );
     const allComponents = componentResults.flatMap((r) => r.data);
     backlogComponents = allComponents

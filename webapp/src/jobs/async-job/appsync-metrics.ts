@@ -43,7 +43,7 @@ export async function handleAppSyncGetTeamMetrics(teamId: string): Promise<TeamM
       ExpressionAttributeValues: {
         ':pk': `TEAM#${teamId}`,
       },
-    })
+    }),
   );
 
   const projects = projectsResult.Items || [];
@@ -65,7 +65,7 @@ export async function handleAppSyncGetTeamMetrics(teamId: string): Promise<TeamM
           ':pk': `PROJECT#${projectId}`,
         },
         Limit: 500,
-      })
+      }),
     );
 
     const items = componentsResult.Items || [];
@@ -92,7 +92,7 @@ export async function handleAppSyncGetTeamMetrics(teamId: string): Promise<TeamM
         ':pk': `TEAM#${teamId}`,
         ':sk': 'SPRINT#',
       },
-    })
+    }),
   );
 
   const sprints = sprintsResult.Items || [];

@@ -47,15 +47,15 @@ export async function findComponentsForPR(
   prUrl: string,
 ): Promise<ComponentData[]> {
   const entities = getEntities();
-  
+
   // Get all components for the project
   const componentsResult = await entities.component.query.byProject({ projectId }).go();
-  
+
   // Filter by componentIds or prUrl (githubPrUrl is an optional field on Component)
   const matchingComponents = componentsResult.data.filter(
-    (c) => componentIds.includes(c.id) || c.githubPrUrl === prUrl
+    (c) => componentIds.includes(c.id) || c.githubPrUrl === prUrl,
   );
-  
+
   // Fetch assignments for each component
   const componentsWithAssignments = await Promise.all(
     matchingComponents.map(async (c) => {
@@ -67,9 +67,9 @@ export async function findComponentsForPR(
         projectId: c.projectId,
         assignments: assignmentsResult.data.map((a) => ({ userId: a.userId })),
       };
-    })
+    }),
   );
-  
+
   return componentsWithAssignments;
 }
 
@@ -200,13 +200,16 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
   const prStatus = mapPRStateToStatus(pr);
   await Promise.all(
     components.map((component) =>
-      entities.component.update({ id: component.id }).set({
-        githubPrUrl: pr.html_url,
-        githubPrNumber: pr.number,
-        githubPrTitle: pr.title,
-        githubPrStatus: prStatus,
-        githubPrUpdatedAt: new Date().toISOString(),
-      }).go()
+      entities.component
+        .update({ id: component.id })
+        .set({
+          githubPrUrl: pr.html_url,
+          githubPrNumber: pr.number,
+          githubPrTitle: pr.title,
+          githubPrStatus: prStatus,
+          githubPrUpdatedAt: new Date().toISOString(),
+        })
+        .go(),
     ),
   );
 
@@ -226,8 +229,8 @@ export async function handlePullRequestEvent(payload: PullRequestPayload, projec
             triggeredBy: pr.user.login,
             mergedBy: pr.merged_by?.login,
             mergedAt: pr.merged_at,
-          })
-        )
+          }),
+        ),
       );
 
       // Log any failures but don't fail the entire webhook
@@ -299,8 +302,8 @@ export async function handlePullRequestReviewEvent(
           prTitle: pr.title,
           prNumber: pr.number,
           approvedBy: payload.review.user.login,
-        })
-      )
+        }),
+      ),
     );
 
     // Log any failures but don't fail the entire webhook
@@ -327,7 +330,7 @@ export async function handlePullRequestReviewEvent(
 
 /**
  * Update component status and create activity/notifications
- * 
+ *
  * IMPORTANT: This function now properly creates ComponentStatusHistory entries
  * to maintain accurate cycle time metrics and aging indicators.
  */
@@ -365,9 +368,7 @@ async function updateComponentStatus(
   const activityId = randomUUID();
 
   // Query existing open status history entry to close it
-  const historyResult = await entities.componentStatusHistory.query
-    .primary({ componentId: component.id })
-    .go();
+  const historyResult = await entities.componentStatusHistory.query.primary({ componentId: component.id }).go();
   const openEntry = historyResult.data.find((h) => !h.exitedAt);
 
   // Map event to activity type
@@ -377,7 +378,7 @@ async function updateComponentStatus(
       : metadata.event === 'PR_CLOSED'
         ? 'GITHUB_PR_CLOSED'
         : metadata.event === 'PR_APPROVED'
-          ? 'COMPONENT_STATUS_CHANGED'  // Use generic type for PR_APPROVED
+          ? 'COMPONENT_STATUS_CHANGED' // Use generic type for PR_APPROVED
           : 'GITHUB_PR_OPENED';
 
   // Use transaction for atomicity - ensures status, history, and activity are consistent
@@ -388,9 +389,7 @@ async function updateComponentStatus(
       const ops: any[] = [];
 
       // 1. Update component status
-      ops.push(
-        compEntity.update({ id: component.id }).set({ status: targetStatus }).commit()
-      );
+      ops.push(compEntity.update({ id: component.id }).set({ status: targetStatus }).commit());
 
       // 2. Close previous status history entry (if exists)
       if (openEntry) {
@@ -402,7 +401,7 @@ async function updateComponentStatus(
               id: openEntry.id,
             })
             .set({ exitedAt: nowIso })
-            .commit()
+            .commit(),
         );
       }
 
@@ -416,7 +415,7 @@ async function updateComponentStatus(
             enteredAt: nowIso,
             exitedAt: undefined,
           })
-          .commit()
+          .commit(),
       );
 
       // 4. Create activity log
@@ -435,7 +434,7 @@ async function updateComponentStatus(
               ...metadata,
             },
           })
-          .commit()
+          .commit(),
       );
 
       return ops;

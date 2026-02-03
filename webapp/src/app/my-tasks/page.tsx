@@ -39,10 +39,7 @@ export default async function MyTasksPage() {
 
   const projectsMap = await batchFetchProjects(projectIds);
   const teamIds = [...new Set(Array.from(projectsMap.values()).map((p) => p.teamId))];
-  const [teamsMap2, sprintsMap] = await Promise.all([
-    batchFetchTeams(teamIds),
-    batchFetchSprints(sprintIds),
-  ]);
+  const [teamsMap2, sprintsMap] = await Promise.all([batchFetchTeams(teamIds), batchFetchSprints(sprintIds)]);
 
   const tasks = assignments
     .map((a) => {
@@ -55,10 +52,9 @@ export default async function MyTasksPage() {
 
       const history = statusHistoryMap.get(component.id) ?? [];
       const sortedHistory = [...history].sort(
-        (x, y) => new Date(x.enteredAt).getTime() - new Date(y.enteredAt).getTime()
+        (x, y) => new Date(x.enteredAt).getTime() - new Date(y.enteredAt).getTime(),
       );
-      const currentStatusEntry =
-        sortedHistory.find((h) => !h.exitedAt) ?? sortedHistory[sortedHistory.length - 1];
+      const currentStatusEntry = sortedHistory.find((h) => !h.exitedAt) ?? sortedHistory[sortedHistory.length - 1];
       const statusAge = currentStatusEntry
         ? Math.floor((Date.now() - new Date(currentStatusEntry.enteredAt).getTime()) / (1000 * 60 * 60 * 24))
         : 0;

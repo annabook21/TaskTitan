@@ -45,16 +45,14 @@ export default async function ProjectsPage() {
     }
 
     // Step 3: Fetch all projects for all teams
-    const projectsByTeam = await Promise.all(
-      teamIds.map((teamId) => entities.project.query.byTeam({ teamId }).go())
-    );
+    const projectsByTeam = await Promise.all(teamIds.map((teamId) => entities.project.query.byTeam({ teamId }).go()));
 
     // Flatten and combine with team info
     const allProjects = projectsByTeam.flatMap((result, index) =>
       result.data.map((project) => ({
         ...project,
         team: teamInfoMap.get(teamIds[index]) ?? { id: teamIds[index], name: 'Unknown' },
-      }))
+      })),
     );
 
     // Sort by updatedAt desc

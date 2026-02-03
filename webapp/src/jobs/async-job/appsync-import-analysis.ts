@@ -99,7 +99,7 @@ export async function handleAppSyncAnalyzeImport(input: AnalyzeImportInput): Pro
           '#n': 'name',
         },
         Limit: 20,
-      })
+      }),
     );
     existingProjects = (queryResult.Items || []).map((item) => item.name as string).filter(Boolean);
   } catch (err) {
@@ -117,7 +117,7 @@ export async function handleAppSyncAnalyzeImport(input: AnalyzeImportInput): Pro
 
   // Call the import analyzer with retry
   const result = await withBedrockRetry(() =>
-    analyzeImportData(input.headers, parsedSampleRows, existingProjects, existingSprints)
+    analyzeImportData(input.headers, parsedSampleRows, existingProjects, existingSprints),
   );
 
   logger.info('Import analysis complete', {

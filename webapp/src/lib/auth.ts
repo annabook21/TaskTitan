@@ -23,20 +23,22 @@ const LOCAL_DEV_USER = {
 
 async function ensureLocalDevUser() {
   const entities = getEntities();
-  
+
   // Create or get the local dev user
   const userResult = await entities.user.get({ id: LOCAL_DEV_USER.id }).go();
-  
+
   if (!userResult.data) {
     const now = new Date().toISOString();
-    await entities.user.create({
-      id: LOCAL_DEV_USER.id,
-      email: LOCAL_DEV_USER.email,
-      name: LOCAL_DEV_USER.name,
-      createdAt: now,
-      updatedAt: now,
-    }).go();
-    
+    await entities.user
+      .create({
+        id: LOCAL_DEV_USER.id,
+        email: LOCAL_DEV_USER.email,
+        name: LOCAL_DEV_USER.name,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .go();
+
     return {
       id: LOCAL_DEV_USER.id,
       email: LOCAL_DEV_USER.email,
@@ -104,10 +106,10 @@ export async function getSession() {
   if (typeof email != 'string') {
     throw new Error(`invalid email ${userId}.`);
   }
-  
+
   const entities = getEntities();
   const userResult = await entities.user.get({ id: userId }).go();
-  
+
   if (userResult.data == null) {
     throw new UserNotCreatedError(userId, email);
   }

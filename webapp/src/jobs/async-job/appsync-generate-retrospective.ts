@@ -34,7 +34,7 @@ export interface GenerateRetrospectiveResult {
 }
 
 export async function handleAppSyncGenerateRetrospective(
-  input: GenerateRetrospectiveInput
+  input: GenerateRetrospectiveInput,
 ): Promise<GenerateRetrospectiveResult> {
   logger.info('Generating retrospective', {
     sprintId: input.sprintId,
@@ -52,7 +52,7 @@ export async function handleAppSyncGenerateRetrospective(
         pk: `SPRINT#${input.sprintId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   if (!sprintResult.Item) {
@@ -70,7 +70,7 @@ export async function handleAppSyncGenerateRetrospective(
       ExpressionAttributeValues: {
         ':pk': `SPRINT#${input.sprintId}`,
       },
-    })
+    }),
   );
 
   const sprintComponents = componentsResult.Items || [];
@@ -83,7 +83,9 @@ export async function handleAppSyncGenerateRetrospective(
       type: c.type as 'EPIC' | 'FEATURE' | 'STORY' | 'TASK' | 'BUG',
       estimatedHours: (c.estimatedHours as number) || 0,
       actualHours: (c.actualHours as number) || (c.estimatedHours as number) || 0,
-      status: (c.status === 'DONE' || c.status === 'COMPLETED' ? 'COMPLETED' : 'INCOMPLETE') as 'COMPLETED' | 'INCOMPLETE',
+      status: (c.status === 'DONE' || c.status === 'COMPLETED' ? 'COMPLETED' : 'INCOMPLETE') as
+        | 'COMPLETED'
+        | 'INCOMPLETE',
     }));
 
   // Get upcoming components (backlog items not in sprint)
@@ -98,7 +100,7 @@ export async function handleAppSyncGenerateRetrospective(
         ':null': null,
       },
       Limit: 20,
-    })
+    }),
   );
 
   // Build a map of component name -> component ID for later lookup
@@ -163,7 +165,7 @@ export async function handleAppSyncGenerateRetrospective(
           new TransactWriteCommand({
             TransactItems: transactItems,
             ClientRequestToken: `retro-${input.sprintId}-${Date.now()}`, // Idempotency
-          })
+          }),
         );
 
         adjustmentsApplied = true;

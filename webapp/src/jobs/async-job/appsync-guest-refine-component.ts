@@ -42,7 +42,7 @@ export interface RefineComponentResult {
  */
 export async function handleAppSyncGuestRefineComponent(
   input: GuestRefineComponentInput,
-  identity?: { cognitoIdentityId?: string }
+  identity?: { cognitoIdentityId?: string },
 ): Promise<RefineComponentResult> {
   logger.info('Guest refining component', {
     guestId: input.guestId,
@@ -61,7 +61,7 @@ export async function handleAppSyncGuestRefineComponent(
         pk: `COMPONENT#${input.componentId}`,
         sk: `ASSIGNEE#GUEST#${input.guestId}`,
       },
-    })
+    }),
   );
 
   if (!assignmentResponse.Item) {
@@ -76,7 +76,7 @@ export async function handleAppSyncGuestRefineComponent(
         pk: `COMPONENT#${input.componentId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   const component = componentResponse.Item;
@@ -94,7 +94,7 @@ export async function handleAppSyncGuestRefineComponent(
         pk: `PROJECT#${projectId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   const project = projectResponse.Item;
@@ -111,7 +111,7 @@ export async function handleAppSyncGuestRefineComponent(
       ExpressionAttributeValues: {
         ':pk': `PROJECT#${projectId}`,
       },
-    })
+    }),
   );
 
   const existingComponents = (componentsResponse.Items || [])

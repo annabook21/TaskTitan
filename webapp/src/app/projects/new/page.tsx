@@ -22,18 +22,18 @@ export default async function NewProjectPage({ searchParams }: Props) {
 
   // Get user's teams from DynamoDB
   const membershipsResult = await entities.membership.query.byUser({ userId }).go();
-  
+
   // Sort by joinedAt descending
   const sortedMemberships = membershipsResult.data.sort(
-    (a, b) => new Date(b.joinedAt ?? 0).getTime() - new Date(a.joinedAt ?? 0).getTime()
+    (a, b) => new Date(b.joinedAt ?? 0).getTime() - new Date(a.joinedAt ?? 0).getTime(),
   );
-  
+
   // Fetch team details
   const teams = await Promise.all(
     sortedMemberships.map(async (m) => {
       const teamResult = await entities.team.get({ id: m.teamId }).go();
       return teamResult.data;
-    })
+    }),
   ).then((results) => results.filter((t): t is NonNullable<typeof t> => t !== null));
 
   return (

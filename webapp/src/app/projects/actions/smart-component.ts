@@ -271,9 +271,18 @@ export const createFromPreview = authActionClient
           ])
           .go();
 
-        return { id: componentId, name: component.name, description: component.description, type: component.type, projectId, priority: Math.round(component.priority * 10), estimatedHours: component.estimatedHours, status: 'PLANNING' };
+        return {
+          id: componentId,
+          name: component.name,
+          description: component.description,
+          type: component.type,
+          projectId,
+          priority: Math.round(component.priority * 10),
+          estimatedHours: component.estimatedHours,
+          status: 'PLANNING',
+        };
       },
-      { context: { action: 'createFromPreview', projectId, componentId } }
+      { context: { action: 'createFromPreview', projectId, componentId } },
     );
 
     revalidatePath(`/projects/${projectId}`);

@@ -183,10 +183,7 @@ export default function SignInPage() {
             {/* Sign Up Link */}
             <div className="mt-4 text-center">
               <span className="text-slate-400 text-sm">Don&apos;t have an account? </span>
-              <Link
-                href="/sign-up"
-                className="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-colors"
-              >
+              <Link href="/sign-up" className="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-colors">
                 Create one
               </Link>
             </div>

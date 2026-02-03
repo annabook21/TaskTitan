@@ -62,10 +62,13 @@ export const linkComponentToPR = authActionClient
         updateData.githubPrStatus = prStatus || (prUrl ? 'open' : undefined);
         updateData.githubPrUpdatedAt = prUrl ? new Date().toISOString() : undefined;
 
-        const updated = await entities.component.update({ id: componentId }).set(updateData).go({ response: 'all_new' });
+        const updated = await entities.component
+          .update({ id: componentId })
+          .set(updateData)
+          .go({ response: 'all_new' });
         return updated.data;
       },
-      { context: { action: 'linkComponentToPR', componentId } }
+      { context: { action: 'linkComponentToPR', componentId } },
     );
 
     // Create activity log for PR linking
@@ -91,7 +94,7 @@ export const linkComponentToPR = authActionClient
             .go();
           return { id: activityId };
         },
-        { context: { action: 'linkComponentToPR', componentId } }
+        { context: { action: 'linkComponentToPR', componentId } },
       );
     }
 
@@ -123,10 +126,14 @@ export async function updateComponentPRStatus(
     async () => {
       const updated = await entities.component
         .update({ id: componentId })
-        .set({ githubPrStatus: prStatus, githubPrTitle: prTitle || undefined, githubPrUpdatedAt: new Date().toISOString() })
+        .set({
+          githubPrStatus: prStatus,
+          githubPrTitle: prTitle || undefined,
+          githubPrUpdatedAt: new Date().toISOString(),
+        })
         .go({ response: 'all_new' });
       return updated.data;
     },
-    { context: { action: 'updateComponentPRStatus', componentId, prStatus } }
+    { context: { action: 'updateComponentPRStatus', componentId, prStatus } },
   );
 }

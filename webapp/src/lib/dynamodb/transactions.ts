@@ -20,11 +20,7 @@
  * ```
  */
 
-import {
-  TransactWriteCommand,
-  TransactGetCommand,
-  TransactWriteCommandInput,
-} from '@aws-sdk/lib-dynamodb';
+import { TransactWriteCommand, TransactGetCommand, TransactWriteCommandInput } from '@aws-sdk/lib-dynamodb';
 import { Logger } from '@aws-lambda-powertools/logger';
 import { getDynamoDBClient, getTableName } from './index';
 
@@ -67,7 +63,7 @@ export interface TransactionResult {
  */
 export async function executeTransaction(
   items: TransactionItem[],
-  options: TransactionOptions = {}
+  options: TransactionOptions = {},
 ): Promise<TransactionResult> {
   if (items.length === 0) {
     return { success: true };
@@ -75,7 +71,7 @@ export async function executeTransaction(
 
   if (items.length > DYNAMODB_TRANSACTION_LIMIT) {
     throw new Error(
-      `Transaction exceeds ${DYNAMODB_TRANSACTION_LIMIT} item limit (got ${items.length}). Use executeSaga for larger operations.`
+      `Transaction exceeds ${DYNAMODB_TRANSACTION_LIMIT} item limit (got ${items.length}). Use executeSaga for larger operations.`,
     );
   }
 
@@ -246,7 +242,7 @@ async function compensateSteps<T>(steps: SagaStep<T>[]): Promise<Error[]> {
  */
 export function createTransactionItem(
   operation: TransactionOperation,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
 ): TransactionItem {
   return { operation, params };
 }
@@ -254,17 +250,13 @@ export function createTransactionItem(
 /**
  * Execute a transactional get (read multiple items atomically)
  */
-export async function transactGet(
-  keys: Array<{ pk: string; sk: string }>
-): Promise<Record<string, unknown>[]> {
+export async function transactGet(keys: Array<{ pk: string; sk: string }>): Promise<Record<string, unknown>[]> {
   if (keys.length === 0) {
     return [];
   }
 
   if (keys.length > DYNAMODB_TRANSACTION_LIMIT) {
-    throw new Error(
-      `TransactGet exceeds ${DYNAMODB_TRANSACTION_LIMIT} item limit (got ${keys.length}).`
-    );
+    throw new Error(`TransactGet exceeds ${DYNAMODB_TRANSACTION_LIMIT} item limit (got ${keys.length}).`);
   }
 
   const client = getDynamoDBClient();
@@ -309,7 +301,7 @@ export function createRetryingSagaStep<T>(
   name: string,
   execute: () => Promise<T>,
   compensate: () => Promise<void>,
-  maxRetries: number = 3
+  maxRetries: number = 3,
 ): SagaStep<T> {
   return {
     name,

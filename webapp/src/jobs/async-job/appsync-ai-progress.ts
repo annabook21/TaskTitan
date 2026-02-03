@@ -44,10 +44,7 @@ interface PublishProgressInput {
  * Calls AppSync publishAIProgress mutation via IAM auth.
  * This triggers the onAIProgress subscription for connected clients.
  */
-async function publishProgress(
-  graphqlUrl: string,
-  input: PublishProgressInput
-): Promise<void> {
+async function publishProgress(graphqlUrl: string, input: PublishProgressInput): Promise<void> {
   const { sessionId, progress, message, status, result, error } = input;
 
   const mutation = `
@@ -181,9 +178,7 @@ async function publishProgress(
  * Handles async startAIGeneration event.
  * Publishes progress updates at each stage, then final result.
  */
-export async function handleStartAIGeneration(
-  input: StartAIGenerationInput
-): Promise<void> {
+export async function handleStartAIGeneration(input: StartAIGenerationInput): Promise<void> {
   const { sessionId, projectId, generateEpics, graphqlUrl } = input;
 
   logger.info('Starting async AI generation', { sessionId, projectId, generateEpics });

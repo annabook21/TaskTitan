@@ -45,9 +45,7 @@ export async function batchFetchUsers(userIds: string[]): Promise<Map<string, Us
   logger.debug('Batch fetching users', { count: uniqueIds.length });
 
   try {
-    const results = await batchGet(
-      uniqueIds.map((id) => ({ pk: `USER#${id}`, sk: 'METADATA' }))
-    );
+    const results = await batchGet(uniqueIds.map((id) => ({ pk: `USER#${id}`, sk: 'METADATA' })));
 
     const userMap = new Map<string, UserItem>();
     for (const result of results) {
@@ -82,9 +80,7 @@ export async function batchFetchTeams(teamIds: string[]): Promise<Map<string, Te
   logger.debug('Batch fetching teams', { count: uniqueIds.length });
 
   try {
-    const results = await batchGet(
-      uniqueIds.map((id) => ({ pk: `TEAM#${id}`, sk: 'METADATA' }))
-    );
+    const results = await batchGet(uniqueIds.map((id) => ({ pk: `TEAM#${id}`, sk: 'METADATA' })));
 
     const teamMap = new Map<string, TeamItem>();
     for (const result of results) {
@@ -173,7 +169,7 @@ export async function batchFetchSprints(sprintIds: string[]): Promise<Map<string
  * Returns a Map where key is componentId and value is array of assignments
  */
 export async function batchFetchAssignmentsByComponents(
-  componentIds: string[]
+  componentIds: string[],
 ): Promise<Map<string, AssignmentItem[]>> {
   const uniqueIds = [...new Set(componentIds.filter(Boolean))];
   const resultMap = new Map<string, AssignmentItem[]>();
@@ -188,7 +184,7 @@ export async function batchFetchAssignmentsByComponents(
 
   // Query assignments for each component in parallel with error handling
   const results = await Promise.allSettled(
-    uniqueIds.map((componentId) => assignment.query.primary({ componentId }).go())
+    uniqueIds.map((componentId) => assignment.query.primary({ componentId }).go()),
   );
 
   for (let i = 0; i < results.length; i++) {
@@ -240,11 +236,11 @@ export async function batchFetchDependencies(componentIds: string[]): Promise<{
   const [dependsOnResults, requiredByResults] = await Promise.all([
     // Dependencies where these components DEPEND ON others
     Promise.allSettled(
-      uniqueIds.map((componentId) => dependency.query.primary({ dependentComponentId: componentId }).go())
+      uniqueIds.map((componentId) => dependency.query.primary({ dependentComponentId: componentId }).go()),
     ),
     // Dependencies where OTHER components depend ON these
     Promise.allSettled(
-      uniqueIds.map((componentId) => dependency.query.byRequired({ requiredComponentId: componentId }).go())
+      uniqueIds.map((componentId) => dependency.query.byRequired({ requiredComponentId: componentId }).go()),
     ),
   ]);
 
@@ -288,7 +284,7 @@ export async function batchFetchDependencies(componentIds: string[]): Promise<{
  * Returns a Map where key is componentId and value is array of history entries
  */
 export async function batchFetchStatusHistory(
-  componentIds: string[]
+  componentIds: string[],
 ): Promise<Map<string, Array<{ id: string; status: string; enteredAt: string; exitedAt?: string }>>> {
   const uniqueIds = [...new Set(componentIds.filter(Boolean))];
   const resultMap = new Map<string, Array<{ id: string; status: string; enteredAt: string; exitedAt?: string }>>();
@@ -302,7 +298,7 @@ export async function batchFetchStatusHistory(
   const { componentStatusHistory } = getEntities();
 
   const results = await Promise.allSettled(
-    uniqueIds.map((componentId) => componentStatusHistory.query.primary({ componentId }).go())
+    uniqueIds.map((componentId) => componentStatusHistory.query.primary({ componentId }).go()),
   );
 
   for (let i = 0; i < results.length; i++) {
@@ -419,7 +415,7 @@ export async function fetchProjectDetailData(projectId: string): Promise<{
  * Returns a Map: projectId -> { count, componentsByStatus }.
  */
 export async function getComponentCountsByProjectIds(
-  projectIds: string[]
+  projectIds: string[],
 ): Promise<Map<string, { count: number; componentsByStatus: Record<string, number> }>> {
   const uniqueIds = [...new Set(projectIds.filter(Boolean))];
   const resultMap = new Map<string, { count: number; componentsByStatus: Record<string, number> }>();
@@ -430,9 +426,7 @@ export async function getComponentCountsByProjectIds(
 
   const { component } = getEntities();
 
-  const results = await Promise.allSettled(
-    uniqueIds.map((projectId) => component.query.byProject({ projectId }).go())
-  );
+  const results = await Promise.allSettled(uniqueIds.map((projectId) => component.query.byProject({ projectId }).go()));
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
@@ -462,10 +456,15 @@ export async function getComponentCountsByProjectIds(
  * Returns a Map: componentId -> array of preview items.
  */
 export async function batchFetchPreviewsByComponents(
-  componentIds: string[]
-): Promise<Map<string, Array<{ id: string; componentId: string; htmlContent: string; createdAt: string; status: string }>>> {
+  componentIds: string[],
+): Promise<
+  Map<string, Array<{ id: string; componentId: string; htmlContent: string; createdAt: string; status: string }>>
+> {
   const uniqueIds = [...new Set(componentIds.filter(Boolean))];
-  const resultMap = new Map<string, Array<{ id: string; componentId: string; htmlContent: string; createdAt: string; status: string }>>();
+  const resultMap = new Map<
+    string,
+    Array<{ id: string; componentId: string; htmlContent: string; createdAt: string; status: string }>
+  >();
 
   if (uniqueIds.length === 0) {
     return resultMap;
@@ -474,7 +473,7 @@ export async function batchFetchPreviewsByComponents(
   const { componentPreview } = getEntities();
 
   const results = await Promise.allSettled(
-    uniqueIds.map((componentId) => componentPreview.query.primary({ componentId }).go())
+    uniqueIds.map((componentId) => componentPreview.query.primary({ componentId }).go()),
   );
 
   for (let i = 0; i < results.length; i++) {
@@ -490,7 +489,7 @@ export async function batchFetchPreviewsByComponents(
           htmlContent: p.htmlContent,
           createdAt: p.createdAt,
           status: p.status,
-        }))
+        })),
       );
     } else {
       logger.warn('Failed to fetch previews for component', { componentId, error: result.reason });

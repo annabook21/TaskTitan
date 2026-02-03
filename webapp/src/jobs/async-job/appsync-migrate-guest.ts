@@ -9,11 +9,7 @@
  */
 
 import { logger } from '@/lib/logger';
-import {
-  executeTransaction,
-  createTransactionItem,
-  transactGet,
-} from '@/lib/dynamodb/transactions';
+import { executeTransaction, createTransactionItem, transactGet } from '@/lib/dynamodb/transactions';
 import { getTableName } from '@/lib/dynamodb';
 
 const TABLE_NAME = getTableName();
@@ -31,9 +27,7 @@ export interface MigrationResult {
   message: string | null;
 }
 
-export async function handleAppSyncMigrateGuestToUser(
-  input: MigrateGuestInput
-): Promise<MigrationResult> {
+export async function handleAppSyncMigrateGuestToUser(input: MigrateGuestInput): Promise<MigrationResult> {
   const { guestId, teamId, userId } = input;
 
   logger.info('Starting guest migration', { guestId, teamId, userId });
@@ -57,7 +51,7 @@ export async function handleAppSyncMigrateGuestToUser(
       };
     }
 
-    const guestName = (guestRecord as Record<string, unknown>).displayName as string || 'Guest';
+    const guestName = ((guestRecord as Record<string, unknown>).displayName as string) || 'Guest';
     const hasGuestMembership = guestMembership && Object.keys(guestMembership).length > 0;
     const hasUserMembership = userMembership && Object.keys(userMembership).length > 0;
 
@@ -75,7 +69,7 @@ export async function handleAppSyncMigrateGuestToUser(
         },
         // Condition: guest record must still exist (prevents race conditions)
         ConditionExpression: 'attribute_exists(pk)',
-      })
+      }),
     );
 
     // If guest membership exists, delete it
@@ -87,7 +81,7 @@ export async function handleAppSyncMigrateGuestToUser(
             pk: `TEAM#${teamId}`,
             sk: `MEMBER#${guestId}`,
           },
-        })
+        }),
       );
     }
 
@@ -111,7 +105,7 @@ export async function handleAppSyncMigrateGuestToUser(
           },
           // Condition: user membership must not exist (prevents duplicates)
           ConditionExpression: 'attribute_not_exists(pk)',
-        })
+        }),
       );
 
       logger.info('Will create user membership from guest', {

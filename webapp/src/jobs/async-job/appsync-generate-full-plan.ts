@@ -56,7 +56,7 @@ export interface FullPlanResult {
  */
 export async function handleAppSyncGenerateFullPlan(
   input: GenerateFullPlanInput,
-  identity?: { sub?: string }
+  identity?: { sub?: string },
 ): Promise<FullPlanResult> {
   const { projectId, generateEpics = false } = input;
   const client = getDynamoDBClient();
@@ -72,7 +72,7 @@ export async function handleAppSyncGenerateFullPlan(
         pk: `PROJECT#${projectId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   if (!projectResult.Item) {
@@ -96,21 +96,21 @@ export async function handleAppSyncGenerateFullPlan(
           pk: `TEAM#${teamId}`,
           sk: 'WORKFLOW_CONFIG',
         },
-      })
+      }),
     );
 
     if (workflowResult.Item) {
       workflowConfig = {
         teamId,
-        cycleEnabled: workflowResult.Item.cycleEnabled as boolean ?? true,
-        cycleName: workflowResult.Item.cycleName as string ?? 'Sprint',
-        cycleDurationWeeks: workflowResult.Item.cycleDurationWeeks as number ?? 2,
-        workflowTemplate: workflowResult.Item.workflowTemplate as string ?? 'SCRUM',
-        statusWorkflow: workflowResult.Item.statusWorkflow as string[] | undefined ?? undefined,
-        wipLimitPlanning: workflowResult.Item.wipLimitPlanning as number | null ?? null,
-        wipLimitInProgress: workflowResult.Item.wipLimitInProgress as number | null ?? null,
-        wipLimitBlocked: workflowResult.Item.wipLimitBlocked as number | null ?? null,
-        wipLimitReview: workflowResult.Item.wipLimitReview as number | null ?? null,
+        cycleEnabled: (workflowResult.Item.cycleEnabled as boolean) ?? true,
+        cycleName: (workflowResult.Item.cycleName as string) ?? 'Sprint',
+        cycleDurationWeeks: (workflowResult.Item.cycleDurationWeeks as number) ?? 2,
+        workflowTemplate: (workflowResult.Item.workflowTemplate as string) ?? 'SCRUM',
+        statusWorkflow: (workflowResult.Item.statusWorkflow as string[] | undefined) ?? undefined,
+        wipLimitPlanning: (workflowResult.Item.wipLimitPlanning as number | null) ?? null,
+        wipLimitInProgress: (workflowResult.Item.wipLimitInProgress as number | null) ?? null,
+        wipLimitBlocked: (workflowResult.Item.wipLimitBlocked as number | null) ?? null,
+        wipLimitReview: (workflowResult.Item.wipLimitReview as number | null) ?? null,
       };
     }
   } catch (err) {
@@ -130,7 +130,7 @@ export async function handleAppSyncGenerateFullPlan(
           ':pk': `TEAM#${teamId}`,
           ':sk': 'MEMBER#',
         },
-      })
+      }),
     );
 
     const members = membersResult.Items || [];
@@ -144,7 +144,7 @@ export async function handleAppSyncGenerateFullPlan(
       }));
 
       const totalCapacityHours = memberDetails.reduce((acc, m) => {
-        return acc + (m.hoursPerDay * sprintDays * (m.availability / 100));
+        return acc + m.hoursPerDay * sprintDays * (m.availability / 100);
       }, 0);
 
       teamCapacity = {
@@ -176,7 +176,7 @@ export async function handleAppSyncGenerateFullPlan(
           '#n': 'name',
         },
         Limit: 500,
-      })
+      }),
     );
 
     for (const item of componentsResult.Items || []) {
@@ -197,7 +197,7 @@ export async function handleAppSyncGenerateFullPlan(
     existingComponents,
     generateEpics,
     workflowConfig,
-    teamCapacity
+    teamCapacity,
   );
 
   logger.info('Bedrock token usage', {

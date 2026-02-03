@@ -41,12 +41,12 @@ const assignToSprintSchema = z.object({
 
 /**
  * Creates a new sprint for a team
- * 
+ *
  * Note: The overlap check has a theoretical TOCTOU race condition where two concurrent
  * requests could both pass the overlap check. In practice, this is rare and the business
  * impact is low (admin can manually resolve). Full atomic overlap checking would require
  * more complex patterns (lock table, GSI on date ranges, etc.).
- * 
+ *
  * We mitigate duplicate submissions by using a conditional write that ensures the sprint
  * doesn't already exist.
  */
@@ -115,7 +115,7 @@ export const createSprint = authActionClient.schema(createSprintSchema).action(a
         throw error;
       }
     },
-    { context: { action: 'createSprint', teamId, sprintId } }
+    { context: { action: 'createSprint', teamId, sprintId } },
   );
 
   revalidatePath(`/team/${teamId}`);
@@ -159,7 +159,7 @@ export const updateSprint = authActionClient.schema(updateSprintSchema).action(a
       const updated = await sprint.update({ id }).set(updateData).go({ response: 'all_new' });
       return updated.data;
     },
-    { context: { action: 'updateSprint', sprintId: id } }
+    { context: { action: 'updateSprint', sprintId: id } },
   );
 
   revalidatePath(`/team/${teamId}`);
@@ -208,7 +208,7 @@ export const updateSprintStatus = authActionClient.schema(sprintStatusSchema).ac
       const updated = await sprint.update({ id }).set({ status }).go({ response: 'all_new' });
       return updated.data;
     },
-    { context: { action: 'updateSprintStatus', sprintId: id, status } }
+    { context: { action: 'updateSprintStatus', sprintId: id, status } },
   );
 
   revalidatePath(`/team/${teamId}`);
@@ -256,12 +256,15 @@ export const assignComponentToSprint = authActionClient
       async () => null, // Prisma removed - DynamoDB only
       async () => {
         const { component } = getEntities();
-        const updated = await component.update({ id: componentId }).set({ sprintId: sprintId ?? undefined }).go({
-          response: 'all_new',
-        });
+        const updated = await component
+          .update({ id: componentId })
+          .set({ sprintId: sprintId ?? undefined })
+          .go({
+            response: 'all_new',
+          });
         return updated.data;
       },
-      { context: { action: 'assignComponentToSprint', componentId, sprintId } }
+      { context: { action: 'assignComponentToSprint', componentId, sprintId } },
     );
 
     revalidatePath(`/projects/${projectId}`);
@@ -303,13 +306,11 @@ export const deleteSprint = authActionClient
       async () => {
         // First: Unassign all components from this sprint to prevent orphan references
         const componentsInSprint = await componentEntity.query.bySprint({ sprintId: id }).go();
-        
+
         if (componentsInSprint.data.length > 0) {
           // Use Promise.allSettled to continue even if some updates fail
           await Promise.allSettled(
-            componentsInSprint.data.map((c) =>
-              componentEntity.update({ id: c.id }).set({ sprintId: undefined }).go()
-            )
+            componentsInSprint.data.map((c) => componentEntity.update({ id: c.id }).set({ sprintId: undefined }).go()),
           );
         }
 
@@ -317,7 +318,7 @@ export const deleteSprint = authActionClient
         await sprintEntity.delete({ id }).go();
         return { success: true };
       },
-      { context: { action: 'deleteSprint', sprintId: id } }
+      { context: { action: 'deleteSprint', sprintId: id } },
     );
 
     revalidatePath(`/team/${teamId}`);

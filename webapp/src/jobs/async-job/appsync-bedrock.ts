@@ -12,10 +12,7 @@ import { logger } from '@/lib/logger';
  * Invokes Bedrock with the given prompt and returns the generated text.
  * Used by AppSync mutation generateComponentViaAI(projectId, prompt).
  */
-export async function handleAppSyncGenerateComponentViaAI(
-  projectId: string,
-  prompt: string,
-): Promise<string> {
+export async function handleAppSyncGenerateComponentViaAI(projectId: string, prompt: string): Promise<string> {
   logger.info('AppSync generateComponentViaAI', { projectId, promptLength: prompt.length });
 
   const client = getBedrockClient();

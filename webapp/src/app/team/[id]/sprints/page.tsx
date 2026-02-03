@@ -81,7 +81,7 @@ export default async function SprintsPage({ params }: Props) {
 
   // Sort sprints by startDate desc
   const sortedSprints = sprintsResult.data.sort(
-    (a, b) => new Date(b.startDate || 0).getTime() - new Date(a.startDate || 0).getTime()
+    (a, b) => new Date(b.startDate || 0).getTime() - new Date(a.startDate || 0).getTime(),
   );
 
   // For each sprint, get component counts and details
@@ -91,7 +91,7 @@ export default async function SprintsPage({ params }: Props) {
 
   // Get all components for all projects
   const componentResults = await Promise.all(
-    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
   );
   const allComponents = componentResults.flatMap((r) => r.data);
 

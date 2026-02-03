@@ -18,9 +18,7 @@ export interface GenerateWireframeResult {
   componentName: string;
 }
 
-export async function handleAppSyncGenerateWireframe(
-  input: GenerateWireframeInput
-): Promise<GenerateWireframeResult> {
+export async function handleAppSyncGenerateWireframe(input: GenerateWireframeInput): Promise<GenerateWireframeResult> {
   logger.info('Generating wireframe', { componentId: input.componentId });
 
   const client = getDynamoDBClient();
@@ -34,7 +32,7 @@ export async function handleAppSyncGenerateWireframe(
         pk: `COMPONENT#${input.componentId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   if (!componentResult.Item) {

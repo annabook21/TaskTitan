@@ -119,7 +119,7 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
     const projects = await entities.project.query.byTeam({ teamId: access.sprint.teamId }).go();
     const projectIds = projects.data.map((p) => p.id);
     const componentResults = await Promise.all(
-      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
     );
     const allComponents = componentResults.flatMap((r) => r.data);
     const sprintComponents = allComponents
@@ -234,7 +234,7 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
           .go({ response: 'all_new' });
         return updated.data;
       },
-      { context: { action: 'refineExistingSprint', sprintId } }
+      { context: { action: 'refineExistingSprint', sprintId } },
     );
   }
 
@@ -258,7 +258,7 @@ export const refineExistingSprint = authActionClient.schema(refineSprintSchema).
             .go({ response: 'all_new' });
           return updated.data;
         },
-        { context: { action: 'refineExistingSprint', sprintId, componentId } }
+        { context: { action: 'refineExistingSprint', sprintId, componentId } },
       );
     }
   }

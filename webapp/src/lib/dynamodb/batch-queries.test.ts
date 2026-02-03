@@ -86,13 +86,9 @@ describe('batch-queries', () => {
     });
 
     it('calls batchGet with COMPONENT# keys', async () => {
-      mockBatchGet.mockResolvedValue([
-        { id: 'c1', name: 'Comp 1', projectId: 'p1', status: 'PLANNING' },
-      ]);
+      mockBatchGet.mockResolvedValue([{ id: 'c1', name: 'Comp 1', projectId: 'p1', status: 'PLANNING' }]);
       const result = await batchFetchComponents(['c1']);
-      expect(mockBatchGet).toHaveBeenCalledWith([
-        { pk: 'COMPONENT#c1', sk: 'METADATA' },
-      ]);
+      expect(mockBatchGet).toHaveBeenCalledWith([{ pk: 'COMPONENT#c1', sk: 'METADATA' }]);
       expect(result.get('c1')).toMatchObject({ id: 'c1', name: 'Comp 1' });
     });
   });
@@ -105,13 +101,9 @@ describe('batch-queries', () => {
     });
 
     it('calls batchGet with PROJECT# keys', async () => {
-      mockBatchGet.mockResolvedValue([
-        { id: 'p1', name: 'Project One', teamId: 't1' },
-      ]);
+      mockBatchGet.mockResolvedValue([{ id: 'p1', name: 'Project One', teamId: 't1' }]);
       const result = await batchFetchProjects(['p1']);
-      expect(mockBatchGet).toHaveBeenCalledWith([
-        { pk: 'PROJECT#p1', sk: 'METADATA' },
-      ]);
+      expect(mockBatchGet).toHaveBeenCalledWith([{ pk: 'PROJECT#p1', sk: 'METADATA' }]);
       expect(result.get('p1')).toMatchObject({ id: 'p1', name: 'Project One' });
     });
   });
@@ -124,13 +116,9 @@ describe('batch-queries', () => {
     });
 
     it('calls batchGet with SPRINT# keys', async () => {
-      mockBatchGet.mockResolvedValue([
-        { id: 's1', name: 'Sprint 1', teamId: 't1', status: 'PLANNING' },
-      ]);
+      mockBatchGet.mockResolvedValue([{ id: 's1', name: 'Sprint 1', teamId: 't1', status: 'PLANNING' }]);
       const result = await batchFetchSprints(['s1']);
-      expect(mockBatchGet).toHaveBeenCalledWith([
-        { pk: 'SPRINT#s1', sk: 'METADATA' },
-      ]);
+      expect(mockBatchGet).toHaveBeenCalledWith([{ pk: 'SPRINT#s1', sk: 'METADATA' }]);
       expect(result.get('s1')).toMatchObject({ id: 's1', name: 'Sprint 1' });
     });
   });
@@ -191,7 +179,8 @@ describe('batch-queries', () => {
     });
 
     it('returns preview list per component', async () => {
-      const mockGo = vi.fn()
+      const mockGo = vi
+        .fn()
         .mockResolvedValueOnce({
           data: [
             { id: 'prev1', componentId: 'c1', htmlContent: '<p>Hi</p>', createdAt: '2025-01-01', status: 'COMPLETED' },

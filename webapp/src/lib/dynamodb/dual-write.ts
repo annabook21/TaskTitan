@@ -39,7 +39,7 @@ export async function dualWrite<T>(
   operation: WriteOperation,
   _prismaOperation: () => Promise<unknown>,
   dynamoOperation: () => Promise<T>,
-  options: WriteOptions = {}
+  options: WriteOptions = {},
 ): Promise<WriteResult<T>> {
   const logContext = {
     entityName,
@@ -73,7 +73,7 @@ export async function dualRead<T>(
   entityName: EntityName,
   _prismaReader: () => Promise<unknown>,
   dynamoReader: () => Promise<T>,
-  options: WriteOptions = {}
+  options: WriteOptions = {},
 ): Promise<T> {
   const logContext = {
     entityName,

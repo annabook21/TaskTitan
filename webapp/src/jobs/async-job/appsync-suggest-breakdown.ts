@@ -28,9 +28,7 @@ export interface SuggestBreakdownResult {
   recommendedApproach: string;
 }
 
-export async function handleAppSyncSuggestBreakdown(
-  input: SuggestBreakdownInput
-): Promise<SuggestBreakdownResult> {
+export async function handleAppSyncSuggestBreakdown(input: SuggestBreakdownInput): Promise<SuggestBreakdownResult> {
   logger.info('Suggesting breakdown', {
     componentId: input.componentId,
     projectId: input.projectId,
@@ -47,7 +45,7 @@ export async function handleAppSyncSuggestBreakdown(
         pk: `COMPONENT#${input.componentId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   if (!componentResult.Item) {
@@ -74,7 +72,7 @@ export async function handleAppSyncSuggestBreakdown(
           '#t': 'type',
         },
         Limit: 50,
-      })
+      }),
     );
 
     relatedComponents = (queryResult.Items || [])

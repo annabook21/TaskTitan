@@ -13,14 +13,10 @@ import { randomBytes } from 'crypto';
 export const handler = async (): Promise<{ token: string }> => {
   // Generate 32 bytes (256 bits) of cryptographically secure random data
   const randomBytesBuffer = randomBytes(32);
-  
+
   // Convert to Base64URL encoding (URL-safe variant of Base64)
   // Base64URL: uses '-' and '_' instead of '+' and '/', and omits padding '='
-  const token = randomBytesBuffer
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, ''); // Remove padding
-  
+  const token = randomBytesBuffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, ''); // Remove padding
+
   return { token };
 };

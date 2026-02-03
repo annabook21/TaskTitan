@@ -78,7 +78,8 @@ export class AppSyncGraphql extends Construct {
 
     // VTL template for mutations with input wrapper (e.g., $ctx.arguments.input)
     const lambdaRequestWithOperation = (useInput: boolean = true) =>
-      appsync.MappingTemplate.fromString(`
+      appsync.MappingTemplate.fromString(
+        `
 #set($inputMap = ${useInput ? '$ctx.arguments.input' : '$ctx.arguments'})
 $util.qr($inputMap.put("__operation", "$ctx.info.fieldName"))
 {
@@ -86,11 +87,16 @@ $util.qr($inputMap.put("__operation", "$ctx.info.fieldName"))
   "operation": "Invoke",
   "payload": $util.toJson($inputMap)
 }
-`.trim());
+`.trim(),
+      );
 
     // Grant Lambda permission to call AppSync mutations (for async progress updates)
     // AWS Best Practice: Scope IAM permissions to specific GraphQL operations
-    this.api.grant(asyncJob.handler, appsync.IamResource.custom('types/Mutation/fields/publishAIProgress'), 'appsync:GraphQL');
+    this.api.grant(
+      asyncJob.handler,
+      appsync.IamResource.custom('types/Mutation/fields/publishAIProgress'),
+      'appsync:GraphQL',
+    );
 
     // Lambda for user registration (AdminCreateUser - requires unauthenticated access)
     // AWS Documentation: https://docs.aws.amazon.com/cognito/latest/developerguide/how-to-create-user-accounts.html
@@ -150,7 +156,8 @@ $util.qr($inputMap.put("__operation", "$ctx.info.fieldName"))
       fieldName: 'getProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -167,7 +174,8 @@ export function response(ctx) {
   }
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getCurrentUser (JS) - Upsert pattern: creates User if not exists
@@ -181,7 +189,8 @@ export function response(ctx) {
       fieldName: 'getCurrentUser',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -251,7 +260,8 @@ export function response(ctx) {
   // UpdateItem returns the updated attributes
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.syncUserProfile (JS) - Updates user email/name from ID token
@@ -263,7 +273,8 @@ export function response(ctx) {
       fieldName: 'syncUserProfile',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -306,7 +317,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -321,7 +333,8 @@ export function response(ctx) {
       name: 'queryUserMemberships',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -349,7 +362,8 @@ export function response(ctx) {
   ctx.stash.memberships = memberships;
   return memberships;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Delete user record and all memberships
@@ -358,7 +372,8 @@ export function response(ctx) {
       name: 'deleteUserAndMemberships',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.stash.userId;
@@ -394,7 +409,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 3: Delete user from Cognito (Lambda)
@@ -404,7 +420,8 @@ export function response(ctx) {
       name: 'deleteCognitoUser',
       dataSource: deleteUserDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.stash.userId;
@@ -423,7 +440,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: deleteCurrentUser
@@ -436,14 +454,16 @@ export function response(ctx) {
       fieldName: 'deleteCurrentUser',
       pipelineConfig: [queryUserMembershipsFn, deleteUserAndMembershipsFn, deleteCognitoUserFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getUserByEmail (JS) - Query GSI1 gsi1pk=EMAIL#email
@@ -453,7 +473,8 @@ export function response(ctx) {
       fieldName: 'getUserByEmail',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const email = ctx.args.email;
@@ -475,7 +496,8 @@ export function response(ctx) {
   const items = ctx.result.items || [];
   return items.length > 0 ? items[0] : null;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getTeam (JS) - GetItem pk=TEAM#id, sk=METADATA
@@ -485,7 +507,8 @@ export function response(ctx) {
       fieldName: 'getTeam',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -500,7 +523,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline functions for getTeamWithMembers
@@ -510,7 +534,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.args.teamId;
@@ -540,7 +565,8 @@ export function response(ctx) {
   ctx.stash.members = members;
   return { team, members };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Batch fetch user details for all members
@@ -549,7 +575,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const members = ctx.stash.members || [];
@@ -589,7 +616,8 @@ export function response(ctx) {
 
   return { team, members: membersWithUsers };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getTeamWithMembers (Pipeline) - Query team + members, then batch fetch user details
@@ -599,10 +627,12 @@ export function response(ctx) {
       fieldName: 'getTeamWithMembers',
       pipelineConfig: [getTeamAndMembersFn, batchGetMemberUsersFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline functions for listTeamsForUser
@@ -611,7 +641,8 @@ export function response(ctx) { return ctx.prev.result; }
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -631,7 +662,8 @@ export function response(ctx) {
   ctx.stash.memberships = ctx.result.items || [];
   return ctx.result.items || [];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Batch get team metadata
@@ -644,7 +676,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const memberships = ctx.stash.memberships || [];
@@ -692,7 +725,10 @@ export function response(ctx) {
     members: teamMemberMap[teamId]
   })).filter(t => t.team && t.team.name !== 'Unknown');
 }
-`.trim().replace(/#{tableName}/g, dynamoTable.tableName)),
+`
+          .trim()
+          .replace(/#{tableName}/g, dynamoTable.tableName),
+      ),
     });
 
     // Resolver: Query.listTeamsForUser (Pipeline) - Query user memberships → batch get teams
@@ -701,10 +737,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'listTeamsForUser',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [listMembershipsForUserFn, batchGetTeamsFn],
     });
 
@@ -715,7 +753,8 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'listProjectsByTeam',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.args.teamId;
@@ -735,7 +774,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result.items || [];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.listProjectsForUser (JS) - Query GSI1 gsi1pk=OWNER#userId
@@ -745,7 +785,8 @@ export function response(ctx) {
       fieldName: 'listProjectsForUser',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -765,7 +806,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result.items || [];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.createProject (JS) - PutItem PROJECT#id METADATA + GSI keys (client sends id)
@@ -775,7 +817,8 @@ export function response(ctx) {
       fieldName: 'createProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -814,7 +857,8 @@ export function response(ctx) {
   const now = util.time.nowISO8601();
   return { id: input.id, name: input.name, description: input.description || null, teamId: input.teamId, ownerId: input.ownerId, createdAt: now, updatedAt: now };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.updateProject (JS) - UpdateItem pk=PROJECT#id, sk=METADATA
@@ -824,7 +868,8 @@ export function response(ctx) {
       fieldName: 'updateProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const projectId = ctx.args.id;
@@ -853,7 +898,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.deleteProject (JS) - DeleteItem pk=PROJECT#id, sk=METADATA
@@ -864,7 +910,8 @@ export function response(ctx) {
       fieldName: 'deleteProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const projectId = ctx.args.id;
@@ -886,7 +933,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.createTeam (JS) - TransactWrite: Team + Membership (OWNER)
@@ -896,7 +944,8 @@ export function response(ctx) {
       fieldName: 'createTeam',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -945,7 +994,8 @@ export function response(ctx) {
   const membership = { id: util.autoId(), userId, teamId: input.id, role: 'OWNER', joinedAt: now, title: null, hoursPerDay: 6, availability: 100 };
   return { team, members: [membership] };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.updateTeam (JS) - UpdateItem pk=TEAM#id, sk=METADATA
@@ -955,7 +1005,8 @@ export function response(ctx) {
       fieldName: 'updateTeam',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.args.teamId;
@@ -984,7 +1035,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -1000,7 +1052,8 @@ export function response(ctx) {
       name: 'verifyOwnerAndQueryTeam',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.args.teamId;
@@ -1046,7 +1099,8 @@ export function response(ctx) {
   ctx.stash.itemsToDelete = items;
   return items;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Query team invites for deletion
@@ -1055,7 +1109,8 @@ export function response(ctx) {
       name: 'queryTeamInvitesForDelete',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.stash.teamId;
@@ -1083,7 +1138,8 @@ export function response(ctx) {
   ctx.stash.itemsToDelete = [...(ctx.stash.itemsToDelete || []), ...invites];
   return invites;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 3: Batch delete all team items
@@ -1092,7 +1148,8 @@ export function response(ctx) {
       name: 'batchDeleteTeamItems',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const items = ctx.stash.itemsToDelete || [];
@@ -1121,7 +1178,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: deleteTeam
@@ -1131,14 +1189,16 @@ export function response(ctx) {
       fieldName: 'deleteTeam',
       pipelineConfig: [verifyOwnerAndQueryTeamFn, queryTeamInvitesForDeleteFn, batchDeleteTeamItemsFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.addTeamMember (JS) - TransactWrite: PutItem Membership + Increment memberCount
@@ -1149,7 +1209,8 @@ export function response(ctx) {
       fieldName: 'addTeamMember',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -1202,7 +1263,8 @@ export function response(ctx) {
   }
   return ctx.stash.membership;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.removeTeamMember (JS) - TransactWrite: DeleteItem Membership + Decrement memberCount
@@ -1213,7 +1275,8 @@ export function response(ctx) {
       fieldName: 'removeTeamMember',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.args.teamId;
@@ -1252,7 +1315,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.updateMemberRole (JS) - UpdateItem Membership role
@@ -1262,7 +1326,8 @@ export function response(ctx) {
       fieldName: 'updateMemberRole',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -1283,7 +1348,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ========== COMPONENT RESOLVERS ==========
@@ -1295,7 +1361,8 @@ export function response(ctx) {
       fieldName: 'getComponent',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1310,7 +1377,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.listComponentsByProject (JS) - Query GSI1 gsi1pk=PROJECT#projectId
@@ -1320,7 +1388,8 @@ export function response(ctx) {
       fieldName: 'listComponentsByProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1339,7 +1408,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result.items || [];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline functions for getComponentChildren
@@ -1348,7 +1418,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1370,7 +1441,8 @@ export function response(ctx) {
   ctx.stash.projectId = parent.projectId;
   return parent;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const queryChildComponentsFn = new appsync.AppsyncFunction(this, 'QueryChildComponentsFn', {
@@ -1378,7 +1450,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const projectId = ctx.stash.projectId;
@@ -1405,7 +1478,8 @@ export function response(ctx) {
   // Filter to only return children of the specified parent
   return items.filter(item => item.parentId === parentId);
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getComponentChildren (Pipeline) - Get parent, then query project components filtered by parentId
@@ -1414,10 +1488,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'getComponentChildren',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [getParentComponentFn, queryChildComponentsFn],
     });
 
@@ -1428,7 +1504,8 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'createComponent',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -1492,7 +1569,8 @@ export function response(ctx) {
     updatedAt: now
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.updateComponent (JS) - UpdateItem with dynamic fields
@@ -1502,7 +1580,8 @@ export function response(ctx) {
       fieldName: 'updateComponent',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.id;
@@ -1549,7 +1628,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline functions for deleteComponent with cascade dependency deletion
@@ -1558,7 +1638,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   ctx.stash.componentId = ctx.args.id;
@@ -1578,7 +1659,8 @@ export function response(ctx) {
   ctx.stash.dependencies = ctx.result.items || [];
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const queryDependentsFn = new appsync.AppsyncFunction(this, 'QueryDependentsForDeleteFn', {
@@ -1586,7 +1668,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1605,7 +1688,8 @@ export function response(ctx) {
   ctx.stash.dependents = ctx.result.items || [];
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const batchDeleteComponentFn = new appsync.AppsyncFunction(this, 'BatchDeleteComponentFn', {
@@ -1613,7 +1697,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -1671,7 +1756,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.deleteComponent (Pipeline) - Query dependencies, then batch delete
@@ -1680,10 +1766,12 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'deleteComponent',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [queryDependenciesFn, queryDependentsFn, batchDeleteComponentFn],
     });
 
@@ -1696,7 +1784,8 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'getDependencies',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1718,7 +1807,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getDependents (JS) - Query GSI1 gsi1pk=REQUIRED_BY#id
@@ -1728,7 +1818,8 @@ export function response(ctx) {
       fieldName: 'getDependents',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1750,7 +1841,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.addDependency (JS) - TransactWriteItems to create dependency with validation
@@ -1760,7 +1852,8 @@ export function response(ctx) {
       fieldName: 'addDependency',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const fromId = ctx.args.fromComponentId;
@@ -1832,7 +1925,8 @@ export function response(ctx) {
   const now = util.time.nowISO8601();
   return { fromComponentId: fromId, toComponentId: toId, createdAt: now };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.removeDependency (JS) - DeleteItem with existence check
@@ -1842,7 +1936,8 @@ export function response(ctx) {
       fieldName: 'removeDependency',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const fromId = ctx.args.fromComponentId;
@@ -1865,7 +1960,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ========== SPRINT RESOLVERS ==========
@@ -1877,7 +1973,8 @@ export function response(ctx) {
       fieldName: 'getSprint',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1892,7 +1989,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.listSprintsByTeam (JS) - Query GSI1 gsi1pk=TEAM#teamId
@@ -1902,7 +2000,8 @@ export function response(ctx) {
       fieldName: 'listSprintsByTeam',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1921,7 +2020,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result.items || [];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline functions for getSprintWithComponents
@@ -1930,7 +2030,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   ctx.stash.sprintId = ctx.args.sprintId;
@@ -1950,7 +2051,8 @@ export function response(ctx) {
   ctx.stash.sprint = ctx.result;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const querySprintComponentsFn = new appsync.AppsyncFunction(this, 'QuerySprintComponentsFn', {
@@ -1958,7 +2060,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -1979,7 +2082,8 @@ export function response(ctx) {
     components: ctx.result.items || []
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getSprintWithComponents (Pipeline)
@@ -1988,10 +2092,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'getSprintWithComponents',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [getSprintFn, querySprintComponentsFn],
     });
 
@@ -2002,7 +2108,8 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'createSprint',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -2051,7 +2158,8 @@ export function response(ctx) {
     updatedAt: now
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.updateSprint (JS) - UpdateItem
@@ -2061,7 +2169,8 @@ export function response(ctx) {
       fieldName: 'updateSprint',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const sprintId = ctx.args.id;
@@ -2096,7 +2205,8 @@ export function response(ctx) {
   }
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.deleteSprint (JS) - DeleteItem
@@ -2106,7 +2216,8 @@ export function response(ctx) {
       fieldName: 'deleteSprint',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -2127,7 +2238,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -2141,7 +2253,8 @@ export function response(ctx) {
       name: 'getSprintForAuth',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   ctx.stash.userId = ctx.identity.sub;
@@ -2161,7 +2274,8 @@ export function response(ctx) {
   ctx.stash.teamId = ctx.result.teamId;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Verify user is team member with adequate role for sprint operations
@@ -2170,7 +2284,8 @@ export function response(ctx) {
       name: 'verifyTeamMemberForSprint',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -2192,7 +2307,8 @@ export function response(ctx) {
   ctx.stash.membership = ctx.result;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Update sprint status to ACTIVE (start)
@@ -2201,7 +2317,8 @@ export function response(ctx) {
       name: 'startSprintStatus',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const now = util.time.nowISO8601();
@@ -2230,7 +2347,8 @@ export function response(ctx) {
   ctx.stash.mainResult = ctx.result;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Update sprint status to COMPLETED
@@ -2239,7 +2357,8 @@ export function response(ctx) {
       name: 'completeSprintStatus',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const now = util.time.nowISO8601();
@@ -2268,7 +2387,8 @@ export function response(ctx) {
   ctx.stash.mainResult = ctx.result;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Update sprint status from COMPLETED back to ACTIVE (reopen)
@@ -2277,7 +2397,8 @@ export function response(ctx) {
       name: 'reopenSprintStatus',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const now = util.time.nowISO8601();
@@ -2306,7 +2427,8 @@ export function response(ctx) {
   ctx.stash.mainResult = ctx.result;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Create activity record for sprint status changes
@@ -2316,7 +2438,8 @@ export function response(ctx) {
       name: 'createSprintActivity',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   // Skip if no activity data provided
@@ -2355,7 +2478,8 @@ export function response(ctx) {
   // Return the main result (updated sprint) regardless of activity creation outcome
   return ctx.stash.mainResult || ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.startSprint - Auth + Status Update + Activity Log
@@ -2365,10 +2489,12 @@ export function response(ctx) {
       fieldName: 'startSprint',
       pipelineConfig: [getSprintForAuthFn, verifyTeamMemberForSprintFn, startSprintStatusFn, createSprintActivityFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.completeSprint - Auth + Status Update + Activity Log
@@ -2378,10 +2504,12 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'completeSprint',
       pipelineConfig: [getSprintForAuthFn, verifyTeamMemberForSprintFn, completeSprintStatusFn, createSprintActivityFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.reopenSprint - Auth + Status Update + Activity Log
@@ -2392,10 +2520,12 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'reopenSprint',
       pipelineConfig: [getSprintForAuthFn, verifyTeamMemberForSprintFn, reopenSprintStatusFn, createSprintActivityFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.assignComponentToSprint (JS) - UpdateItem component with sprintId + GSI2
@@ -2405,7 +2535,8 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'assignComponentToSprint',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.componentId;
@@ -2441,7 +2572,8 @@ export function response(ctx) {
   }
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.removeComponentFromSprint (JS) - UpdateItem to clear sprintId + GSI2
@@ -2451,7 +2583,8 @@ export function response(ctx) {
       fieldName: 'removeComponentFromSprint',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.componentId;
@@ -2484,7 +2617,8 @@ export function response(ctx) {
   }
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ========== ASSIGNMENT RESOLVERS ==========
@@ -2495,7 +2629,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -2517,7 +2652,8 @@ export function response(ctx) {
   ctx.stash.assignments = ctx.result.items || [];
   return ctx.result.items || [];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const batchGetAssignmentComponentsFn = new appsync.AppsyncFunction(this, 'BatchGetAssignmentComponentsFn', {
@@ -2525,7 +2661,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const assignments = ctx.stash.assignments || [];
@@ -2558,7 +2695,10 @@ export function response(ctx) {
     component: componentMap[a.componentId] || null
   })).filter(item => item.component !== null);
 }
-`.trim().replace(/#{tableName}/g, dynamoTable.tableName)),
+`
+          .trim()
+          .replace(/#{tableName}/g, dynamoTable.tableName),
+      ),
     });
 
     // Resolver: Query.listAssignmentsForUser (Pipeline) - Query user assignments → batch get components
@@ -2567,10 +2707,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'listAssignmentsForUser',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [queryAssignmentsForUserFn, batchGetAssignmentComponentsFn],
     });
 
@@ -2581,7 +2723,8 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'listAssignmentsForComponent',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -2606,7 +2749,8 @@ export function response(ctx) {
     isGuest: item.isGuest || false
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.assignUserToComponent (Pipeline)
@@ -2619,7 +2763,8 @@ export function response(ctx) {
       name: 'getComponentForAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.componentId;
@@ -2640,7 +2785,8 @@ export function response(ctx) {
   ctx.stash.component = ctx.result;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // AWS Best Practice: Authorization check - verify user is project owner or team admin
@@ -2650,7 +2796,8 @@ export function response(ctx) {
       name: 'authorizeAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const component = ctx.stash.component;
@@ -2694,7 +2841,8 @@ export function response(ctx) {
   
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // AWS Best Practice: Check team membership role if not project owner
@@ -2703,7 +2851,8 @@ export function response(ctx) {
       name: 'checkTeamRoleForAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   // If user is already authorized as project owner, skip this check
@@ -2752,7 +2901,8 @@ export function response(ctx) {
   // User is authorized
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Check for existing assignments before allowing new ones
@@ -2761,7 +2911,8 @@ export function response(ctx) {
       name: 'checkNoExistingAssignments',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -2785,7 +2936,8 @@ export function response(ctx) {
   }
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const createAssignmentFn = new appsync.AppsyncFunction(this, 'CreateAssignmentFn', {
@@ -2793,7 +2945,8 @@ export function response(ctx) {
       name: 'createAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -2838,7 +2991,8 @@ export function response(ctx) {
   const a = ctx.stash.assignment;
   return { id: a.id, componentId: a.componentId, userId: a.userId, assignedAt: a.assignedAt };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Step 4: Update component's owner field to sync with assignment
@@ -2847,7 +3001,8 @@ export function response(ctx) {
       name: 'updateComponentOwner',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -2871,7 +3026,8 @@ export function response(ctx) {
   // Return the assignment from the previous step
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     new appsync.Resolver(this, 'AssignUserToComponentResolver', {
@@ -2884,13 +3040,15 @@ export function response(ctx) {
         checkTeamRoleForAssignmentFn,
         checkNoExistingAssignmentsFn,
         createAssignmentFn,
-        updateComponentOwnerFn
+        updateComponentOwnerFn,
       ],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.unassignUserFromComponent (Pipeline)
@@ -2902,7 +3060,8 @@ export function response(ctx) { return ctx.prev.result; }
       name: 'getComponentForUnassignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.componentId;
@@ -2923,7 +3082,8 @@ export function response(ctx) {
   ctx.stash.component = ctx.result;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const deleteAssignmentFn = new appsync.AppsyncFunction(this, 'DeleteAssignmentFn', {
@@ -2931,7 +3091,8 @@ export function response(ctx) {
       name: 'deleteAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.componentId;
@@ -2955,7 +3116,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Step 2: Clear component's owner field
@@ -2964,7 +3126,8 @@ export function response(ctx) {
       name: 'clearComponentOwner',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -2986,7 +3149,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     new appsync.Resolver(this, 'UnassignUserFromComponentResolver', {
@@ -2998,13 +3162,15 @@ export function response(ctx) {
         authorizeAssignmentFn,
         checkTeamRoleForAssignmentFn,
         deleteAssignmentFn,
-        clearComponentOwnerFn
+        clearComponentOwnerFn,
       ],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ========== ACTIVITY & NOTIFICATION RESOLVERS ==========
@@ -3016,7 +3182,8 @@ export function response(ctx) { return ctx.prev.result; }
       fieldName: 'listActivitiesForProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const limit = ctx.args.limit || 50;
@@ -3044,7 +3211,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Query notifications and compute read status using timestamp
@@ -3053,7 +3221,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.stash.userId;
@@ -3107,7 +3276,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Get user's notificationsReadUntil timestamp (shared by multiple resolvers)
@@ -3116,7 +3286,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -3135,7 +3306,8 @@ export function response(ctx) {
   ctx.stash.notificationsReadUntil = ctx.result?.notificationsReadUntil || '1970-01-01T00:00:00.000Z';
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.listNotificationsForUser (Pipeline) - Uses timestamp for read status computation
@@ -3145,10 +3317,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'listNotificationsForUser',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [getUserReadUntilFn, queryNotificationsWithReadStatusFn],
     });
 
@@ -3158,7 +3332,8 @@ export function response(ctx) { return ctx.prev.result; }
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.stash.userId;
@@ -3181,7 +3356,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result.count || 0;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.countUnreadNotifications (Pipeline) - Uses timestamp for O(1) counting
@@ -3191,10 +3367,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'countUnreadNotifications',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [getUserReadUntilFn, countNotificationsAfterFn],
     });
 
@@ -3204,7 +3382,8 @@ export function response(ctx) { return ctx.prev.result; }
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const notification = ctx.stash.notification || ctx.prev.result;
@@ -3225,7 +3404,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Override markNotificationRead to use pipeline
@@ -3235,7 +3415,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -3265,7 +3446,8 @@ export function response(ctx) {
   ctx.stash.notification = items[0];
   return items[0];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.markNotificationRead (Pipeline)
@@ -3274,7 +3456,8 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'markNotificationRead',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) {
   const notification = ctx.stash.notification;
@@ -3290,7 +3473,8 @@ export function response(ctx) {
     createdAt: notification.createdAt
   };
 }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [findNotificationFn, updateNotificationReadFn],
     });
 
@@ -3303,7 +3487,8 @@ export function response(ctx) {
       fieldName: 'markAllNotificationsRead',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -3333,7 +3518,8 @@ export function response(ctx) {
   // The frontend should refresh the notification list after this call
   return 0;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ==================== COMMENTS RESOLVERS ====================
@@ -3347,7 +3533,8 @@ export function response(ctx) {
       fieldName: 'listCommentsForComponent',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const limit = ctx.args.limit || 50;
@@ -3378,7 +3565,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Get component and project info for comment creation
@@ -3387,7 +3575,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -3405,7 +3594,8 @@ export function response(ctx) {
   ctx.stash.projectId = ctx.result.projectId;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Get user info for comment author
@@ -3414,7 +3604,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -3433,7 +3624,8 @@ export function response(ctx) {
   ctx.stash.authorName = ctx.result?.name || ctx.result?.email || 'Unknown User';
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Create comment item
@@ -3443,7 +3635,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const id = util.autoId();
@@ -3494,7 +3687,8 @@ export function response(ctx) {
     createdAt: comment.createdAt
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.createComment (Pipeline) - Creates comment with author info
@@ -3503,10 +3697,12 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'createComment',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [getComponentForCommentFn, getUserForCommentFn, createCommentItemFn],
     });
 
@@ -3520,7 +3716,8 @@ export function response(ctx) { return ctx.prev.result; }
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -3557,7 +3754,8 @@ export function response(ctx) {
   ctx.stash.guest = guest;
   return guest;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Query comments for component (guest)
@@ -3566,7 +3764,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const limit = ctx.args.limit || 50;
@@ -3597,7 +3796,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.guestListComments (Pipeline) - List comments with guest verification
@@ -3606,10 +3806,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'guestListComments',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [verifyGuestForListCommentsFn, queryCommentsForGuestFn],
     });
 
@@ -3624,7 +3826,8 @@ export function response(ctx) { return ctx.prev.result; }
       name: 'createActivity',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   // Skip if no activity data provided
@@ -3666,7 +3869,8 @@ export function response(ctx) {
   // Activity creation is a side effect and should not fail the main operation
   return ctx.stash.mainResult || ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Verify guest and get component for guest comment
@@ -3675,7 +3879,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -3715,7 +3920,8 @@ export function response(ctx) {
 
   return guest;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Get component for guest comment
@@ -3724,7 +3930,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -3747,7 +3954,8 @@ export function response(ctx) {
   ctx.stash.projectId = ctx.result.projectId;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Create comment for guest
@@ -3757,7 +3965,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const id = util.autoId();
@@ -3820,7 +4029,8 @@ export function response(ctx) {
 
   return result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.guestCreateComment (Pipeline) - Creates comment for guest
@@ -3829,11 +4039,18 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'guestCreateComment',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result; }
-`.trim()),
-      pipelineConfig: [verifyGuestAndGetComponentFn, getComponentForGuestCommentFn, createGuestCommentItemFn, createActivityFn],
+`.trim(),
+      ),
+      pipelineConfig: [
+        verifyGuestAndGetComponentFn,
+        getComponentForGuestCommentFn,
+        createGuestCommentItemFn,
+        createActivityFn,
+      ],
     });
 
     // ==================== @MENTIONS AUTOCOMPLETE ====================
@@ -3845,7 +4062,8 @@ export function response(ctx) { return ctx.prev.result; }
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   ctx.stash.query = ctx.args.query.toLowerCase();
@@ -3874,7 +4092,8 @@ export function response(ctx) {
 
   return members;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline function: Batch get user details for team members
@@ -3885,7 +4104,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userIds = ctx.stash.userIds || [];
@@ -3940,7 +4160,8 @@ export function response(ctx) {
 
   return suggestions;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.searchTeamMembersForMention (Pipeline)
@@ -3949,10 +4170,12 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'searchTeamMembersForMention',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) { return ctx.prev.result || []; }
-`.trim()),
+`.trim(),
+      ),
       pipelineConfig: [queryTeamMembersForMentionFn, batchGetUsersForMentionFn],
     });
 
@@ -3967,7 +4190,8 @@ export function response(ctx) { return ctx.prev.result || []; }
       fieldName: 'guestListNotifications',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -4008,7 +4232,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.guestCountUnreadNotifications (IAM) - Count unread notifications
@@ -4018,7 +4243,8 @@ export function response(ctx) {
       fieldName: 'guestCountUnreadNotifications',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -4050,7 +4276,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result.scannedCount || 0;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.guestMarkNotificationRead (IAM) - Mark single notification as read
@@ -4060,7 +4287,8 @@ export function response(ctx) {
       fieldName: 'guestMarkNotificationRead',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -4106,7 +4334,8 @@ export function response(ctx) {
 
   return notification;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.guestMarkAllNotificationsRead (IAM) - Mark all as read
@@ -4116,7 +4345,8 @@ export function response(ctx) {
       fieldName: 'guestMarkAllNotificationsRead',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -4152,7 +4382,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return 0;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ==================== GUEST ACTIVITY FEED ====================
@@ -4165,7 +4396,8 @@ export function response(ctx) {
       fieldName: 'guestListActivityFeed',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -4207,7 +4439,8 @@ export function response(ctx) {
     createdAt: item.createdAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ==================== Phase 9: Workflow Config & Metrics ====================
@@ -4223,7 +4456,8 @@ export function response(ctx) {
       fieldName: 'getTeamWorkflowConfig',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -4256,7 +4490,8 @@ export function response(ctx) {
     updatedAt: ctx.result.updatedAt
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.updateTeamWorkflowConfig (JS) - Direct DynamoDB UpdateItem with if_not_exists
@@ -4266,7 +4501,8 @@ export function response(ctx) {
       fieldName: 'updateTeamWorkflowConfig',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.args.teamId;
@@ -4390,7 +4626,8 @@ export function response(ctx) {
     updatedAt: r.updatedAt
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.getTeamMetrics (Lambda) - Uses Lambda for reliable metrics computation
@@ -4466,7 +4703,8 @@ export function response(ctx) {
       name: 'verifyGuestComponentUpdate',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -4511,7 +4749,8 @@ export function response(ctx) {
   ctx.stash.assignmentVerified = true;
   return assignment;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Update component fields in DynamoDB
@@ -4520,7 +4759,8 @@ export function response(ctx) {
       name: 'updateComponentFields',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.stash.input;
@@ -4589,7 +4829,8 @@ export function response(ctx) {
   ctx.stash.needsFetch = true;
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 3: Fetch component after update to return complete data
@@ -4598,7 +4839,8 @@ export function response(ctx) {
       name: 'fetchComponentAfterUpdate',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -4616,7 +4858,8 @@ export function response(ctx) {
   }
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: guestUpdateComponent
@@ -4626,14 +4869,16 @@ export function response(ctx) {
       fieldName: 'guestUpdateComponent',
       pipelineConfig: [verifyGuestComponentUpdateFn, updateComponentFieldsFn, fetchComponentAfterUpdateFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Mutation.refineBulkPlan (Lambda) - chat-based bulk plan refinement
@@ -4844,7 +5089,8 @@ export function response(ctx) {
       name: 'verifyTeamMemberForShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -4882,7 +5128,8 @@ export function response(ctx) {
   // This allows collaboration while still ensuring only team members can share
   return membership;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Create the share code
@@ -4891,7 +5138,8 @@ export function response(ctx) {
       name: 'createShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.stash.userId;
@@ -4953,7 +5201,8 @@ export function response(ctx) {
     createdBy: ctx.stash.userId
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.generateShareCode (Cognito auth) - Generate share code for project
@@ -4964,14 +5213,16 @@ export function response(ctx) {
       fieldName: 'generateShareCode',
       pipelineConfig: [verifyTeamMemberForShareCodeFn, createShareCodeFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.listShareCodesForProject (Cognito auth) - List share codes for a project
@@ -4981,7 +5232,9 @@ export function response(ctx) {
       fieldName: 'listShareCodesForProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromAsset(join(__dirname, 'appsync-graphql/resolvers/share-codes/Query.listShareCodesForProject.js')),
+      code: appsync.Code.fromAsset(
+        join(__dirname, 'appsync-graphql/resolvers/share-codes/Query.listShareCodesForProject.js'),
+      ),
     });
 
     // Function: Fetch share code and extract projectId/teamId for authorization
@@ -4990,7 +5243,8 @@ export function response(ctx) {
       name: 'fetchShareCodeForRevoke',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.args.code.toUpperCase();
@@ -5020,7 +5274,8 @@ export function response(ctx) {
   ctx.stash.createdBy = shareCode.createdBy;
   return shareCode;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Verify user is team member (or share code creator) before allowing revoke
@@ -5029,7 +5284,8 @@ export function response(ctx) {
       name: 'verifyShareCodeRevoke',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.stash.teamId;
@@ -5072,7 +5328,8 @@ export function response(ctx) {
 
   return { authorized: true };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Delete the share code
@@ -5081,7 +5338,8 @@ export function response(ctx) {
       name: 'deleteShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -5098,7 +5356,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.revokeShareCode (Cognito auth) - Delete share code
@@ -5109,14 +5368,16 @@ export function response(ctx) {
       fieldName: 'revokeShareCode',
       pipelineConfig: [fetchShareCodeForRevokeFn, verifyShareCodeRevokeFn, deleteShareCodeFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -5131,7 +5392,8 @@ export function response(ctx) {
       name: 'validateShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -5182,7 +5444,8 @@ export function response(ctx) {
   
   return codeItem;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Create GUEST# record in DynamoDB
@@ -5191,7 +5454,8 @@ export function response(ctx) {
       name: 'createGuestRecord',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.stash.cognitoIdentityId;
@@ -5235,7 +5499,8 @@ export function response(ctx) {
     teamName: ctx.stash.teamName
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 3: Create GUEST team membership record
@@ -5244,7 +5509,8 @@ export function response(ctx) {
       name: 'createGuestTeamMembership',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.stash.cognitoIdentityId;
@@ -5289,7 +5555,8 @@ export function response(ctx) {
     teamName: ctx.stash.teamName
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: guestJoinProject
@@ -5299,14 +5566,16 @@ export function response(ctx) {
       fieldName: 'guestJoinProject',
       pipelineConfig: [validateShareCodeFn, createGuestRecordFn, createGuestTeamMembershipFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.guestGetProject (IAM auth) - Get project for guest
@@ -5317,7 +5586,8 @@ export function response(ctx) {
       fieldName: 'guestGetProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -5367,7 +5637,8 @@ export function response(ctx) {
     updatedAt: guest.updatedAt
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -5382,7 +5653,8 @@ export function response(ctx) {
       name: 'verifyGuestAccess',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -5429,7 +5701,8 @@ export function response(ctx) {
   ctx.stash.guestVerified = true;
   return guest;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Query components for the project
@@ -5438,7 +5711,8 @@ export function response(ctx) {
       name: 'listComponentsForGuest',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const projectId = ctx.stash.projectId;
@@ -5475,7 +5749,8 @@ export function response(ctx) {
     updatedAt: item.updatedAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: guestListComponents
@@ -5485,14 +5760,16 @@ export function response(ctx) {
       fieldName: 'guestListComponents',
       pipelineConfig: [verifyGuestAccessFn, listComponentsForGuestFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -5507,7 +5784,8 @@ export function response(ctx) {
       name: 'verifyGuestTeamMembership',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -5554,7 +5832,8 @@ export function response(ctx) {
   ctx.stash.guestVerified = true;
   return guest;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Query projects for the team
@@ -5563,7 +5842,8 @@ export function response(ctx) {
       name: 'listProjectsForGuestTeam',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.stash.teamId;
@@ -5597,7 +5877,8 @@ export function response(ctx) {
     updatedAt: item.updatedAt
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: guestListTeamProjects
@@ -5607,14 +5888,16 @@ export function response(ctx) {
       fieldName: 'guestListTeamProjects',
       pipelineConfig: [verifyGuestTeamMembershipFn, listProjectsForGuestTeamFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.guestListAssignments (IAM auth) - List guest's assignments
@@ -5625,7 +5908,8 @@ export function response(ctx) {
       fieldName: 'guestListAssignments',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -5671,7 +5955,8 @@ export function response(ctx) {
     }
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -5687,7 +5972,8 @@ export function response(ctx) {
       name: 'fetchComponentForAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -5731,7 +6017,8 @@ export function response(ctx) {
   
   return component;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Check no existing assignments before allowing new ones
@@ -5740,7 +6027,8 @@ export function response(ctx) {
       name: 'checkNoExistingGuestAssignments',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -5764,7 +6052,8 @@ export function response(ctx) {
   }
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 3: Create assignment with denormalized component data
@@ -5773,7 +6062,8 @@ export function response(ctx) {
       name: 'createGuestAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.stash.guestId;
@@ -5839,7 +6129,8 @@ export function response(ctx) {
 
   return result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: guestAssignSelf
@@ -5847,16 +6138,23 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'guestAssignSelf',
-      pipelineConfig: [fetchComponentForAssignmentFn, checkNoExistingGuestAssignmentsFn, createGuestAssignmentFn, createActivityFn],
+      pipelineConfig: [
+        fetchComponentForAssignmentFn,
+        checkNoExistingGuestAssignmentsFn,
+        createGuestAssignmentFn,
+        createActivityFn,
+      ],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -5872,7 +6170,8 @@ export function response(ctx) {
       name: 'fetchAssignmentForUnassign',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -5918,7 +6217,8 @@ export function response(ctx) {
 
   return assignment;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Delete the assignment
@@ -5927,7 +6227,8 @@ export function response(ctx) {
       name: 'deleteGuestAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -5956,7 +6257,8 @@ export function response(ctx) {
 
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: guestUnassignSelf
@@ -5966,14 +6268,16 @@ export function response(ctx) {
       fieldName: 'guestUnassignSelf',
       pipelineConfig: [fetchAssignmentForUnassignFn, deleteGuestAssignmentFn, createActivityFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -5988,7 +6292,8 @@ export function response(ctx) {
       name: 'verifyGuestAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.args.guestId;
@@ -6033,7 +6338,8 @@ export function response(ctx) {
   ctx.stash.assignmentVerified = true;
   return assignment;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function 2: Update component status in DynamoDB
@@ -6042,7 +6348,8 @@ export function response(ctx) {
       name: 'updateComponentStatus',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.stash.componentId;
@@ -6104,7 +6411,8 @@ export function response(ctx) {
 
   return result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: guestUpdateStatus
@@ -6114,14 +6422,16 @@ export function response(ctx) {
       fieldName: 'guestUpdateStatus',
       pipelineConfig: [verifyGuestAssignmentFn, updateComponentStatusFn, createActivityFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.listAssignmentsForTeamMember (Cognito auth) - Owner views member's assignments
@@ -6131,7 +6441,8 @@ export function response(ctx) {
       fieldName: 'listAssignmentsForTeamMember',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.args.userId;
@@ -6171,7 +6482,8 @@ export function response(ctx) {
     }
   }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -6185,7 +6497,8 @@ export function response(ctx) {
       name: 'verifyTeamOwnerAdmin',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -6232,7 +6545,8 @@ export function response(ctx) {
 
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Fetch team metadata to get team name for invite denormalization
@@ -6241,7 +6555,8 @@ export function response(ctx) {
       name: 'fetchTeamForInvite',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.stash.teamId;
@@ -6264,7 +6579,8 @@ export function response(ctx) {
 
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Create the team invite code record
@@ -6273,7 +6589,8 @@ export function response(ctx) {
       name: 'createTeamInviteCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.stash.code;
@@ -6325,7 +6642,8 @@ export function response(ctx) {
     maxUses: ctx.stash.maxUses
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.generateTeamInvite
@@ -6335,14 +6653,16 @@ export function response(ctx) {
       fieldName: 'generateTeamInvite',
       pipelineConfig: [verifyTeamOwnerAdminFn, fetchTeamForInviteFn, createTeamInviteCodeFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Resolver: Query.validateTeamInvite - Check if invite code is valid
@@ -6352,7 +6672,8 @@ export function response(ctx) {
       fieldName: 'validateTeamInvite',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.args.code.toUpperCase();
@@ -6394,7 +6715,8 @@ export function response(ctx) {
     message: null
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Verify user is team owner/admin before listing invite codes
@@ -6403,7 +6725,8 @@ export function response(ctx) {
       name: 'verifyTeamOwnerAdminForList',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.args.teamId;
@@ -6431,7 +6754,8 @@ export function response(ctx) {
 
   return membership;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Query team invite codes
@@ -6440,7 +6764,8 @@ export function response(ctx) {
       name: 'queryTeamInvites',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.stash.teamId;
@@ -6479,7 +6804,8 @@ export function response(ctx) {
       maxUses: item.maxUses
     }));
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Query.listTeamInviteCodes - List active invite codes for a team (owner/admin only)
@@ -6490,14 +6816,16 @@ export function response(ctx) {
       fieldName: 'listTeamInviteCodes',
       pipelineConfig: [verifyTeamOwnerAdminForListFn, queryTeamInvitesFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Validate invite code and prepare join data
@@ -6506,7 +6834,8 @@ export function response(ctx) {
       name: 'validateInviteCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.args.code.toUpperCase();
@@ -6553,7 +6882,8 @@ export function response(ctx) {
 
   return invite;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Create membership record
@@ -6562,7 +6892,8 @@ export function response(ctx) {
       name: 'createTeamMembershipFromInvite',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.stash.userId;
@@ -6615,7 +6946,8 @@ export function response(ctx) {
     availability: 100
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function to increment usage count on invite code
@@ -6624,7 +6956,8 @@ export function response(ctx) {
       name: 'incrementInviteUsageCount',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.stash.code;
@@ -6647,7 +6980,8 @@ export function response(ctx) {
   // Return the membership from previous function
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Increment team member count (AWS Best Practice: atomic counter)
@@ -6657,7 +6991,8 @@ export function response(ctx) {
       name: 'incrementTeamMemberCount',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.stash.teamId;
@@ -6683,7 +7018,8 @@ export function response(ctx) {
   // Return the membership from previous function
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.joinTeamWithCode
@@ -6691,16 +7027,23 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'joinTeamWithCode',
-      pipelineConfig: [validateInviteCodeFn, createTeamMembershipFromInviteFn, incrementInviteUsageCountFn, incrementTeamMemberCountFn],
+      pipelineConfig: [
+        validateInviteCodeFn,
+        createTeamMembershipFromInviteFn,
+        incrementInviteUsageCountFn,
+        incrementTeamMemberCountFn,
+      ],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Fetch invite code and extract teamId for authorization
@@ -6709,7 +7052,8 @@ export function response(ctx) {
       name: 'fetchInviteForRevoke',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.args.code.toUpperCase();
@@ -6737,7 +7081,8 @@ export function response(ctx) {
   ctx.stash.teamId = invite.teamId;
   return invite;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Verify user is team owner/admin before allowing revoke
@@ -6746,7 +7091,8 @@ export function response(ctx) {
       name: 'verifyTeamOwnerAdminForRevoke',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const teamId = ctx.stash.teamId;
@@ -6772,7 +7118,8 @@ export function response(ctx) {
 
   return membership;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Delete the team invite code
@@ -6781,7 +7128,8 @@ export function response(ctx) {
       name: 'deleteTeamInvite',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {
@@ -6798,7 +7146,8 @@ export function response(ctx) {
   }
   return true;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.revokeTeamInvite - Delete invite code (owner/admin only)
@@ -6809,14 +7158,16 @@ export function response(ctx) {
       fieldName: 'revokeTeamInvite',
       pipelineConfig: [fetchInviteForRevokeFn, verifyTeamOwnerAdminForRevokeFn, deleteTeamInviteFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -6829,7 +7180,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const input = ctx.args.input;
@@ -6895,7 +7247,8 @@ export function response(ctx) {
 
   return invite;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Create guest record in DynamoDB for team join
@@ -6904,7 +7257,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.stash.cognitoIdentityId;
@@ -6938,7 +7292,8 @@ export function response(ctx) {
   // Pass through stash for next function (don't return PutItem result)
   return ctx.stash;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Create guest team membership record for team join
@@ -6947,7 +7302,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.stash.cognitoIdentityId;
@@ -7010,7 +7366,8 @@ export function response(ctx) {
     role: ctx.stash.role || 'GUEST'
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Increment invite usage count for guest join
@@ -7021,7 +7378,8 @@ export function response(ctx) {
       api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.stash.code;
@@ -7045,7 +7403,8 @@ export function response(ctx) {
   // Return the membership result from previous function (ignore update result)
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Pipeline Resolver: Mutation.guestJoinTeam
@@ -7053,9 +7412,16 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'guestJoinTeam',
-      pipelineConfig: [validateTeamInviteForGuestJoinFn, createGuestRecordForTeamJoinFn, createGuestMembershipForTeamJoinFn, incrementGuestInviteUsageFn, incrementTeamMemberCountFn],
+      pipelineConfig: [
+        validateTeamInviteForGuestJoinFn,
+        createGuestRecordForTeamJoinFn,
+        createGuestMembershipForTeamJoinFn,
+        incrementGuestInviteUsageFn,
+        incrementTeamMemberCountFn,
+      ],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {};
@@ -7081,7 +7447,8 @@ export function response(ctx) {
   }
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -7095,7 +7462,8 @@ export function response(ctx) {
       fieldName: 'migrateGuestToUser',
       dataSource: lambdaDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   // Get the authenticated user ID from Cognito
@@ -7119,7 +7487,8 @@ export function response(ctx) {
   }
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     new CfnOutput(this, 'GraphQLApiUrl', {

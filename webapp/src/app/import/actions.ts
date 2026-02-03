@@ -320,7 +320,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
           .go();
         return { id: newProjectId };
       },
-      { context: { action: 'executeImport-createProject', projectName } }
+      { context: { action: 'executeImport-createProject', projectName } },
     );
 
     targetProjectId = newProjectId;
@@ -546,10 +546,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
       // DynamoDB: Batch create with chunking
 
       // Helper for batch creation
-      const batchCreate = async <T>(
-        items: T[],
-        createFn: (item: T) => Promise<unknown>
-      ): Promise<void> => {
+      const batchCreate = async <T>(items: T[], createFn: (item: T) => Promise<unknown>): Promise<void> => {
         for (let i = 0; i < items.length; i += BATCH_SIZE) {
           const batch = items.slice(i, i + BATCH_SIZE);
           await Promise.all(batch.map((item) => createFn(item).catch(() => null)));
@@ -593,7 +590,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
               projectId: targetProjectId!,
               sprintId: autoAssignSprint || undefined,
             })
-            .go()
+            .go(),
         );
 
         componentsWithoutParents.forEach((c) => {
@@ -621,7 +618,7 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
               sprintId: autoAssignSprint || undefined,
               parentId: nameToId.get(c.parentName!) || undefined,
             })
-            .go()
+            .go(),
         );
 
         componentsWithParents.forEach((c) => {
@@ -638,13 +635,13 @@ export const executeImport = authActionClient.schema(importSchema).action(async 
               dependentComponentId: d.dependentComponentId,
               requiredComponentId: d.requiredComponentId,
             })
-            .go()
+            .go(),
         );
       }
 
       return { count: parsedRows.length + (createMissingParents ? missingParents.size : 0) };
     },
-    { context: { action: 'executeImport', projectId: targetProjectId, rowCount: parsedRows.length } }
+    { context: { action: 'executeImport', projectId: targetProjectId, rowCount: parsedRows.length } },
   );
 
   revalidatePath(`/projects/${targetProjectId}`);

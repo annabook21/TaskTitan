@@ -72,7 +72,7 @@ export const updateComponentContextAction = authActionClient
           .go({ response: 'all_new' });
         return updated.data;
       },
-      { context: { action: 'updateComponentContext', componentId } }
+      { context: { action: 'updateComponentContext', componentId } },
     );
 
     revalidatePath(`/projects/${projectId}`);
@@ -140,7 +140,7 @@ export const generateContextSummaryAction = authActionClient
           .go({ response: 'all_new' });
         return updated.data;
       },
-      { context: { action: 'generateContextSummary', componentId } }
+      { context: { action: 'generateContextSummary', componentId } },
     );
 
     revalidatePath(`/projects/${componentData.projectId}`);
@@ -200,7 +200,7 @@ export const clearComponentContextAction = authActionClient
           .go({ response: 'all_new' });
         return updated.data;
       },
-      { context: { action: 'clearComponentContext', componentId } }
+      { context: { action: 'clearComponentContext', componentId } },
     );
 
     revalidatePath(`/projects/${projectId}`);

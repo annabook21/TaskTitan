@@ -52,7 +52,7 @@ export const handler = async (event: AppSyncLambdaEvent | InvitationEmailPayload
   } else {
     payload = event as InvitationEmailPayload;
   }
-  
+
   const { toEmail, token, teamName, projectName, inviterName, role, expiresAt } = payload;
 
   // Format expiration date for display

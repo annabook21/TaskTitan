@@ -61,14 +61,10 @@ export class MainStack extends Stack {
     // TEMPORARY: Import existing table (preserved from previous stack with RemovalPolicy.RETAIN)
     // TODO: After first successful deploy, revert to: new TaskTitanTable(this, 'DynamoTable', {...})
     // NOTE: Must use fromTableAttributes to include GSI names for proper IAM permissions
-    const existingTable = Table.fromTableAttributes(
-      this,
-      'ExistingTable',
-      {
-        tableName: 'TaskTitanForgeStack-TaskTitan',
-        globalIndexes: ['gsi1', 'gsi2', 'gsi3'],
-      }
-    );
+    const existingTable = Table.fromTableAttributes(this, 'ExistingTable', {
+      tableName: 'TaskTitanForgeStack-TaskTitan',
+      globalIndexes: ['gsi1', 'gsi2', 'gsi3'],
+    });
 
     // Wrap in TaskTitanTable interface for compatibility
     const dynamoTable = {
@@ -126,10 +122,7 @@ export class MainStack extends Stack {
       `${staticFrontend.distributionUrl}/auth-callback`,
       'http://localhost:5173/auth-callback', // Vite dev server
     ];
-    const logoutUrls = [
-      staticFrontend.distributionUrl,
-      'http://localhost:5173',
-    ];
+    const logoutUrls = [staticFrontend.distributionUrl, 'http://localhost:5173'];
     // Add custom domain URLs if configured
     if (props.customDomain) {
       callbackUrls.push(`https://${props.customDomain}/auth-callback`);

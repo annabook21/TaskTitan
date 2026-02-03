@@ -107,7 +107,7 @@ export const createTeam = authActionClient.schema(createTeamSchema).action(async
         .go();
 
       return { id: teamId, name, description };
-    }
+    },
   );
 
   revalidatePath('/');
@@ -143,7 +143,7 @@ export const updateTeam = authActionClient.schema(updateTeamSchema).action(async
 
       const updated = await team.update({ id }).set(updateData).go({ response: 'all_new' });
       return updated.data;
-    }
+    },
   );
 
   revalidatePath(`/team/${id}`);
@@ -200,7 +200,7 @@ export const inviteMember = authActionClient.schema(inviteMemberSchema).action(a
         })
         .go();
       return created.data;
-    }
+    },
   );
 
   revalidatePath(`/team/${teamId}`);
@@ -236,7 +236,7 @@ export const updateMemberRole = authActionClient.schema(updateMemberRoleSchema).
         .set({ role })
         .go({ response: 'all_new' });
       return updated.data;
-    }
+    },
   );
 
   revalidatePath(`/team/${teamId}`);
@@ -278,7 +278,7 @@ export const removeMember = authActionClient.schema(removeMemberSchema).action(a
     async () => {
       await membershipEntity.delete({ teamId, userId: targetUserId }).go();
       return { success: true };
-    }
+    },
   );
 
   revalidatePath(`/team/${teamId}`);
@@ -338,7 +338,7 @@ export const deleteTeam = authActionClient
 
           if (projectIds.length > 0) {
             const componentResults = await Promise.all(
-              projectIds.map((projectId) => component.query.byProject({ projectId }).go())
+              projectIds.map((projectId) => component.query.byProject({ projectId }).go()),
             );
             const allComponents = componentResults.flatMap((r) => r.data);
             const componentIds = allComponents.map((c) => c.id);
@@ -355,10 +355,10 @@ export const deleteTeam = authActionClient
               Promise.all(projectIds.map((projectId) => activity.query.primary({ projectId }).go())),
               Promise.all(componentIds.map((componentId) => assignment.query.primary({ componentId }).go())),
               Promise.all(
-                componentIds.map((componentId) => dependency.query.primary({ dependentComponentId: componentId }).go())
+                componentIds.map((componentId) => dependency.query.primary({ dependentComponentId: componentId }).go()),
               ),
               Promise.all(
-                componentIds.map((componentId) => componentStatusHistory.query.primary({ componentId }).go())
+                componentIds.map((componentId) => componentStatusHistory.query.primary({ componentId }).go()),
               ),
               Promise.all(componentIds.map((componentId) => componentPreview.query.primary({ componentId }).go())),
               Promise.all(projectIds.map((projectId) => githubTransitionConfig.query.primary({ projectId }).go())),
@@ -377,7 +377,7 @@ export const deleteTeam = authActionClient
                 allAssignments.map((a) => ({
                   pk: `COMPONENT#${a.componentId}`,
                   sk: `ASSIGNEE#${a.userId}`,
-                }))
+                })),
               );
             }
 
@@ -386,7 +386,7 @@ export const deleteTeam = authActionClient
                 allDependencies.map((d) => ({
                   pk: `COMPONENT#${d.dependentComponentId}`,
                   sk: `DEPENDS_ON#${d.requiredComponentId}`,
-                }))
+                })),
               );
             }
 
@@ -395,7 +395,7 @@ export const deleteTeam = authActionClient
                 allHistory.map((h) => ({
                   pk: `COMPONENT#${h.componentId}`,
                   sk: `STATUS_HISTORY#${h.enteredAt}#${h.id}`,
-                }))
+                })),
               );
             }
 
@@ -404,7 +404,7 @@ export const deleteTeam = authActionClient
                 allPreviews.map((p) => ({
                   pk: `COMPONENT#${p.componentId}`,
                   sk: `PREVIEW#${p.createdAt}#${p.id}`,
-                }))
+                })),
               );
             }
 
@@ -413,7 +413,7 @@ export const deleteTeam = authActionClient
                 allComponents.map((c) => ({
                   pk: `COMPONENT#${c.id}`,
                   sk: 'METADATA',
-                }))
+                })),
               );
             }
 
@@ -422,7 +422,7 @@ export const deleteTeam = authActionClient
                 allActivities.map((a) => ({
                   pk: `PROJECT#${a.projectId}`,
                   sk: `ACTIVITY#${a.createdAt}#${a.id}`,
-                }))
+                })),
               );
             }
 
@@ -431,7 +431,7 @@ export const deleteTeam = authActionClient
                 allGithubConfigs.map((g) => ({
                   pk: `PROJECT#${g.projectId}`,
                   sk: `GITHUB_CONFIG#${g.event}`,
-                }))
+                })),
               );
             }
 
@@ -440,7 +440,7 @@ export const deleteTeam = authActionClient
                 projects.data.map((p) => ({
                   pk: `PROJECT#${p.id}`,
                   sk: 'METADATA',
-                }))
+                })),
               );
             }
           }
@@ -451,7 +451,7 @@ export const deleteTeam = authActionClient
               sprints.data.map((s) => ({
                 pk: `SPRINT#${s.id}`,
                 sk: 'METADATA',
-              }))
+              })),
             );
           }
 
@@ -461,7 +461,7 @@ export const deleteTeam = authActionClient
               memberships.data.map((m) => ({
                 pk: `TEAM#${id}`,
                 sk: `MEMBER#${m.userId}`,
-              }))
+              })),
             );
           }
 
@@ -474,7 +474,7 @@ export const deleteTeam = authActionClient
           await team.delete({ id }).go();
 
           return { success: true };
-        }
+        },
       );
 
       revalidatePath('/');

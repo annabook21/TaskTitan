@@ -28,11 +28,24 @@ const UserSchema = {
     name: { type: 'string' },
     avatarUrl: { type: 'string' },
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
-    updatedAt: { type: 'string', required: true, default: () => new Date().toISOString(), set: () => new Date().toISOString(), watch: '*' },
+    updatedAt: {
+      type: 'string',
+      required: true,
+      default: () => new Date().toISOString(),
+      set: () => new Date().toISOString(),
+      watch: '*',
+    },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['id'], template: 'USER#${id}' }, sk: { field: 'sk', composite: [], template: 'METADATA' } },
-    byEmail: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['email'], template: 'EMAIL#${email}' }, sk: { field: 'gsi1sk', composite: [], template: 'USER' } },
+    primary: {
+      pk: { field: 'pk', composite: ['id'], template: 'USER#${id}' },
+      sk: { field: 'sk', composite: [], template: 'METADATA' },
+    },
+    byEmail: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['email'], template: 'EMAIL#${email}' },
+      sk: { field: 'gsi1sk', composite: [], template: 'USER' },
+    },
   },
 } as const;
 
@@ -43,10 +56,19 @@ const TeamSchema = {
     name: { type: 'string', required: true },
     description: { type: 'string' },
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
-    updatedAt: { type: 'string', required: true, default: () => new Date().toISOString(), set: () => new Date().toISOString(), watch: '*' },
+    updatedAt: {
+      type: 'string',
+      required: true,
+      default: () => new Date().toISOString(),
+      set: () => new Date().toISOString(),
+      watch: '*',
+    },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['id'], template: 'TEAM#${id}' }, sk: { field: 'sk', composite: [], template: 'METADATA' } },
+    primary: {
+      pk: { field: 'pk', composite: ['id'], template: 'TEAM#${id}' },
+      sk: { field: 'sk', composite: [], template: 'METADATA' },
+    },
   },
 } as const;
 
@@ -63,8 +85,15 @@ const MembershipSchema = {
     availability: { type: 'number', default: 100 },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['teamId'], template: 'TEAM#${teamId}' }, sk: { field: 'sk', composite: ['userId'], template: 'MEMBER#${userId}' } },
-    byUser: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['userId'], template: 'USER#${userId}' }, sk: { field: 'gsi1sk', composite: ['teamId'], template: 'TEAM#${teamId}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['teamId'], template: 'TEAM#${teamId}' },
+      sk: { field: 'sk', composite: ['userId'], template: 'MEMBER#${userId}' },
+    },
+    byUser: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['userId'], template: 'USER#${userId}' },
+      sk: { field: 'gsi1sk', composite: ['teamId'], template: 'TEAM#${teamId}' },
+    },
   },
 } as const;
 
@@ -78,16 +107,40 @@ const ProjectSchema = {
     ownerId: { type: 'string', required: true },
     githubRepoUrl: { type: 'string' },
     githubWebhookSecret: { type: 'string' },
-    githubPrTargetStatus: { type: ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'] as const, default: 'REVIEW' },
+    githubPrTargetStatus: {
+      type: ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'] as const,
+      default: 'REVIEW',
+    },
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
-    updatedAt: { type: 'string', required: true, default: () => new Date().toISOString(), set: () => new Date().toISOString(), watch: '*' },
+    updatedAt: {
+      type: 'string',
+      required: true,
+      default: () => new Date().toISOString(),
+      set: () => new Date().toISOString(),
+      watch: '*',
+    },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['id'], template: 'PROJECT#${id}' }, sk: { field: 'sk', composite: [], template: 'METADATA' } },
-    byOwner: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['ownerId'], template: 'OWNER#${ownerId}' }, sk: { field: 'gsi1sk', composite: ['id'], template: 'PROJECT#${id}' } },
-    byTeam: { index: 'gsi2', pk: { field: 'gsi2pk', composite: ['teamId'], template: 'TEAM#${teamId}' }, sk: { field: 'gsi2sk', composite: ['id'], template: 'PROJECT#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['id'], template: 'PROJECT#${id}' },
+      sk: { field: 'sk', composite: [], template: 'METADATA' },
+    },
+    byOwner: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['ownerId'], template: 'OWNER#${ownerId}' },
+      sk: { field: 'gsi1sk', composite: ['id'], template: 'PROJECT#${id}' },
+    },
+    byTeam: {
+      index: 'gsi2',
+      pk: { field: 'gsi2pk', composite: ['teamId'], template: 'TEAM#${teamId}' },
+      sk: { field: 'gsi2sk', composite: ['id'], template: 'PROJECT#${id}' },
+    },
     // GSI for efficient GitHub webhook lookup - sparse index (only items with githubRepoUrl)
-    byGitHubRepo: { index: 'gsi3', pk: { field: 'gsi3pk', composite: ['githubRepoUrl'], template: 'GITHUB_REPO#${githubRepoUrl}' }, sk: { field: 'gsi3sk', composite: ['id'], template: 'PROJECT#${id}' } },
+    byGitHubRepo: {
+      index: 'gsi3',
+      pk: { field: 'gsi3pk', composite: ['githubRepoUrl'], template: 'GITHUB_REPO#${githubRepoUrl}' },
+      sk: { field: 'gsi3sk', composite: ['id'], template: 'PROJECT#${id}' },
+    },
   },
 } as const;
 
@@ -98,11 +151,19 @@ const ComponentSchema = {
     id: { type: 'string' as const, required: true as const },
     name: { type: 'string' as const, required: true as const },
     description: { type: 'string' as const },
-    type: { type: ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'] as const, required: true as const, default: 'TASK' as const },
+    type: {
+      type: ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'] as const,
+      required: true as const,
+      default: 'TASK' as const,
+    },
     projectId: { type: 'string' as const, required: true as const },
     parentId: { type: 'string' as const },
     sprintId: { type: 'string' as const },
-    status: { type: ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'] as const, required: true as const, default: 'PLANNING' as const },
+    status: {
+      type: ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'] as const,
+      required: true as const,
+      default: 'PLANNING' as const,
+    },
     priority: { type: 'number' as const, default: 0 },
     estimatedHours: { type: 'number' as const },
     actualHours: { type: 'number' as const },
@@ -122,15 +183,37 @@ const ComponentSchema = {
     contextAiSummary: { type: 'string' as const },
     contextUpdatedAt: { type: 'string' as const },
     contextUpdatedBy: { type: 'string' as const },
-    createdAt: { type: 'string' as const, required: true as const, default: () => new Date().toISOString(), readOnly: true as const },
-    updatedAt: { type: 'string' as const, required: true as const, default: () => new Date().toISOString(), set: () => new Date().toISOString(), watch: '*' as const },
+    createdAt: {
+      type: 'string' as const,
+      required: true as const,
+      default: () => new Date().toISOString(),
+      readOnly: true as const,
+    },
+    updatedAt: {
+      type: 'string' as const,
+      required: true as const,
+      default: () => new Date().toISOString(),
+      set: () => new Date().toISOString(),
+      watch: '*' as const,
+    },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['id'] as const, template: 'COMPONENT#${id}' }, sk: { field: 'sk', composite: [] as const, template: 'METADATA' } },
-    byProject: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['projectId'] as const, template: 'PROJECT#${projectId}' }, sk: { field: 'gsi1sk', composite: ['id'] as const, template: 'COMPONENT#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['id'] as const, template: 'COMPONENT#${id}' },
+      sk: { field: 'sk', composite: [] as const, template: 'METADATA' },
+    },
+    byProject: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['projectId'] as const, template: 'PROJECT#${projectId}' },
+      sk: { field: 'gsi1sk', composite: ['id'] as const, template: 'COMPONENT#${id}' },
+    },
     // Sparse GSI for sprint queries - only items with sprintId are indexed
     // Used for sprint metrics and planning views
-    bySprint: { index: 'gsi2', pk: { field: 'gsi2pk', composite: ['sprintId'] as const, template: 'SPRINT#${sprintId}' }, sk: { field: 'gsi2sk', composite: ['id'] as const, template: 'COMPONENT#${id}' } },
+    bySprint: {
+      index: 'gsi2',
+      pk: { field: 'gsi2pk', composite: ['sprintId'] as const, template: 'SPRINT#${sprintId}' },
+      sk: { field: 'gsi2sk', composite: ['id'] as const, template: 'COMPONENT#${id}' },
+    },
   },
 };
 
@@ -146,12 +229,29 @@ const SprintSchema = {
     status: { type: ['PLANNING', 'ACTIVE', 'COMPLETED', 'CANCELLED'] as const, required: true, default: 'PLANNING' },
     capacity: { type: 'number' },
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
-    updatedAt: { type: 'string', required: true, default: () => new Date().toISOString(), set: () => new Date().toISOString(), watch: '*' },
+    updatedAt: {
+      type: 'string',
+      required: true,
+      default: () => new Date().toISOString(),
+      set: () => new Date().toISOString(),
+      watch: '*',
+    },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['id'], template: 'SPRINT#${id}' }, sk: { field: 'sk', composite: [], template: 'METADATA' } },
-    byTeam: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['teamId'], template: 'TEAM#${teamId}' }, sk: { field: 'gsi1sk', composite: ['startDate', 'id'], template: 'SPRINT#${startDate}#${id}' } },
-    byStatus: { index: 'gsi2', pk: { field: 'gsi2pk', composite: ['teamId', 'status'], template: 'TEAM#${teamId}#STATUS#${status}' }, sk: { field: 'gsi2sk', composite: ['startDate', 'id'], template: 'SPRINT#${startDate}#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['id'], template: 'SPRINT#${id}' },
+      sk: { field: 'sk', composite: [], template: 'METADATA' },
+    },
+    byTeam: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['teamId'], template: 'TEAM#${teamId}' },
+      sk: { field: 'gsi1sk', composite: ['startDate', 'id'], template: 'SPRINT#${startDate}#${id}' },
+    },
+    byStatus: {
+      index: 'gsi2',
+      pk: { field: 'gsi2pk', composite: ['teamId', 'status'], template: 'TEAM#${teamId}#STATUS#${status}' },
+      sk: { field: 'gsi2sk', composite: ['startDate', 'id'], template: 'SPRINT#${startDate}#${id}' },
+    },
   },
 } as const;
 
@@ -164,8 +264,15 @@ const AssignmentSchema = {
     assignedAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' }, sk: { field: 'sk', composite: ['userId'], template: 'ASSIGNEE#${userId}' } },
-    byUser: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['userId'], template: 'USER#${userId}' }, sk: { field: 'gsi1sk', composite: ['componentId'], template: 'ASSIGNMENT#${componentId}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' },
+      sk: { field: 'sk', composite: ['userId'], template: 'ASSIGNEE#${userId}' },
+    },
+    byUser: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['userId'], template: 'USER#${userId}' },
+      sk: { field: 'gsi1sk', composite: ['componentId'], template: 'ASSIGNMENT#${componentId}' },
+    },
   },
 } as const;
 
@@ -179,8 +286,15 @@ const DependencySchema = {
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['dependentComponentId'], template: 'COMPONENT#${dependentComponentId}' }, sk: { field: 'sk', composite: ['requiredComponentId'], template: 'DEPENDS_ON#${requiredComponentId}' } },
-    byRequired: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['requiredComponentId'], template: 'REQUIRED_BY#${requiredComponentId}' }, sk: { field: 'gsi1sk', composite: ['dependentComponentId'], template: 'DEPENDENT#${dependentComponentId}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['dependentComponentId'], template: 'COMPONENT#${dependentComponentId}' },
+      sk: { field: 'sk', composite: ['requiredComponentId'], template: 'DEPENDS_ON#${requiredComponentId}' },
+    },
+    byRequired: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['requiredComponentId'], template: 'REQUIRED_BY#${requiredComponentId}' },
+      sk: { field: 'gsi1sk', composite: ['dependentComponentId'], template: 'DEPENDENT#${dependentComponentId}' },
+    },
   },
 } as const;
 
@@ -188,16 +302,49 @@ const ActivitySchema = {
   model: { entity: 'Activity', version: '1', service: 'tasktitan' },
   attributes: {
     id: { type: 'string', required: true },
-    type: { type: ['PROJECT_CREATED', 'COMPONENT_CREATED', 'COMPONENT_UPDATED', 'COMPONENT_STATUS_CHANGED', 'DEPENDENCY_ADDED', 'DEPENDENCY_REMOVED', 'MEMBER_ASSIGNED', 'MEMBER_UNASSIGNED', 'COMMENT_ADDED', 'SPRINT_CREATED', 'SPRINT_STARTED', 'SPRINT_COMPLETED', 'COMPONENT_ADDED_TO_SPRINT', 'COMPONENT_REMOVED_FROM_SPRINT', 'GITHUB_PR_OPENED', 'GITHUB_PR_MERGED', 'GITHUB_PR_CLOSED', 'GITHUB_PR_LINKED'] as const, required: true },
+    type: {
+      type: [
+        'PROJECT_CREATED',
+        'COMPONENT_CREATED',
+        'COMPONENT_UPDATED',
+        'COMPONENT_STATUS_CHANGED',
+        'DEPENDENCY_ADDED',
+        'DEPENDENCY_REMOVED',
+        'MEMBER_ASSIGNED',
+        'MEMBER_UNASSIGNED',
+        'COMMENT_ADDED',
+        'SPRINT_CREATED',
+        'SPRINT_STARTED',
+        'SPRINT_COMPLETED',
+        'COMPONENT_ADDED_TO_SPRINT',
+        'COMPONENT_REMOVED_FROM_SPRINT',
+        'GITHUB_PR_OPENED',
+        'GITHUB_PR_MERGED',
+        'GITHUB_PR_CLOSED',
+        'GITHUB_PR_LINKED',
+      ] as const,
+      required: true,
+    },
     projectId: { type: 'string', required: true },
     userId: { type: 'string', required: true },
     metadata: { type: 'any' },
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['projectId'], template: 'PROJECT#${projectId}' }, sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'ACTIVITY#${createdAt}#${id}' } },
-    byUser: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['userId'], template: 'USER#${userId}' }, sk: { field: 'gsi1sk', composite: ['createdAt', 'id'], template: 'ACTIVITY#${createdAt}#${id}' } },
-    byType: { index: 'gsi2', pk: { field: 'gsi2pk', composite: ['projectId', 'type'], template: 'PROJECT#${projectId}#TYPE#${type}' }, sk: { field: 'gsi2sk', composite: ['createdAt', 'id'], template: 'ACTIVITY#${createdAt}#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['projectId'], template: 'PROJECT#${projectId}' },
+      sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'ACTIVITY#${createdAt}#${id}' },
+    },
+    byUser: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['userId'], template: 'USER#${userId}' },
+      sk: { field: 'gsi1sk', composite: ['createdAt', 'id'], template: 'ACTIVITY#${createdAt}#${id}' },
+    },
+    byType: {
+      index: 'gsi2',
+      pk: { field: 'gsi2pk', composite: ['projectId', 'type'], template: 'PROJECT#${projectId}#TYPE#${type}' },
+      sk: { field: 'gsi2sk', composite: ['createdAt', 'id'], template: 'ACTIVITY#${createdAt}#${id}' },
+    },
   },
 } as const;
 
@@ -206,7 +353,18 @@ const NotificationSchema = {
   attributes: {
     id: { type: 'string', required: true },
     userId: { type: 'string', required: true },
-    type: { type: ['TASK_ASSIGNED', 'TASK_STATUS_CHANGED', 'TASK_COMMENT', 'TASK_DUE_SOON', 'TASK_OVERDUE', 'SPRINT_STARTED', 'SPRINT_ENDING'] as const, required: true },
+    type: {
+      type: [
+        'TASK_ASSIGNED',
+        'TASK_STATUS_CHANGED',
+        'TASK_COMMENT',
+        'TASK_DUE_SOON',
+        'TASK_OVERDUE',
+        'SPRINT_STARTED',
+        'SPRINT_ENDING',
+      ] as const,
+      required: true,
+    },
     title: { type: 'string', required: true },
     message: { type: 'string', required: true },
     componentId: { type: 'string' },
@@ -215,7 +373,10 @@ const NotificationSchema = {
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['userId'], template: 'USER#${userId}' }, sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'NOTIFICATION#${createdAt}#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['userId'], template: 'USER#${userId}' },
+      sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'NOTIFICATION#${createdAt}#${id}' },
+    },
     // For unread notifications, filter by read=false in the query
   },
 } as const;
@@ -230,7 +391,10 @@ const ComponentStatusHistorySchema = {
     exitedAt: { type: 'string' },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' }, sk: { field: 'sk', composite: ['enteredAt', 'id'], template: 'STATUS_HISTORY#${enteredAt}#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' },
+      sk: { field: 'sk', composite: ['enteredAt', 'id'], template: 'STATUS_HISTORY#${enteredAt}#${id}' },
+    },
   },
 } as const;
 
@@ -249,8 +413,15 @@ const ComponentPreviewSchema = {
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' }, sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'PREVIEW#${createdAt}#${id}' } },
-    byUser: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['generatedBy'], template: 'USER#${generatedBy}' }, sk: { field: 'gsi1sk', composite: ['createdAt', 'id'], template: 'PREVIEW#${createdAt}#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' },
+      sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'PREVIEW#${createdAt}#${id}' },
+    },
+    byUser: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['generatedBy'], template: 'USER#${generatedBy}' },
+      sk: { field: 'gsi1sk', composite: ['createdAt', 'id'], template: 'PREVIEW#${createdAt}#${id}' },
+    },
   },
 } as const;
 
@@ -272,10 +443,19 @@ const TeamWorkflowConfigSchema = {
     enforceEstimates: { type: 'boolean', required: true, default: false },
     autoArchiveCompleted: { type: 'boolean', required: true, default: false },
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
-    updatedAt: { type: 'string', required: true, default: () => new Date().toISOString(), set: () => new Date().toISOString(), watch: '*' },
+    updatedAt: {
+      type: 'string',
+      required: true,
+      default: () => new Date().toISOString(),
+      set: () => new Date().toISOString(),
+      watch: '*',
+    },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['teamId'], template: 'TEAM#${teamId}' }, sk: { field: 'sk', composite: [], template: 'WORKFLOW_CONFIG' } },
+    primary: {
+      pk: { field: 'pk', composite: ['teamId'], template: 'TEAM#${teamId}' },
+      sk: { field: 'sk', composite: [], template: 'WORKFLOW_CONFIG' },
+    },
   },
 } as const;
 
@@ -284,14 +464,26 @@ const GitHubTransitionConfigSchema = {
   attributes: {
     id: { type: 'string', required: true },
     projectId: { type: 'string', required: true },
-    event: { type: ['PR_OPENED', 'PR_READY_FOR_REVIEW', 'PR_APPROVED', 'PR_MERGED', 'PR_CLOSED'] as const, required: true },
+    event: {
+      type: ['PR_OPENED', 'PR_READY_FOR_REVIEW', 'PR_APPROVED', 'PR_MERGED', 'PR_CLOSED'] as const,
+      required: true,
+    },
     targetStatus: { type: ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'] as const, required: true },
     enabled: { type: 'boolean', required: true, default: true },
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
-    updatedAt: { type: 'string', required: true, default: () => new Date().toISOString(), set: () => new Date().toISOString(), watch: '*' },
+    updatedAt: {
+      type: 'string',
+      required: true,
+      default: () => new Date().toISOString(),
+      set: () => new Date().toISOString(),
+      watch: '*',
+    },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['projectId'], template: 'PROJECT#${projectId}' }, sk: { field: 'sk', composite: ['event'], template: 'GITHUB_CONFIG#${event}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['projectId'], template: 'PROJECT#${projectId}' },
+      sk: { field: 'sk', composite: ['event'], template: 'GITHUB_CONFIG#${event}' },
+    },
   },
 } as const;
 
@@ -313,8 +505,15 @@ const CommentSchema = {
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' }, sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'COMMENT#${createdAt}#${id}' } },
-    byAuthor: { index: 'gsi1', pk: { field: 'gsi1pk', composite: ['authorId'], template: 'AUTHOR#${authorId}' }, sk: { field: 'gsi1sk', composite: ['createdAt', 'id'], template: 'COMMENT#${createdAt}#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['componentId'], template: 'COMPONENT#${componentId}' },
+      sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'COMMENT#${createdAt}#${id}' },
+    },
+    byAuthor: {
+      index: 'gsi1',
+      pk: { field: 'gsi1pk', composite: ['authorId'], template: 'AUTHOR#${authorId}' },
+      sk: { field: 'gsi1sk', composite: ['createdAt', 'id'], template: 'COMMENT#${createdAt}#${id}' },
+    },
   },
 } as const;
 
@@ -327,7 +526,10 @@ const GuestNotificationSchema = {
   attributes: {
     id: { type: 'string', required: true },
     guestId: { type: 'string', required: true },
-    type: { type: ['TASK_ASSIGNED', 'TASK_UNASSIGNED', 'TASK_STATUS_CHANGED', 'TASK_MENTIONED'] as const, required: true },
+    type: {
+      type: ['TASK_ASSIGNED', 'TASK_UNASSIGNED', 'TASK_STATUS_CHANGED', 'TASK_MENTIONED'] as const,
+      required: true,
+    },
     title: { type: 'string', required: true },
     message: { type: 'string', required: true },
     componentId: { type: 'string' },
@@ -336,7 +538,10 @@ const GuestNotificationSchema = {
     createdAt: { type: 'string', required: true, default: () => new Date().toISOString(), readOnly: true },
   },
   indexes: {
-    primary: { pk: { field: 'pk', composite: ['guestId'], template: 'GUEST#${guestId}' }, sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'NOTIFICATION#${createdAt}#${id}' } },
+    primary: {
+      pk: { field: 'pk', composite: ['guestId'], template: 'GUEST#${guestId}' },
+      sk: { field: 'sk', composite: ['createdAt', 'id'], template: 'NOTIFICATION#${createdAt}#${id}' },
+    },
   },
 } as const;
 

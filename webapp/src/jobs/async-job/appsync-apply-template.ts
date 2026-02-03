@@ -33,7 +33,7 @@ export interface ApplyTemplateAppSyncResult {
 }
 
 export async function handleAppSyncApplyTemplate(
-  input: ApplyTemplateAppSyncInput
+  input: ApplyTemplateAppSyncInput,
 ): Promise<ApplyTemplateAppSyncResult> {
   logger.info('Applying template', {
     template: input.template,
@@ -61,7 +61,7 @@ export async function handleAppSyncApplyTemplate(
           '#n': 'name',
           '#t': 'type',
         },
-      })
+      }),
     );
 
     existingComponents = (queryResult.Items || [])

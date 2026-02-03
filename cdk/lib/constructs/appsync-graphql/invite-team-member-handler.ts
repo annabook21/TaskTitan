@@ -40,7 +40,7 @@ const client = new CognitoIdentityProviderClient({});
 
 export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemberResult> => {
   console.log('Received inviteTeamMember event:', JSON.stringify(event));
-  
+
   // Handle both wrapped and unwrapped payload structures
   const input = event.input || event.payload?.input;
   if (!input) {
@@ -50,7 +50,7 @@ export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemb
       userExists: false,
     };
   }
-  
+
   const { email, teamId, role } = input;
   const userPoolId = process.env.USER_POOL_ID;
 
@@ -74,7 +74,7 @@ export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemb
   }
 
   const normalizedEmail = email.toLowerCase().trim();
-  
+
   // Extract name from email (use part before @) as fallback
   // AWS Best Practice: Include name attribute for consistency with registerUser
   const nameFromEmail = normalizedEmail.split('@')[0];
@@ -92,10 +92,10 @@ export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemb
       );
 
       // User exists - return their user ID (sub) so AppSync can add them to team
-      const userId = getUserResponse.UserAttributes?.find(attr => attr.Name === 'sub')?.Value;
-      
+      const userId = getUserResponse.UserAttributes?.find((attr) => attr.Name === 'sub')?.Value;
+
       console.log('User already exists in Cognito', { email: normalizedEmail, userId });
-      
+
       return {
         success: true,
         message: 'User already has an account. They will be added to the team.',
@@ -132,7 +132,9 @@ export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemb
       // AWS Best Practice: Handle race condition - if AdminCreateUser fails with UsernameExistsException,
       // retry AdminGetUser to get the userId
       if (createError instanceof UsernameExistsException) {
-        console.warn('Race condition: User created between AdminGetUser and AdminCreateUser', { email: normalizedEmail });
+        console.warn('Race condition: User created between AdminGetUser and AdminCreateUser', {
+          email: normalizedEmail,
+        });
         try {
           getUserResponse = await client.send(
             new AdminGetUserCommand({
@@ -140,7 +142,7 @@ export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemb
               Username: normalizedEmail,
             }),
           );
-          const userId = getUserResponse.UserAttributes?.find(attr => attr.Name === 'sub')?.Value;
+          const userId = getUserResponse.UserAttributes?.find((attr) => attr.Name === 'sub')?.Value;
           return {
             success: true,
             message: 'User already has an account. They will be added to the team.',
@@ -155,10 +157,10 @@ export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemb
       throw createError;
     }
 
-    const userId = createUserResponse.User?.Attributes?.find(attr => attr.Name === 'sub')?.Value;
-    
-    console.log('User created successfully via AdminCreateUser', { 
-      email: normalizedEmail, 
+    const userId = createUserResponse.User?.Attributes?.find((attr) => attr.Name === 'sub')?.Value;
+
+    console.log('User created successfully via AdminCreateUser', {
+      email: normalizedEmail,
       userId,
       name,
       // Note: Cognito automatically sent invitation email with temporary password
@@ -181,7 +183,7 @@ export const handler = async (event: AppSyncLambdaEvent): Promise<InviteTeamMemb
             Username: normalizedEmail,
           }),
         );
-        const userId = getUserResponse.UserAttributes?.find(attr => attr.Name === 'sub')?.Value;
+        const userId = getUserResponse.UserAttributes?.find((attr) => attr.Name === 'sub')?.Value;
         return {
           success: true,
           message: 'User already has an account. They will be added to the team.',

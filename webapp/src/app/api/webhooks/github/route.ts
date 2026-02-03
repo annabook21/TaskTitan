@@ -86,9 +86,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Fetch transition configs for this project
-    const transitionConfigResult = await entities.githubTransitionConfig.query
-      .primary({ projectId: project.id })
-      .go();
+    const transitionConfigResult = await entities.githubTransitionConfig.query.primary({ projectId: project.id }).go();
     const enabledConfigs = transitionConfigResult.data.filter((c) => c.enabled);
 
     // 6. Handle events based on type

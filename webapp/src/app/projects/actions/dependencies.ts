@@ -99,7 +99,7 @@ export const addDependency = authActionClient.schema(addDependencySchema).action
 
       return { id: dependencyId, dependentComponentId, requiredComponentId, description };
     },
-    { context: { action: 'addDependency', dependentComponentId, requiredComponentId } }
+    { context: { action: 'addDependency', dependentComponentId, requiredComponentId } },
   );
 
   revalidatePath(`/projects/${projectId}`);
@@ -115,7 +115,7 @@ export const removeDependency = authActionClient
     z.object({
       dependentComponentId: z.string().min(1),
       requiredComponentId: z.string().min(1),
-    })
+    }),
   )
   .action(async ({ parsedInput, ctx }) => {
     const { dependentComponentId, requiredComponentId } = parsedInput;
@@ -164,7 +164,7 @@ export const removeDependency = authActionClient
 
         return { success: true };
       },
-      { context: { action: 'removeDependency', dependentComponentId, requiredComponentId } }
+      { context: { action: 'removeDependency', dependentComponentId, requiredComponentId } },
     );
 
     revalidatePath(`/projects/${projectId}`);

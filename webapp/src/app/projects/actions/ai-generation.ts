@@ -168,7 +168,7 @@ export const generateAIComponents = authActionClient
       const project = access.project;
       if (!project.description || project.description.trim().length < 20) {
         throw new MyCustomError(
-          'Please add a detailed project description (at least 20 characters) to generate components'
+          'Please add a detailed project description (at least 20 characters) to generate components',
         );
       }
 
@@ -218,7 +218,7 @@ export const generateAIComponents = authActionClient
                 hoursPerDay: m.hoursPerDay ?? 6,
                 availability: m.availability ?? 100,
               };
-            })
+            }),
           );
 
           const totalCapacityHours = members.reduce((total, member) => {
@@ -295,7 +295,7 @@ export const applyAIComponents = authActionClient
           await entities.project.update({ id: projectId }).set({ description: enhancedDescription }).go();
           return { id: projectId };
         },
-        { context: { action: 'applyAIComponents-updateDescription', projectId } }
+        { context: { action: 'applyAIComponents-updateDescription', projectId } },
       );
     }
 
@@ -360,7 +360,9 @@ export const applyAIComponents = authActionClient
         const endDate = new Date(startDate);
         endDate.setDate(endDate.getDate() + sprint.durationWeeks * 7);
 
-        const componentIds = sprint.componentNames.map((name) => nameToId.get(name)).filter((id) => id != null) as string[];
+        const componentIds = sprint.componentNames
+          .map((name) => nameToId.get(name))
+          .filter((id) => id != null) as string[];
 
         sprintData.push({
           id: randomUUID(),
@@ -425,8 +427,8 @@ export const applyAIComponents = authActionClient
                     parentId: c.parentId || undefined,
                     status: c.status,
                   })
-                  .go()
-              )
+                  .go(),
+              ),
             );
           }
         };
@@ -443,16 +445,17 @@ export const applyAIComponents = authActionClient
         for (let i = 0; i < dependenciesToCreate.length; i += BATCH_SIZE) {
           const batch = dependenciesToCreate.slice(i, i + BATCH_SIZE);
           await Promise.all(
-            batch.map(({ id, dependentId, requiredId }) =>
-              entities.dependency
-                .create({
-                  id,
-                  dependentComponentId: dependentId,
-                  requiredComponentId: requiredId,
-                })
-                .go()
-                .catch(() => null) // Ignore duplicates
-            )
+            batch.map(
+              ({ id, dependentId, requiredId }) =>
+                entities.dependency
+                  .create({
+                    id,
+                    dependentComponentId: dependentId,
+                    requiredComponentId: requiredId,
+                  })
+                  .go()
+                  .catch(() => null), // Ignore duplicates
+            ),
           );
         }
 
@@ -476,8 +479,8 @@ export const applyAIComponents = authActionClient
             const batch = sprint.componentIds.slice(i, i + BATCH_SIZE);
             await Promise.all(
               batch.map((componentId) =>
-                entities.component.update({ id: componentId }).set({ sprintId: sprint.id }).go()
-              )
+                entities.component.update({ id: componentId }).set({ sprintId: sprint.id }).go(),
+              ),
             );
           }
         }
@@ -501,7 +504,7 @@ export const applyAIComponents = authActionClient
           for (let i = 0; i < epic.childIds.length; i += BATCH_SIZE) {
             const batch = epic.childIds.slice(i, i + BATCH_SIZE);
             await Promise.all(
-              batch.map((childId) => entities.component.update({ id: childId }).set({ parentId: epic.id }).go())
+              batch.map((childId) => entities.component.update({ id: childId }).set({ parentId: epic.id }).go()),
             );
           }
         }
@@ -524,7 +527,7 @@ export const applyAIComponents = authActionClient
 
         return { count: components.length };
       },
-      { context: { action: 'applyAIComponents', projectId, componentCount: components.length } }
+      { context: { action: 'applyAIComponents', projectId, componentCount: components.length } },
     );
 
     revalidatePath(`/projects/${projectId}`);

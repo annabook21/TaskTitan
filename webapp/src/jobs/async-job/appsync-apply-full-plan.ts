@@ -84,7 +84,7 @@ async function batchWriteWithUnprocessedRetry(
   client: ReturnType<typeof getDynamoDBClient>,
   tableName: string,
   requests: Array<{ PutRequest?: { Item: Record<string, unknown> }; DeleteRequest?: { Key: Record<string, unknown> } }>,
-  maxRetries = 5
+  maxRetries = 5,
 ): Promise<void> {
   let unprocessed = requests;
   let retries = 0;
@@ -102,9 +102,9 @@ async function batchWriteWithUnprocessedRetry(
     if (unprocessedItems.length > 0) {
       // Filter to ensure Item/Key are defined (AWS guarantees this for valid responses)
       unprocessed = unprocessedItems.filter(
-        (item): item is typeof requests[number] =>
+        (item): item is (typeof requests)[number] =>
           (item.PutRequest !== undefined && item.PutRequest.Item !== undefined) ||
-          (item.DeleteRequest !== undefined && item.DeleteRequest.Key !== undefined)
+          (item.DeleteRequest !== undefined && item.DeleteRequest.Key !== undefined),
       );
       retries++;
 
@@ -134,7 +134,9 @@ async function batchWriteWithUnprocessedRetry(
       unprocessedCount: unprocessed.length,
       maxRetries,
     });
-    throw new Error(`BatchWriteItem failed: ${unprocessed.length} items could not be processed after ${maxRetries} retries`);
+    throw new Error(
+      `BatchWriteItem failed: ${unprocessed.length} items could not be processed after ${maxRetries} retries`,
+    );
   }
 }
 
@@ -144,7 +146,7 @@ async function batchWriteWithUnprocessedRetry(
  */
 export async function handleAppSyncApplyFullPlan(
   input: ApplyFullPlanInput,
-  identity?: { sub?: string }
+  identity?: { sub?: string },
 ): Promise<ApplyPlanResult> {
   const { projectId, components, enhancedDescription, sprints = [], epics = [] } = input;
   const client = getDynamoDBClient();
@@ -168,9 +170,9 @@ export async function handleAppSyncApplyFullPlan(
             pk: `PROJECT#${projectId}`,
             sk: 'METADATA',
           },
-        })
+        }),
       ),
-    { maxRetries: 3 }
+    { maxRetries: 3 },
   );
 
   if (!projectResult.Item) {
@@ -194,9 +196,9 @@ export async function handleAppSyncApplyFullPlan(
               ':sk': `MEMBER#${identity.sub}`,
             },
             Limit: 1,
-          })
+          }),
         ),
-      { maxRetries: 3 }
+      { maxRetries: 3 },
     );
 
     if (!membershipResult.Items || membershipResult.Items.length === 0) {
@@ -321,11 +323,11 @@ export async function handleAppSyncApplyFullPlan(
                         ':parentId': parentId,
                         ':now': now,
                       },
-                    })
+                    }),
                   ),
-                { maxRetries: 3 }
+                { maxRetries: 3 },
               );
-            })
+            }),
           );
           logger.info('Updated parent IDs', { chunkIndex: i, count: chunk.length });
         },
@@ -347,11 +349,11 @@ export async function handleAppSyncApplyFullPlan(
                       ExpressionAttributeValues: {
                         ':now': now,
                       },
-                    })
+                    }),
                   ),
-                { maxRetries: 3 }
-              )
-            )
+                { maxRetries: 3 },
+              ),
+            ),
           );
           const failures = results.filter((r) => r.status === 'rejected');
           if (failures.length > 0) {
@@ -409,7 +411,7 @@ export async function handleAppSyncApplyFullPlan(
         },
         compensate: async () => {
           const pairsToDelete = chunk.filter((dep) =>
-            createdDependencyPairs.some((p) => p.fromId === dep.fromId && p.toId === dep.toId)
+            createdDependencyPairs.some((p) => p.fromId === dep.fromId && p.toId === dep.toId),
           );
           if (pairsToDelete.length === 0) return;
 
@@ -516,18 +518,19 @@ export async function handleAppSyncApplyFullPlan(
                           pk: `COMPONENT#${componentId}`,
                           sk: 'METADATA',
                         },
-                        UpdateExpression: 'SET sprintId = :sprintId, gsi2pk = :gsi2pk, gsi2sk = :gsi2sk, updatedAt = :now',
+                        UpdateExpression:
+                          'SET sprintId = :sprintId, gsi2pk = :gsi2pk, gsi2sk = :gsi2sk, updatedAt = :now',
                         ExpressionAttributeValues: {
                           ':sprintId': sprint.id,
                           ':gsi2pk': `SPRINT#${sprint.id}`,
                           ':gsi2sk': `COMPONENT#${componentId}`,
                           ':now': now,
                         },
-                      })
+                      }),
                     ),
-                  { maxRetries: 3 }
-                )
-              )
+                  { maxRetries: 3 },
+                ),
+              ),
             );
             logger.info('Assigned components to sprint', {
               sprintName: sprint.name,
@@ -552,11 +555,11 @@ export async function handleAppSyncApplyFullPlan(
                         ExpressionAttributeValues: {
                           ':now': now,
                         },
-                      })
+                      }),
                     ),
-                  { maxRetries: 3 }
-                )
-              )
+                  { maxRetries: 3 },
+                ),
+              ),
             );
             const failures = results.filter((r) => r.status === 'rejected');
             if (failures.length > 0) {
@@ -591,9 +594,9 @@ export async function handleAppSyncApplyFullPlan(
                   ':desc': enhancedDescription,
                   ':now': now,
                 },
-              })
+              }),
             ),
-          { maxRetries: 3 }
+          { maxRetries: 3 },
         );
         logger.info('Updated project description');
       },

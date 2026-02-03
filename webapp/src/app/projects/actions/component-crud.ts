@@ -124,7 +124,7 @@ export const createComponent = authActionClient.schema(createComponentSchema).ac
         status: 'PLANNING',
       };
     },
-    { context: { action: 'createComponent', projectId, componentId } }
+    { context: { action: 'createComponent', projectId, componentId } },
   );
 
   revalidatePath(`/projects/${projectId}`);
@@ -221,7 +221,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                 componentStatusHistory
                   .update({ componentId: id, enteredAt: openEntry.enteredAt, id: openEntry.id })
                   .set({ exitedAt: nowIso })
-                  .commit()
+                  .commit(),
               );
             }
 
@@ -235,7 +235,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                   enteredAt: nowIso,
                   exitedAt: undefined,
                 })
-                .commit()
+                .commit(),
             );
 
             // 4. Create activity log
@@ -253,7 +253,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                     newStatus: status,
                   },
                 })
-                .commit()
+                .commit(),
             );
 
             // 5. Create notifications for assignees
@@ -270,7 +270,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                     projectId,
                     read: false,
                   })
-                  .commit()
+                  .commit(),
               );
             }
 
@@ -299,7 +299,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                 componentStatusHistory
                   .update({ componentId: id, enteredAt: openEntry.enteredAt, id: openEntry.id })
                   .set({ exitedAt: nowIso })
-                  .commit()
+                  .commit(),
               );
             }
 
@@ -312,7 +312,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                   enteredAt: nowIso,
                   exitedAt: undefined,
                 })
-                .commit()
+                .commit(),
             );
 
             ops.push(
@@ -329,7 +329,7 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                     newStatus: status,
                   },
                 })
-                .commit()
+                .commit(),
             );
 
             return ops;
@@ -351,15 +351,15 @@ export const updateComponent = authActionClient.schema(updateComponentSchema).ac
                 projectId,
                 read: false,
               })
-              .go()
-          )
+              .go(),
+          ),
         );
 
         const updatedComponent = await entities.component.get({ id }).go();
         return updatedComponent.data;
       }
     },
-    { context: { action: 'updateComponent', componentId: id, projectId } }
+    { context: { action: 'updateComponent', componentId: id, projectId } },
   );
 
   revalidatePath(`/projects/${projectId}`);
@@ -414,7 +414,7 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
                   assignments.data.map((a) => ({
                     pk: `COMPONENT#${id}`,
                     sk: `ASSIGNEE#${a.userId}`,
-                  }))
+                  })),
                 );
               }
               return assignments.data.length;
@@ -434,7 +434,7 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
                   dependsOnResult.data.map((d) => ({
                     pk: `COMPONENT#${id}`,
                     sk: `DEPENDS_ON#${d.requiredComponentId}`,
-                  }))
+                  })),
                 );
               }
 
@@ -445,7 +445,7 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
                   requiredByResult.data.map((d) => ({
                     pk: `COMPONENT#${d.dependentComponentId}`,
                     sk: `DEPENDS_ON#${id}`,
-                  }))
+                  })),
                 );
               }
 
@@ -465,7 +465,7 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
                   history.data.map((h) => ({
                     pk: `COMPONENT#${id}`,
                     sk: `STATUS_HISTORY#${h.enteredAt}#${h.id}`,
-                  }))
+                  })),
                 );
               }
               return history.data.length;
@@ -484,7 +484,7 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
                   previews.data.map((p) => ({
                     pk: `COMPONENT#${id}`,
                     sk: `PREVIEW#${p.createdAt}#${p.id}`,
-                  }))
+                  })),
                 );
               }
               return previews.data.length;
@@ -530,7 +530,7 @@ export const deleteComponent = authActionClient.schema(deleteComponentSchema).ac
 
         return { success: true };
       },
-      { context: { action: 'deleteComponent', componentId: id, projectId } }
+      { context: { action: 'deleteComponent', componentId: id, projectId } },
     );
   } catch (error) {
     console.error('Failed to delete component:', error);

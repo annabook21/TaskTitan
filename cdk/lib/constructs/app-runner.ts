@@ -1,6 +1,14 @@
 import { CfnOutput, Duration, Fn, Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { Service, Source, Cpu, Memory, HealthCheck, AutoScalingConfiguration, Secret as AppRunnerSecret } from '@aws-cdk/aws-apprunner-alpha';
+import {
+  Service,
+  Source,
+  Cpu,
+  Memory,
+  HealthCheck,
+  AutoScalingConfiguration,
+  Secret as AppRunnerSecret,
+} from '@aws-cdk/aws-apprunner-alpha';
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
@@ -113,7 +121,9 @@ export class AppRunnerService extends Construct {
     instanceRole.addToPrincipalPolicy(
       new PolicyStatement({
         actions: ['ssm:GetParameter'],
-        resources: [`arn:aws:ssm:${Stack.of(this).region}:${Stack.of(this).account}:parameter${appOriginParameterName}`],
+        resources: [
+          `arn:aws:ssm:${Stack.of(this).region}:${Stack.of(this).account}:parameter${appOriginParameterName}`,
+        ],
       }),
     );
 
@@ -148,10 +158,7 @@ export class AppRunnerService extends Construct {
 
     // Build environment secrets
     const environmentSecrets: Record<string, AppRunnerSecret> = {
-      NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: AppRunnerSecret.fromSecretsManager(
-        serverActionsKeySecret,
-        'encryptionKey',
-      ),
+      NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: AppRunnerSecret.fromSecretsManager(serverActionsKeySecret, 'encryptionKey'),
     };
 
     // Create App Runner service
@@ -216,7 +223,9 @@ export class AppRunnerService extends Construct {
       policy: AwsCustomResourcePolicy.fromStatements([
         new PolicyStatement({
           actions: ['ssm:PutParameter', 'ssm:DeleteParameter'],
-          resources: [`arn:aws:ssm:${Stack.of(this).region}:${Stack.of(this).account}:parameter${appOriginParameterName}`],
+          resources: [
+            `arn:aws:ssm:${Stack.of(this).region}:${Stack.of(this).account}:parameter${appOriginParameterName}`,
+          ],
         }),
       ]),
     });

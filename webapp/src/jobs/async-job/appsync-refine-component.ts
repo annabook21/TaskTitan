@@ -48,7 +48,7 @@ export interface RefineComponentResult {
  */
 export async function handleAppSyncRefineComponent(
   input: RefineComponentInput,
-  identity?: { sub?: string }
+  identity?: { sub?: string },
 ): Promise<RefineComponentResult> {
   logger.info('Refining component', {
     projectId: input.projectId,
@@ -67,7 +67,7 @@ export async function handleAppSyncRefineComponent(
         pk: `PROJECT#${input.projectId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   const project = projectResponse.Item;
@@ -84,7 +84,7 @@ export async function handleAppSyncRefineComponent(
       ExpressionAttributeValues: {
         ':pk': `PROJECT#${input.projectId}`,
       },
-    })
+    }),
   );
 
   const existingComponents = (componentsResponse.Items || [])

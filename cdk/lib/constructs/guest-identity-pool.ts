@@ -68,9 +68,7 @@ export class GuestIdentityPool extends Construct {
       allowUnauthenticatedIdentities: true,
       // Link to User Pool for Amplify v6 compatibility
       authenticationProviders: {
-        userPools: [
-          new UserPoolAuthenticationProvider({ userPool, userPoolClient }),
-        ],
+        userPools: [new UserPoolAuthenticationProvider({ userPool, userPoolClient })],
       },
     });
 

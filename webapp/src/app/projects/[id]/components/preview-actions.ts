@@ -101,7 +101,7 @@ export const generatePreviewAction = authActionClient
             .go();
           return preview.data;
         },
-        { context: { action: 'generatePreview', componentId, previewId } }
+        { context: { action: 'generatePreview', componentId, previewId } },
       );
 
       logger.info('Wireframe preview generated successfully', {

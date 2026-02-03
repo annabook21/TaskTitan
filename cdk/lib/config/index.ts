@@ -65,7 +65,7 @@ function validateCertificateArn(arn: string, environmentName: string): void {
     throw new ConfigurationError(
       `Invalid certificate ARN format for environment '${environmentName}'.\n` +
         `Expected: arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERTIFICATE_ID\n` +
-        `Got: ${arn}`
+        `Got: ${arn}`,
     );
   }
 
@@ -74,7 +74,7 @@ function validateCertificateArn(arn: string, environmentName: string): void {
     throw new ConfigurationError(
       `Certificate for environment '${environmentName}' must be in us-east-1 region (required for CloudFront).\n` +
         `Current region: ${region}\n` +
-        `Certificate ARN: ${arn}`
+        `Certificate ARN: ${arn}`,
     );
   }
 }
@@ -94,7 +94,7 @@ function validateEnvironmentConfig(config: EnvironmentConfig, environmentName: s
     throw new ConfigurationError(
       `Missing required configuration for environment '${environmentName}':\n` +
         `  - ${missingFields.join('\n  - ')}\n\n` +
-        `Add these to cdk.json under context.taskTitanConfig.${environmentName}`
+        `Add these to cdk.json under context.taskTitanConfig.${environmentName}`,
     );
   }
 
@@ -132,7 +132,7 @@ export function loadConfig(app: cdk.App, currentAccountId: string): EnvironmentC
       }
     }
   }
-}`
+}`,
     );
   }
 
@@ -171,7 +171,7 @@ export function loadConfig(app: cdk.App, currentAccountId: string): EnvironmentC
       }
     }
   }
-}`
+}`,
     );
   }
 

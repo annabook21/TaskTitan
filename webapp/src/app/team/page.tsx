@@ -64,7 +64,7 @@ export default async function TeamPage() {
   } else {
     // Sort by joinedAt desc
     const sortedMemberships = membershipsResult.data.sort(
-      (a, b) => new Date(b.joinedAt || 0).getTime() - new Date(a.joinedAt || 0).getTime()
+      (a, b) => new Date(b.joinedAt || 0).getTime() - new Date(a.joinedAt || 0).getTime(),
     );
 
     const teamIds = sortedMemberships.map((m) => m.teamId);
@@ -93,7 +93,7 @@ export default async function TeamPage() {
           membershipsCount: teamMembershipsResult.data.length,
           projectsCount: projectsResult.data.length,
         };
-      })
+      }),
     );
 
     // Step 4: Collect all member user IDs and batch fetch users

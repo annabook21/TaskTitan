@@ -79,7 +79,7 @@ export interface RefineBulkPlanResult {
  */
 export async function handleAppSyncRefineBulkPlan(
   input: RefineBulkPlanInput,
-  identity?: { sub?: string }
+  identity?: { sub?: string },
 ): Promise<RefineBulkPlanResult> {
   logger.info('Refining bulk plan', {
     projectId: input.projectId,
@@ -99,7 +99,7 @@ export async function handleAppSyncRefineBulkPlan(
         pk: `PROJECT#${input.projectId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   const project = projectResponse.Item;
@@ -115,7 +115,7 @@ export async function handleAppSyncRefineBulkPlan(
         pk: `TEAM#${project.teamId}`,
         sk: 'WORKFLOW_CONFIG',
       },
-    })
+    }),
   );
 
   const workflowConfig = workflowConfigResponse.Item;

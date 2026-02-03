@@ -26,7 +26,7 @@ const updateGitHubTransitionConfigSchema = z.object({
       event: z.enum(['PR_OPENED', 'PR_READY_FOR_REVIEW', 'PR_APPROVED', 'PR_MERGED', 'PR_CLOSED']),
       targetStatus: z.enum(['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED']),
       enabled: z.boolean(),
-    })
+    }),
   ),
 });
 
@@ -72,7 +72,7 @@ export const updateProjectGitHubSettings = authActionClient
           .go({ response: 'all_new' });
         return updated.data;
       },
-      { context: { action: 'updateProjectGitHubSettings', projectId: id } }
+      { context: { action: 'updateProjectGitHubSettings', projectId: id } },
     );
 
     revalidatePath(`/projects/${id}`);
@@ -128,9 +128,9 @@ export const updateGitHubTransitionConfig = authActionClient
             const result = await entities.githubTransitionConfig.upsert(upsertData).go();
             return result.data;
           },
-          { context: { action: 'updateGitHubTransitionConfig', projectId, event: transition.event } }
+          { context: { action: 'updateGitHubTransitionConfig', projectId, event: transition.event } },
         );
-      })
+      }),
     );
 
     revalidatePath(`/projects/${projectId}`);

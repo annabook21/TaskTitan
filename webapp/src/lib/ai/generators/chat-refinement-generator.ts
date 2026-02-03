@@ -140,17 +140,14 @@ export async function refineComponentWithChat(input: ChatRefinementInput): Promi
     result.component.estimatedHours = Math.max(1, Math.min(200, Number(result.component.estimatedHours) || 8));
     result.component.priority = Math.max(1, Math.min(10, Number(result.component.priority) || 5));
     // Filter out null/undefined values - GraphQL [String!] requires non-null elements
-    result.component.suggestedDependencies = (Array.isArray(result.component.suggestedDependencies)
-      ? result.component.suggestedDependencies
-      : []
+    result.component.suggestedDependencies = (
+      Array.isArray(result.component.suggestedDependencies) ? result.component.suggestedDependencies : []
     ).filter((s): s is string => typeof s === 'string' && s.length > 0);
-    result.component.acceptanceCriteria = (Array.isArray(result.component.acceptanceCriteria)
-      ? result.component.acceptanceCriteria.slice(0, 4)
-      : []
+    result.component.acceptanceCriteria = (
+      Array.isArray(result.component.acceptanceCriteria) ? result.component.acceptanceCriteria.slice(0, 4) : []
     ).filter((s): s is string => typeof s === 'string' && s.length > 0);
-    result.suggestedFollowUps = (Array.isArray(result.suggestedFollowUps)
-      ? result.suggestedFollowUps.slice(0, 3)
-      : []
+    result.suggestedFollowUps = (
+      Array.isArray(result.suggestedFollowUps) ? result.suggestedFollowUps.slice(0, 3) : []
     ).filter((s): s is string => typeof s === 'string' && s.length > 0);
 
     // Ensure we have an explanation

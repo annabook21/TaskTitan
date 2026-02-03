@@ -8,10 +8,7 @@ export const dynamic = 'force-dynamic';
  * Users now register via AdminCreateUser flow on /sign-up.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const origin =
-    process.env.AMPLIFY_APP_ORIGIN ||
-    request.headers.get('origin') ||
-    request.nextUrl.origin;
+  const origin = process.env.AMPLIFY_APP_ORIGIN || request.headers.get('origin') || request.nextUrl.origin;
 
   return NextResponse.redirect(new URL('/sign-up', origin));
 }

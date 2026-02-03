@@ -105,21 +105,23 @@ export async function generateComponents(
         scopeCount: parsed.scopes.length,
       });
       result = {
-        components: parsed.scopes.map((scope: {
-          name: string;
-          description: string;
-          appetite?: string;
-          priority?: number;
-          suggestedDependencies?: string[];
-        }) => ({
-          name: scope.name,
-          description: scope.description,
-          type: 'STORY', // Shape Up scopes map to STORY type
-          // Appetite-based estimation: SMALL_BATCH = 20h, BIG_BATCH = 80h (rough mapping)
-          estimatedHours: scope.appetite === 'BIG_BATCH' ? 80 : 20,
-          priority: scope.priority || 5,
-          suggestedDependencies: scope.suggestedDependencies || [],
-        })),
+        components: parsed.scopes.map(
+          (scope: {
+            name: string;
+            description: string;
+            appetite?: string;
+            priority?: number;
+            suggestedDependencies?: string[];
+          }) => ({
+            name: scope.name,
+            description: scope.description,
+            type: 'STORY', // Shape Up scopes map to STORY type
+            // Appetite-based estimation: SMALL_BATCH = 20h, BIG_BATCH = 80h (rough mapping)
+            estimatedHours: scope.appetite === 'BIG_BATCH' ? 80 : 20,
+            priority: scope.priority || 5,
+            suggestedDependencies: scope.suggestedDependencies || [],
+          }),
+        ),
         summary: parsed.summary || 'Shape Up cycle plan generated.',
         enhancedDescription: parsed.enhancedDescription,
         // Shape Up doesn't use sprints or epics

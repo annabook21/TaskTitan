@@ -80,7 +80,7 @@ export default async function SprintDetailPage({ params }: Props) {
 
   // Fetch all components and filter for this sprint
   const componentResults = await Promise.all(
-    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go())
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
   );
   const allComponents = componentResults.flatMap((r) => r.data);
   const sprintComponents = allComponents.filter((c) => c.sprintId === sprintId);
@@ -255,7 +255,12 @@ export default async function SprintDetailPage({ params }: Props) {
           )}
 
           {/* Components List */}
-          <SprintComponents components={sortedComponents as any} sprintId={sprintId} teamId={teamId} canManage={canManage} />
+          <SprintComponents
+            components={sortedComponents as any}
+            sprintId={sprintId}
+            teamId={teamId}
+            canManage={canManage}
+          />
         </div>
       </main>
     </div>

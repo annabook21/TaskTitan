@@ -19,13 +19,7 @@
 
 import { Logger } from '@aws-lambda-powertools/logger';
 import { getEntities } from './service';
-import type {
-  MembershipItem,
-  ProjectItem,
-  ComponentItem,
-  TeamItem,
-  SprintItem,
-} from './service';
+import type { MembershipItem, ProjectItem, ComponentItem, TeamItem, SprintItem } from './service';
 
 const logger = new Logger({ serviceName: 'AuthHelpers' });
 
@@ -66,7 +60,7 @@ export interface SprintAccessResult {
 export async function verifyTeamMembership(
   userId: string,
   teamId: string,
-  requiredRoles?: MemberRole[]
+  requiredRoles?: MemberRole[],
 ): Promise<TeamAccessResult | null> {
   const { team, membership } = getEntities();
 
@@ -122,7 +116,7 @@ export async function verifyTeamMembership(
 export async function verifyProjectAccess(
   userId: string,
   projectId: string,
-  requiredRoles?: MemberRole[]
+  requiredRoles?: MemberRole[],
 ): Promise<ProjectAccessResult | null> {
   const { project } = getEntities();
 
@@ -164,7 +158,7 @@ export async function verifyProjectAccess(
 export async function verifyComponentAccess(
   userId: string,
   componentId: string,
-  requiredRoles?: MemberRole[]
+  requiredRoles?: MemberRole[],
 ): Promise<ComponentAccessResult | null> {
   const { component } = getEntities();
 
@@ -207,7 +201,7 @@ export async function verifyComponentAccess(
 export async function verifySprintAccess(
   userId: string,
   sprintId: string,
-  requiredRoles?: MemberRole[]
+  requiredRoles?: MemberRole[],
 ): Promise<SprintAccessResult | null> {
   const { sprint } = getEntities();
 
@@ -316,7 +310,7 @@ export async function getUserProjectIds(userId: string): Promise<string[]> {
 export async function batchVerifyComponentAccess(
   userId: string,
   componentIds: string[],
-  requiredRoles?: MemberRole[]
+  requiredRoles?: MemberRole[],
 ): Promise<Map<string, ComponentAccessResult>> {
   const { component, project } = getEntities();
   const results = new Map<string, ComponentAccessResult>();

@@ -2,18 +2,7 @@ import { getSession } from '@/lib/auth';
 import Header from '@/components/Header';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import {
-  ArrowLeft,
-  Plus,
-  Layers,
-  GitBranch,
-  Users,
-  Clock,
-  Sparkles,
-  Zap,
-  PlayCircle,
-  PauseCircle,
-} from 'lucide-react';
+import { ArrowLeft, Plus, Layers, GitBranch, Users, Clock, Sparkles, Zap, PlayCircle, PauseCircle } from 'lucide-react';
 import ComponentCard from './components/ComponentCard';
 import SmartComponentCreator from './components/SmartComponentCreator';
 import DependencyGraph from './components/DependencyGraph';
@@ -72,21 +61,15 @@ export default async function ProjectDetailPage({ params }: Props) {
   const membership = access.membership;
 
   // Fetch all related data in parallel (batch queries for project detail)
-  const [
-    membershipsResult,
-    sprintsResult,
-    workflowConfigResult,
-    projectDetailData,
-    activitiesResult,
-    ownerResult,
-  ] = await Promise.all([
-    entities.membership.query.primary({ teamId: team.id }).go(),
-    entities.sprint.query.byTeam({ teamId: team.id }).go(),
-    entities.teamWorkflowConfig.get({ teamId: team.id }).go(),
-    fetchProjectDetailData(id),
-    entities.activity.query.primary({ projectId: id }).go(),
-    entities.user.get({ id: project.ownerId }).go(),
-  ]);
+  const [membershipsResult, sprintsResult, workflowConfigResult, projectDetailData, activitiesResult, ownerResult] =
+    await Promise.all([
+      entities.membership.query.primary({ teamId: team.id }).go(),
+      entities.sprint.query.byTeam({ teamId: team.id }).go(),
+      entities.teamWorkflowConfig.get({ teamId: team.id }).go(),
+      fetchProjectDetailData(id),
+      entities.activity.query.primary({ projectId: id }).go(),
+      entities.user.get({ id: project.ownerId }).go(),
+    ]);
 
   const { components: rawComponents, assignmentsMap, dependenciesMap, statusHistoryMap, usersMap } = projectDetailData;
 
@@ -142,7 +125,7 @@ export default async function ProjectDetailPage({ params }: Props) {
     }));
     const statusHistoryData = statusHistoryMap.get(c.id) ?? [];
     const sortedHistory = [...statusHistoryData].sort(
-      (a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime()
+      (a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime(),
     );
     const currentStatusEntry = sortedHistory.find((h) => !h.exitedAt) ?? sortedHistory[sortedHistory.length - 1];
     let cycleTimeDays: number | null = null;
@@ -150,13 +133,14 @@ export default async function ProjectDetailPage({ params }: Props) {
       const inProgressEntry = sortedHistory.find((h) => h.status === 'IN_PROGRESS');
       const completedEntry = sortedHistory.find((h) => h.status === 'COMPLETED');
       if (inProgressEntry && completedEntry) {
-        const cycleTimeMs = new Date(completedEntry.enteredAt).getTime() - new Date(inProgressEntry.enteredAt).getTime();
+        const cycleTimeMs =
+          new Date(completedEntry.enteredAt).getTime() - new Date(inProgressEntry.enteredAt).getTime();
         cycleTimeDays = Math.round((cycleTimeMs / (1000 * 60 * 60 * 24)) * 10) / 10;
       }
     }
     const previewList = previewsByComponent.get(c.id) ?? [];
     const sortedPreviews = [...previewList].sort(
-      (a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+      (a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime(),
     );
     const latestPreview = sortedPreviews[0] ?? null;
     const sprintData = c.sprintId ? sprintMap.get(c.sprintId) : null;
@@ -185,8 +169,12 @@ export default async function ProjectDetailPage({ params }: Props) {
       githubPrUpdatedAt: c.githubPrUpdatedAt ?? null,
       createdAt: new Date(c.createdAt ?? Date.now()),
       updatedAt: new Date(c.updatedAt ?? Date.now()),
-      sprint: sprintData ? { ...sprintData, startDate: new Date(sprintData.startDate), endDate: new Date(sprintData.endDate) } : null,
-      Sprint: sprintData ? { ...sprintData, startDate: new Date(sprintData.startDate), endDate: new Date(sprintData.endDate) } : null,
+      sprint: sprintData
+        ? { ...sprintData, startDate: new Date(sprintData.startDate), endDate: new Date(sprintData.endDate) }
+        : null,
+      Sprint: sprintData
+        ? { ...sprintData, startDate: new Date(sprintData.startDate), endDate: new Date(sprintData.endDate) }
+        : null,
       sprintId: c.sprintId ?? null,
       assignments,
       Assignment: assignments,
@@ -200,7 +188,9 @@ export default async function ProjectDetailPage({ params }: Props) {
       })),
       Preview: latestPreview ? [{ id: latestPreview.id, htmlContent: latestPreview.htmlContent }] : [],
       StatusHistory: sortedHistory,
-      statusEnteredAt: currentStatusEntry?.enteredAt ? new Date(currentStatusEntry.enteredAt) : new Date(c.createdAt ?? Date.now()),
+      statusEnteredAt: currentStatusEntry?.enteredAt
+        ? new Date(currentStatusEntry.enteredAt)
+        : new Date(c.createdAt ?? Date.now()),
       cycleTimeDays,
     };
   });
@@ -245,9 +235,7 @@ export default async function ProjectDetailPage({ params }: Props) {
     COMPLETED: { label: 'Completed', color: 'emerald' },
   };
 
-  const teamMembers = memberUsers
-    .filter((m) => m.user)
-    .map((m) => m.user!);
+  const teamMembers = memberUsers.filter((m) => m.user).map((m) => m.user!);
 
   const teamWithMembership = {
     ...team,
@@ -355,16 +343,18 @@ export default async function ProjectDetailPage({ params }: Props) {
                   {/* Timeline View */}
                   {components.length > 0 && (
                     <TimelineView
-                      components={components.map((c) => ({
-                        ...c,
-                        dependsOn: c.dependsOn.map((d) => ({
-                          requiredComponent: {
-                            id: d.requiredComponent.id,
-                            name: d.requiredComponent.name,
-                            status: d.requiredComponent.status,
-                          },
-                        })),
-                      })) as any}
+                      components={
+                        components.map((c) => ({
+                          ...c,
+                          dependsOn: c.dependsOn.map((d) => ({
+                            requiredComponent: {
+                              id: d.requiredComponent.id,
+                              name: d.requiredComponent.name,
+                              status: d.requiredComponent.status,
+                            },
+                          })),
+                        })) as any
+                      }
                     />
                   )}
 
@@ -529,7 +519,9 @@ export default async function ProjectDetailPage({ params }: Props) {
                         {memberUser.name?.[0] || memberUser.email[0].toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-slate-200 truncate">{memberUser.name || memberUser.email}</div>
+                        <div className="text-sm font-medium text-slate-200 truncate">
+                          {memberUser.name || memberUser.email}
+                        </div>
                         <div className="text-xs text-slate-500">{role.toLowerCase()}</div>
                       </div>
                     </div>
@@ -553,9 +545,7 @@ export default async function ProjectDetailPage({ params }: Props) {
                           <span className="font-medium">{activity.user.name || activity.user.email}</span>{' '}
                           <span className="text-slate-500">{activity.type.replace(/_/g, ' ').toLowerCase()}</span>
                         </div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {activity.createdAt.toLocaleString()}
-                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5">{activity.createdAt.toLocaleString()}</div>
                       </div>
                     ))}
                   </div>
@@ -563,7 +553,9 @@ export default async function ProjectDetailPage({ params }: Props) {
               </div>
 
               {/* GitHub Integration - only for owner or admin */}
-              {teamWithMembership.Membership.some((m) => m.User.id === userId && (m.role === 'OWNER' || m.role === 'ADMIN')) && (
+              {teamWithMembership.Membership.some(
+                (m) => m.User.id === userId && (m.role === 'OWNER' || m.role === 'ADMIN'),
+              ) && (
                 <GitHubIntegrationSettings
                   projectId={projectData.id}
                   currentSettings={{

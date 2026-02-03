@@ -79,7 +79,7 @@ export default async function TeamDetailPage({ params }: Props) {
 
   // Sort memberships by joinedAt
   const sortedMemberships = membershipsResult.data.sort(
-    (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+    (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime(),
   );
 
   // Batch fetch user details for all memberships
@@ -92,7 +92,7 @@ export default async function TeamDetailPage({ params }: Props) {
 
   // Batch fetch component counts for all projects
   const sortedProjects = projectsResult.data.sort(
-    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+    (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
   );
   const projectIds = sortedProjects.map((p) => p.id);
   const countsMap = await getComponentCountsByProjectIds(projectIds);

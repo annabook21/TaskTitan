@@ -27,7 +27,8 @@ export class TeamInvitationResolvers extends Construct {
       api: api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -59,7 +60,8 @@ export function response(ctx) {
   
   return { hasEmail: true, email };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const queryPendingInvitationsFn = new appsync.AppsyncFunction(this, 'QueryPendingInvitationsFn', {
@@ -67,7 +69,8 @@ export function response(ctx) {
       api: api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   // Check if user has email from previous function
@@ -117,7 +120,8 @@ export function response(ctx) {
   
   return validInvites;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     new appsync.Resolver(this, 'CheckPendingInvitationsResolver', {
@@ -126,12 +130,14 @@ export function response(ctx) {
       fieldName: 'checkPendingInvitations',
       pipelineConfig: [getUserEmailForInvitesFn, queryPendingInvitationsFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -142,7 +148,8 @@ export function response(ctx) {
       api: api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -180,7 +187,8 @@ export function response(ctx) {
   
   return membership;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const checkOrCreateUserFn = new appsync.AppsyncFunction(this, 'CheckOrCreateUserFn', {
@@ -188,7 +196,8 @@ export function response(ctx) {
       api: api,
       dataSource: inviteTeamMemberDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   // Invoke Lambda to check/create user
@@ -214,7 +223,8 @@ export function response(ctx) {
   
   return result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const addMemberOrCreateInviteFn = new appsync.AppsyncFunction(this, 'AddMemberOrCreateInviteFn', {
@@ -222,7 +232,8 @@ export function response(ctx) {
       api: api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userExists = ctx.stash.userExists;
@@ -307,7 +318,8 @@ export function response(ctx) {
   
   return ctx.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     new appsync.Resolver(this, 'InviteTeamMemberResolver', {
@@ -316,12 +328,14 @@ export function response(ctx) {
       fieldName: 'inviteTeamMember',
       pipelineConfig: [verifyTeamOwnerAdminForInviteFn, checkOrCreateUserFn, addMemberOrCreateInviteFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) {
   return ctx.prev.result;
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // ============================================
@@ -332,7 +346,8 @@ export function response(ctx) {
       api: api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
@@ -397,7 +412,8 @@ export function response(ctx) {
   
   return { invites: validInvites };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const createMembershipsFromInvitesFn = new appsync.AppsyncFunction(this, 'CreateMembershipsFromInvitesFn', {
@@ -405,7 +421,8 @@ export function response(ctx) {
       api: api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const invites = ctx.stash.invites || [];
@@ -465,7 +482,8 @@ export function response(ctx) {
   ctx.stash.processedCount = (ctx.stash.processedCount || 0) + 1;
   return { success: true };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     const deleteInvitationRecordsFn = new appsync.AppsyncFunction(this, 'DeleteInvitationRecordsFn', {
@@ -473,7 +491,8 @@ export function response(ctx) {
       api: api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const invites = ctx.stash.invites || [];
@@ -504,7 +523,8 @@ export function response(ctx) {
   
   return { deleted: true };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     new appsync.Resolver(this, 'AcceptPendingInvitationsResolver', {
@@ -513,13 +533,15 @@ export function response(ctx) {
       fieldName: 'acceptPendingInvitations',
       pipelineConfig: [queryPendingInvitesForAcceptFn, createMembershipsFromInvitesFn, deleteInvitationRecordsFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 export function request(ctx) { return {}; }
 export function response(ctx) {
   const processedCount = ctx.stash.processedCount || 0;
   return processedCount > 0;
 }
-`.trim()),
+`.trim(),
+      ),
     });
   }
 }

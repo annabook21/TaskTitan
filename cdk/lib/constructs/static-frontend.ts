@@ -224,7 +224,9 @@ export class StaticFrontend extends Construct {
         prune: true, // Remove old files not in the new deployment
       });
     } else {
-      console.warn(`[StaticFrontend] Frontend dist not found at ${distPath}. Run 'npm run build' in webapp-static first.`);
+      console.warn(
+        `[StaticFrontend] Frontend dist not found at ${distPath}. Run 'npm run build' in webapp-static first.`,
+      );
     }
 
     this.distributionDomainName = this.distribution.distributionDomainName;

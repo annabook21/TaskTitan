@@ -88,7 +88,7 @@ export const createProject = authActionClient.schema(createProjectSchema).action
       // Return project data (transaction doesn't return created items)
       return { id: projectId, name, description, teamId, ownerId: userId };
     },
-    { context: { action: 'createProject', projectId, teamId } }
+    { context: { action: 'createProject', projectId, teamId } },
   );
 
   revalidatePath('/');
@@ -132,7 +132,7 @@ export const updateProject = authActionClient.schema(updateProjectSchema).action
       const updated = await entities.project.update({ id }).set(updateData).go({ response: 'all_new' });
       return updated.data;
     },
-    { context: { action: 'updateProject', projectId: id } }
+    { context: { action: 'updateProject', projectId: id } },
   );
 
   revalidatePath(`/projects/${id}`);
@@ -186,7 +186,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                   activities.data.map((a) => ({
                     pk: `PROJECT#${id}`,
                     sk: `ACTIVITY#${a.createdAt}#${a.id}`,
-                  }))
+                  })),
                 );
               }
               return activities.data.length;
@@ -209,7 +209,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                     assignments.data.map((a) => ({
                       pk: `COMPONENT#${comp.id}`,
                       sk: `ASSIGNEE#${a.userId}`,
-                    }))
+                    })),
                   );
                 }
 
@@ -221,19 +221,21 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                     dependsOnResult.data.map((d) => ({
                       pk: `COMPONENT#${comp.id}`,
                       sk: `DEPENDS_ON#${d.requiredComponentId}`,
-                    }))
+                    })),
                   );
                 }
 
                 // 2. Dependencies where OTHER components depend ON this one (byRequired GSI)
                 // This prevents orphan dependency records pointing to deleted components
-                const requiredByResult = await entities.dependency.query.byRequired({ requiredComponentId: comp.id }).go();
+                const requiredByResult = await entities.dependency.query
+                  .byRequired({ requiredComponentId: comp.id })
+                  .go();
                 if (requiredByResult.data.length > 0) {
                   await batchDelete(
                     requiredByResult.data.map((d) => ({
                       pk: `COMPONENT#${d.dependentComponentId}`,
                       sk: `DEPENDS_ON#${comp.id}`,
-                    }))
+                    })),
                   );
                 }
 
@@ -244,7 +246,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                     history.data.map((h) => ({
                       pk: `COMPONENT#${comp.id}`,
                       sk: `STATUS_HISTORY#${h.enteredAt}#${h.id}`,
-                    }))
+                    })),
                   );
                 }
 
@@ -255,7 +257,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                     previews.data.map((p) => ({
                       pk: `COMPONENT#${comp.id}`,
                       sk: `PREVIEW#${p.createdAt}#${p.id}`,
-                    }))
+                    })),
                   );
                 }
               }
@@ -266,7 +268,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
                   components.data.map((c) => ({
                     pk: `COMPONENT#${c.id}`,
                     sk: 'METADATA',
-                  }))
+                  })),
                 );
               }
 
@@ -293,7 +295,7 @@ export const deleteProject = authActionClient.schema(deleteProjectSchema).action
 
         return { success: true };
       },
-      { context: { action: 'deleteProject', projectId: id } }
+      { context: { action: 'deleteProject', projectId: id } },
     );
   } catch (error) {
     console.error('Failed to delete project:', error);

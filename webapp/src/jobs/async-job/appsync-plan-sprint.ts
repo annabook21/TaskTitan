@@ -32,7 +32,7 @@ export interface SprintPlanResult {
  */
 export async function handleAppSyncPlanSprint(
   input: PlanSprintInput,
-  identity?: { sub?: string }
+  identity?: { sub?: string },
 ): Promise<SprintPlanResult> {
   logger.info('Planning sprint', {
     teamId: input.teamId,
@@ -56,7 +56,7 @@ export async function handleAppSyncPlanSprint(
           pk: `SPRINT#${input.sprintId}`,
           sk: 'METADATA',
         },
-      })
+      }),
     );
 
     if (sprintResponse.Item) {
@@ -74,7 +74,7 @@ export async function handleAppSyncPlanSprint(
       ExpressionAttributeValues: {
         ':pk': `TEAM#${input.teamId}`,
       },
-    })
+    }),
   );
 
   const projectIds = (projectsResponse.Items || [])
@@ -102,7 +102,7 @@ export async function handleAppSyncPlanSprint(
         ExpressionAttributeValues: {
           ':pk': `PROJECT#${projectId}`,
         },
-      })
+      }),
     );
 
     const projectComponents = (componentsResponse.Items || [])
@@ -146,7 +146,7 @@ export async function handleAppSyncPlanSprint(
           ':pk': `COMPONENT#${component.id}`,
           ':sk': 'DEPENDS_ON#',
         },
-      })
+      }),
     );
 
     const deps = (depsResponse.Items || []).map((item) => {

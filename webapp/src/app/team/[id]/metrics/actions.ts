@@ -47,23 +47,33 @@ export const getCycleTimeMetrics = authActionClient.schema(metricsQuerySchema).a
   const projectIds = projects.data.map((p) => p.id);
   if (projectIds.length === 0) return { stats: null, message: 'No projects found' };
 
-  const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+  const componentResults = await Promise.all(
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
+  );
   const allComponents = componentResults.flatMap((r) => r.data);
   const completed = allComponents.filter((c) => c.status === 'COMPLETED');
 
   if (completed.length === 0) return { stats: null, message: 'No completed items found' };
 
-  const histories = await Promise.all(completed.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+  const histories = await Promise.all(
+    completed.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()),
+  );
   const cutoffIso = startDate.toISOString();
 
   const cycleTimes: number[] = [];
 
   for (let i = 0; i < completed.length; i++) {
     const statusHistory = histories[i].data
-      .map((h) => ({ status: h.status, enteredAt: new Date(h.enteredAt), exitedAt: h.exitedAt ? new Date(h.exitedAt) : null }))
+      .map((h) => ({
+        status: h.status,
+        enteredAt: new Date(h.enteredAt),
+        exitedAt: h.exitedAt ? new Date(h.exitedAt) : null,
+      }))
       .sort((a, b) => a.enteredAt.getTime() - b.enteredAt.getTime());
 
-    const hasCompletedInRange = statusHistory.some((h) => h.status === 'COMPLETED' && h.enteredAt.toISOString() >= cutoffIso);
+    const hasCompletedInRange = statusHistory.some(
+      (h) => h.status === 'COMPLETED' && h.enteredAt.toISOString() >= cutoffIso,
+    );
     if (!hasCompletedInRange) continue;
 
     const inProgressEntry = statusHistory.find((h) => h.status === 'IN_PROGRESS');
@@ -110,10 +120,14 @@ export const getThroughputMetrics = authActionClient.schema(metricsQuerySchema).
   const projectIds = projects.data.map((p) => p.id);
   if (projectIds.length === 0) return { data: [], totalCompleted: 0, dailyAverage: 0, weeklyAverage: 0 };
 
-  const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+  const componentResults = await Promise.all(
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
+  );
   const allComponents = componentResults.flatMap((r) => r.data);
 
-  const histories = await Promise.all(allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+  const histories = await Promise.all(
+    allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()),
+  );
   const cutoffIso = startDate.toISOString();
 
   const completionEvents = histories
@@ -159,7 +173,9 @@ export const getStatusDistribution = authActionClient
     const projectIds = projects.data.map((p) => p.id);
     if (projectIds.length === 0) return { data: [] };
 
-    const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+    const componentResults = await Promise.all(
+      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
+    );
     const allComponents = componentResults.flatMap((r) => r.data);
 
     const counts = new Map<string, number>();
@@ -186,7 +202,9 @@ export const getWipOverTime = authActionClient.schema(metricsQuerySchema).action
   const projectIds = projects.data.map((p) => p.id);
   if (projectIds.length === 0) return { currentWip: 0, message: 'No projects found' };
 
-  const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+  const componentResults = await Promise.all(
+    projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
+  );
   const allComponents = componentResults.flatMap((r) => r.data);
   const currentWip = allComponents.filter((c) => c.status === 'IN_PROGRESS').length;
 
@@ -223,14 +241,22 @@ export const getCumulativeFlowData = authActionClient
     const projectIds = projects.data.map((p) => p.id);
     if (projectIds.length === 0) return { data: [] };
 
-    const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+    const componentResults = await Promise.all(
+      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
+    );
     const allComponents = componentResults.flatMap((r) => r.data);
 
-    const histories = await Promise.all(allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+    const histories = await Promise.all(
+      allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()),
+    );
 
     const statusHistory = histories
       .flatMap((r) => r.data)
-      .map((h) => ({ status: h.status, enteredAt: new Date(h.enteredAt), exitedAt: h.exitedAt ? new Date(h.exitedAt) : null }))
+      .map((h) => ({
+        status: h.status,
+        enteredAt: new Date(h.enteredAt),
+        exitedAt: h.exitedAt ? new Date(h.exitedAt) : null,
+      }))
       .sort((a, b) => a.enteredAt.getTime() - b.enteredAt.getTime());
 
     const data: CumulativeFlowData[] = [];
@@ -287,10 +313,14 @@ export const getAgingAnalysis = authActionClient
     const projectIds = projects.data.map((p) => p.id);
     if (projectIds.length === 0) return { data: [] };
 
-    const componentResults = await Promise.all(projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()));
+    const componentResults = await Promise.all(
+      projectIds.map((projectId) => entities.component.query.byProject({ projectId }).go()),
+    );
     const allComponents = componentResults.flatMap((r) => r.data).filter((c) => c.status !== 'COMPLETED');
 
-    const histories = await Promise.all(allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()));
+    const histories = await Promise.all(
+      allComponents.map((c) => entities.componentStatusHistory.query.primary({ componentId: c.id }).go()),
+    );
 
     const now = new Date();
     const statusAging: Map<string, number[]> = new Map();

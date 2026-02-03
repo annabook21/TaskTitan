@@ -36,7 +36,7 @@ export default async function AuthCallbackPage() {
             .go();
           return result.data;
         },
-        { context: { action: 'auth-callback-createUser', userId, email } }
+        { context: { action: 'auth-callback-createUser', userId, email } },
       );
     } else {
       throw e;

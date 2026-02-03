@@ -41,7 +41,7 @@ export default async function ImportPage({ searchParams }: Props) {
       if (!teamResult.data) return null;
 
       const activeOrPlanningSprints = sprintsResult.data.filter(
-        (s) => s.status === 'PLANNING' || s.status === 'ACTIVE'
+        (s) => s.status === 'PLANNING' || s.status === 'ACTIVE',
       );
 
       return {
@@ -50,7 +50,7 @@ export default async function ImportPage({ searchParams }: Props) {
         Project: projectsResult.data.map((p) => ({ id: p.id, name: p.name })),
         Sprint: activeOrPlanningSprints.map((s) => ({ id: s.id, name: s.name })),
       };
-    })
+    }),
   );
 
   const teams = teamsData.filter((t): t is NonNullable<typeof t> => t !== null);

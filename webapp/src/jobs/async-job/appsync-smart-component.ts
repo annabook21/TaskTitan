@@ -40,7 +40,7 @@ export interface SmartComponentResult {
  */
 export async function handleAppSyncSmartComponent(
   input: SmartComponentInput,
-  identity?: { sub?: string }
+  identity?: { sub?: string },
 ): Promise<SmartComponentResult> {
   logger.info('Creating smart component', {
     projectId: input.projectId,
@@ -60,7 +60,7 @@ export async function handleAppSyncSmartComponent(
         pk: `PROJECT#${input.projectId}`,
         sk: 'METADATA',
       },
-    })
+    }),
   );
 
   const project = projectResponse.Item;
@@ -77,7 +77,7 @@ export async function handleAppSyncSmartComponent(
       ExpressionAttributeValues: {
         ':pk': `PROJECT#${input.projectId}`,
       },
-    })
+    }),
   );
 
   const existingComponents = (componentsResponse.Items || [])
@@ -97,7 +97,7 @@ export async function handleAppSyncSmartComponent(
           pk: `COMPONENT#${input.parentComponentId}`,
           sk: 'METADATA',
         },
-      })
+      }),
     );
 
     if (parentResponse.Item) {

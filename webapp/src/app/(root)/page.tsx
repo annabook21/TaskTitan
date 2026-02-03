@@ -69,7 +69,7 @@ export default async function Dashboard() {
           sortedProjects,
           membershipsCount: membershipsCountResult.data.length,
         };
-      })
+      }),
     );
 
     // Step 4: Batch component counts for all projects across teams
