@@ -8619,7 +8619,24 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/7890327d86cdcfca05315f3808c30b728af6fb8a639317b408e9080b5ddb00d2.js",
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const projectId = ctx.args.projectId;
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'PROJECT#' + projectId,
+        ':skPrefix': 'SHARE_CODE#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result.items || [];
+}",
         "DataSourceName": "DynamoDB",
         "FieldName": "listShareCodesForProject",
         "Kind": "UNIT",
