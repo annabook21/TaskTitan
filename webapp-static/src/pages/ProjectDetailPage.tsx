@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getProject,
@@ -14,6 +14,7 @@ import {
   type Team,
 } from '../api/appsync';
 import { useAuth } from '../hooks/useAuth';
+import { useComponentSubscription } from '../hooks/useComponentSubscription';
 import { signInWithRedirect } from 'aws-amplify/auth';
 import { KanbanBoard } from '../components/KanbanBoard';
 import { AIGeneratePanel } from '../components/AIGeneratePanel';
@@ -54,6 +55,26 @@ export function ProjectDetailPage() {
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newType, setNewType] = useState<ComponentType>('TASK');
+
+  // Real-time component subscription for multi-user updates
+  const { publish } = useComponentSubscription({
+    projectId: id,
+    enabled: isAuthenticated,
+    onCreated: useCallback((component: Component) => {
+      // Avoid duplicates (in case we're the one who created it)
+      setComponents((prev) =>
+        prev.some((c) => c.id === component.id) ? prev : [...prev, component]
+      );
+    }, []),
+    onUpdated: useCallback((component: Component) => {
+      setComponents((prev) =>
+        prev.map((c) => (c.id === component.id ? component : c))
+      );
+    }, []),
+    onDeleted: useCallback((componentId: string) => {
+      setComponents((prev) => prev.filter((c) => c.id !== componentId));
+    }, []),
+  });
 
   useEffect(() => {
     if (!statusUpdateError) return;
@@ -123,6 +144,8 @@ export function ProjectDetailPage() {
         type: newType,
       });
       setComponents((prev) => [...prev, newComponent]);
+      // Notify other users viewing this project
+      publish(newComponent.id, 'CREATED', newComponent);
       setNewName('');
       setNewDescription('');
       setNewType('TASK');
@@ -136,10 +159,14 @@ export function ProjectDetailPage() {
 
   const handleComponentUpdate = (updated: Component) => {
     setComponents((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    // Notify other users viewing this project
+    publish(updated.id, 'UPDATED', updated);
   };
 
   const handleComponentDeleted = (componentId: string) => {
     setComponents((prev) => prev.filter((c) => c.id !== componentId));
+    // Notify other users viewing this project
+    publish(componentId, 'DELETED', null);
   };
 
   const handleDeleteProject = async () => {

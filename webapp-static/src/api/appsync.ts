@@ -171,6 +171,7 @@ export type Component = {
   dueDate?: string | null;
   owner?: string | null;
   tags?: string[] | null;
+  acceptanceCriteria?: string[] | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   // Kanban: Timestamp when work started (for cycle time calculation)
@@ -211,6 +212,7 @@ export type UpdateComponentInput = {
   tags?: string[] | null;
   startedAt?: string | null;
   hillPhase?: number | null;
+  acceptanceCriteria?: string[] | null;
 };
 
 export type Dependency = {
@@ -723,6 +725,7 @@ const GetComponent = /* GraphQL */ `
       dueDate
       owner
       tags
+      acceptanceCriteria
       createdAt
       updatedAt
     }
@@ -746,6 +749,7 @@ const ListComponentsByProject = /* GraphQL */ `
       dueDate
       owner
       tags
+      acceptanceCriteria
       createdAt
       updatedAt
     }
@@ -815,6 +819,7 @@ const UpdateComponent = /* GraphQL */ `
       dueDate
       owner
       tags
+      acceptanceCriteria
       createdAt
       updatedAt
     }

@@ -19,6 +19,11 @@ const wafStack = new WafStack(app, 'TaskTitanWafStack', {
   crossRegionReferences: true, // Enable cross-region exports
 });
 
+// Optional custom domain configuration (for portability)
+// Pass via CDK context: cdk deploy -c customDomain=tasktitan.live -c certificateArn=arn:aws:acm:us-east-1:...
+const customDomain = app.node.tryGetContext('customDomain') as string | undefined;
+const certificateArn = app.node.tryGetContext('certificateArn') as string | undefined;
+
 // FORGE v3: Fully serverless static SPA architecture
 // - CloudFront + S3 (static frontend with security headers + WAF)
 // - AppSync GraphQL API (Cognito auth)
@@ -31,6 +36,8 @@ const mainStack = new MainStack(app, 'TaskTitanForgeStack', {
   },
   crossRegionReferences: true, // Enable cross-region imports
   webAclArn: wafStack.webAclArn, // Pass WAF ARN from us-east-1
+  customDomain, // Optional: CloudFront uses default domain if not set
+  certificateArn, // Optional: Required only if customDomain is set
 });
 
 // Explicit dependency: main stack depends on WAF stack

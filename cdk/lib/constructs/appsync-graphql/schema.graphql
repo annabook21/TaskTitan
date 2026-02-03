@@ -100,6 +100,8 @@ type Component @aws_cognito_user_pools @aws_iam {
   dueDate: String
   owner: String
   tags: [String!]
+  # AI-generated acceptance criteria from refinement
+  acceptanceCriteria: [String!]
   createdAt: String
   updatedAt: String
   # Kanban: Timestamp when work started (for cycle time calculation)
@@ -107,6 +109,48 @@ type Component @aws_cognito_user_pools @aws_iam {
   startedAt: String
   # Shape Up: Manual hill chart position (0-100)
   # 0-50 = "figuring things out" (uphill), 51-100 = "making it happen" (downhill)
+  hillPhase: Int
+}
+
+# =============================================================================
+# Real-time Component Updates (Subscriptions)
+# =============================================================================
+
+enum ComponentChangeAction {
+  CREATED
+  UPDATED
+  DELETED
+}
+
+# Published component change event for real-time dashboard updates
+type ComponentChange @aws_cognito_user_pools {
+  projectId: ID!
+  componentId: ID!
+  action: ComponentChangeAction!
+  # Full component data (null for DELETED action)
+  component: Component
+}
+
+# Input for publishing component changes (mirrors Component type)
+input ComponentInput {
+  id: ID!
+  name: String!
+  description: String
+  type: ComponentType!
+  projectId: String!
+  parentId: String
+  sprintId: String
+  status: ComponentStatus!
+  priority: Int
+  estimatedHours: Float
+  actualHours: Float
+  dueDate: String
+  owner: String
+  tags: [String!]
+  acceptanceCriteria: [String!]
+  createdAt: String
+  updatedAt: String
+  startedAt: String
   hillPhase: Int
 }
 
@@ -669,6 +713,8 @@ input UpdateComponentInput {
   startedAt: String
   # Shape Up: Manual hill chart position (0-100, user-draggable)
   hillPhase: Int
+  # AI-generated acceptance criteria from refinement
+  acceptanceCriteria: [String!]
 }
 
 input CreateSprintInput {
@@ -1117,6 +1163,18 @@ type Mutation {
   # Uses IAM auth - only callable by Lambda with appsync:GraphQL permission
   publishAIProgress(sessionId: ID!, progress: Int!, message: String!, status: AIJobStatus!, result: FullPlanResultInput, error: String): AIProgress! @aws_iam
 
+  # =============================================================================
+  # Real-time Component Updates
+  # =============================================================================
+  # Publish component change event (triggers onComponentChange subscription)
+  # Called by frontend after component CRUD operations to notify other users
+  publishComponentChange(
+    projectId: ID!
+    componentId: ID!
+    action: ComponentChangeAction!
+    component: ComponentInput
+  ): ComponentChange! @aws_cognito_user_pools
+
   # Legacy: Simple AI generation (returns raw string)
   generateComponentViaAI(projectId: ID!, prompt: String!): String
   # Full AI Plan Generation (workflow-aware: Scrum generates sprints, Kanban generates flat items)
@@ -1276,6 +1334,11 @@ type Subscription {
   # Client subscribes with sessionId returned from startAIGeneration
   onAIProgress(sessionId: ID!): AIProgress
     @aws_subscribe(mutations: ["publishAIProgress"])
+
+  # Subscribe to component changes for a specific project
+  # Clients filter by projectId to receive updates only for projects they're viewing
+  onComponentChange(projectId: ID!): ComponentChange
+    @aws_subscribe(mutations: ["publishComponentChange"])
 }
 
 schema {

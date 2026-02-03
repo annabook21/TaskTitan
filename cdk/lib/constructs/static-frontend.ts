@@ -3,6 +3,7 @@
  * - S3 bucket for static/SPA assets (private, OAC)
  * - CloudFront distribution: HTTPS only, SPA fallback (403/404 → index.html)
  * - Tiered TTLs: short for index.html, long for hashed assets (configure in behaviors if needed)
+ * - BucketDeployment: automatically uploads frontend assets during cdk deploy
  */
 
 import { CfnOutput, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
@@ -19,9 +20,12 @@ import {
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
+import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { Construct } from 'constructs';
+import { existsSync } from 'fs';
+import { join } from 'path';
 
 export interface StaticFrontendProps {
   /**
@@ -36,6 +40,26 @@ export interface StaticFrontendProps {
    * Provides rate limiting without payload size restrictions.
    */
   readonly webAclArn?: string;
+
+  /**
+   * Optional custom domain name (e.g., 'tasktitan.live').
+   * If not provided, uses CloudFront's default domain.
+   */
+  readonly customDomain?: string;
+
+  /**
+   * Optional ACM certificate ARN for custom domain.
+   * Must be in us-east-1 region.
+   * Required if customDomain is provided.
+   */
+  readonly certificateArn?: string;
+
+  /**
+   * Path to the frontend build output directory.
+   * If not provided, defaults to '../webapp-static/dist' relative to cdk directory.
+   * If the directory doesn't exist, deployment is skipped (allows initial cdk deploy).
+   */
+  readonly frontendDistPath?: string;
 }
 
 export class StaticFrontend extends Construct {
@@ -49,7 +73,7 @@ export class StaticFrontend extends Construct {
   constructor(scope: Construct, id: string, props: StaticFrontendProps = {}) {
     super(scope, id);
 
-    const { accessLogBucket, webAclArn } = props;
+    const { accessLogBucket, webAclArn, customDomain, certificateArn, frontendDistPath } = props;
 
     // S3 bucket for static assets (private; CloudFront only via OAC)
     // Object ownership must be BUCKET_OWNER_ENFORCED when using OAC per AWS docs
@@ -64,12 +88,10 @@ export class StaticFrontend extends Construct {
 
     const s3Origin = S3BucketOrigin.withOriginAccessControl(this.bucket);
 
-    // Import existing ACM certificate for custom domain
-    const certificate = acm.Certificate.fromCertificateArn(
-      this,
-      'Certificate',
-      'arn:aws:acm:us-east-1:232894901916:certificate/b23ebe27-d839-4b87-b117-0148907aa109'
-    );
+    // Import ACM certificate only if custom domain is configured
+    const certificate = certificateArn
+      ? acm.Certificate.fromCertificateArn(this, 'Certificate', certificateArn)
+      : undefined;
 
     // AWS Best Practice: Security headers policy
     // https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-response-headers-policies.html
@@ -112,8 +134,11 @@ export class StaticFrontend extends Construct {
 
     this.distribution = new Distribution(this, 'Distribution', {
       comment: `${Stack.of(this).stackName} static frontend`,
-      domainNames: ['tasktitan.live'],
-      certificate: certificate,
+      // Only set domain/cert if custom domain is configured
+      ...(customDomain && certificate && {
+        domainNames: [customDomain],
+        certificate: certificate,
+      }),
       defaultBehavior: {
         origin: s3Origin,
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -190,6 +215,22 @@ export class StaticFrontend extends Construct {
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
+
+    // Deploy frontend assets to S3 and invalidate CloudFront cache
+    // AWS Best Practice: Use BucketDeployment for atomic updates with cache invalidation
+    const distPath = frontendDistPath || join(__dirname, '../../../webapp-static/dist');
+    if (existsSync(distPath)) {
+      new s3deploy.BucketDeployment(this, 'DeployFrontend', {
+        sources: [s3deploy.Source.asset(distPath)],
+        destinationBucket: this.bucket,
+        distribution: this.distribution,
+        distributionPaths: ['/*'], // Invalidate all paths after deployment
+        memoryLimit: 512, // Increase memory for larger builds
+        prune: true, // Remove old files not in the new deployment
+      });
+    } else {
+      console.warn(`[StaticFrontend] Frontend dist not found at ${distPath}. Run 'npm run build' in webapp-static first.`);
+    }
 
     this.distributionDomainName = this.distribution.distributionDomainName;
     this.distributionUrl = `https://${this.distribution.distributionDomainName}`;

@@ -80,6 +80,9 @@ export function ComponentDetailModal({
   const [estimatedHours, setEstimatedHours] = useState(
     initialComponent.estimatedHours != null ? String(initialComponent.estimatedHours) : ''
   );
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState<string[]>(
+    initialComponent.acceptanceCriteria ?? []
+  );
 
   // Create a lookup map to resolve owner IDs to names
   const memberMap = useMemo(() => {
@@ -173,6 +176,7 @@ export function ComponentDetailModal({
           setEstimatedHours(
             full.estimatedHours != null ? String(full.estimatedHours) : ''
           );
+          setAcceptanceCriteria(full.acceptanceCriteria ?? []);
         }
       } catch (err) {
         if (mounted) {
@@ -217,6 +221,7 @@ export function ComponentDetailModal({
         status,
         priority: parsedPriority,
         estimatedHours: parsedHours,
+        acceptanceCriteria: acceptanceCriteria.length > 0 ? acceptanceCriteria : undefined,
       });
       onUpdate(updated);
       onClose();
@@ -557,6 +562,7 @@ export function ComponentDetailModal({
                             setType(refinedPreview.type);
                             setEstimatedHours(String(refinedPreview.estimatedHours));
                             setPriority(String(refinedPreview.priority));
+                            setAcceptanceCriteria(refinedPreview.acceptanceCriteria ?? []);
                             setRefinedPreview(null);
                           }}
                           disabled={refining}

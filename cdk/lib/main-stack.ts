@@ -17,6 +17,18 @@ interface MainStackProps extends StackProps {
    * Must be created in us-east-1 with CLOUDFRONT scope.
    */
   readonly webAclArn?: string;
+
+  /**
+   * Optional custom domain for CloudFront (e.g., 'tasktitan.live').
+   * If not provided, uses CloudFront's default domain.
+   */
+  readonly customDomain?: string;
+
+  /**
+   * Optional ACM certificate ARN for custom domain.
+   * Must be in us-east-1 region. Required if customDomain is set.
+   */
+  readonly certificateArn?: string;
 }
 
 export class MainStack extends Stack {
@@ -98,21 +110,25 @@ export class MainStack extends Stack {
     const staticFrontend = new StaticFrontend(this, 'StaticFrontend', {
       accessLogBucket,
       webAclArn: props.webAclArn,
+      customDomain: props.customDomain,
+      certificateArn: props.certificateArn,
     });
 
-    // Configure Cognito OAuth callback URLs for CloudFront + custom domain + local dev
-    auth.updateAllowedCallbackUrls(
-      [
-        `${staticFrontend.distributionUrl}/auth-callback`,
-        'https://tasktitan.live/auth-callback', // Custom domain
-        'http://localhost:5173/auth-callback', // Vite dev server
-      ],
-      [
-        staticFrontend.distributionUrl,
-        'https://tasktitan.live',
-        'http://localhost:5173',
-      ],
-    );
+    // Configure Cognito OAuth callback URLs for CloudFront + optional custom domain + local dev
+    const callbackUrls = [
+      `${staticFrontend.distributionUrl}/auth-callback`,
+      'http://localhost:5173/auth-callback', // Vite dev server
+    ];
+    const logoutUrls = [
+      staticFrontend.distributionUrl,
+      'http://localhost:5173',
+    ];
+    // Add custom domain URLs if configured
+    if (props.customDomain) {
+      callbackUrls.push(`https://${props.customDomain}/auth-callback`);
+      logoutUrls.push(`https://${props.customDomain}`);
+    }
+    auth.updateAllowedCallbackUrls(callbackUrls, logoutUrls);
 
     // CloudWatch Monitoring Dashboard
     new Monitoring(this, 'Monitoring', {

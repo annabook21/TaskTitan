@@ -106,6 +106,26 @@ export class AppSyncGraphql extends Construct {
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
+    // Lambda for user deletion (AdminDeleteUser - removes user from Cognito)
+    // AWS Documentation: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminDeleteUser.html
+    const deleteUserLambda = new lambdaNode.NodejsFunction(this, 'DeleteUserHandler', {
+      entry: join(__dirname, 'appsync-graphql', 'delete-user-handler.ts'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: Duration.seconds(10),
+      environment: {
+        USER_POOL_ID: auth.userPool.userPoolId,
+      },
+    });
+
+    // Grant Cognito AdminDeleteUser permission
+    auth.userPool.grant(deleteUserLambda, 'cognito-idp:AdminDeleteUser');
+
+    // Lambda data source for user deletion
+    const deleteUserDs = this.api.addLambdaDataSource('DeleteUserLambda', deleteUserLambda);
+
     // Resolver: Query.getProject (JS) - GetItem pk=PROJECT#id, sk=METADATA (single-table key pattern)
     new appsync.Resolver(this, 'GetProjectResolver', {
       api: this.api,
@@ -360,12 +380,44 @@ export function response(ctx) {
 `.trim()),
     });
 
+    // Function 3: Delete user from Cognito (Lambda)
+    // AWS Best Practice: Use Lambda for admin SDK operations
+    const deleteCognitoUserFn = new appsync.AppsyncFunction(this, 'DeleteCognitoUserFn', {
+      api: this.api,
+      name: 'deleteCognitoUser',
+      dataSource: deleteUserDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.stash.userId;
+  return {
+    operation: 'Invoke',
+    payload: { userId: userId }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const result = ctx.result;
+  if (!result.success) {
+    util.error(result.message, 'CognitoDeleteFailed');
+  }
+  return true;
+}
+`.trim()),
+    });
+
     // Pipeline Resolver: deleteCurrentUser
+    // Step 1: Query user's memberships
+    // Step 2: Delete DynamoDB records (user + memberships)
+    // Step 3: Delete Cognito user (prevents future sign-in)
     new appsync.Resolver(this, 'DeleteCurrentUserResolver', {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'deleteCurrentUser',
-      pipelineConfig: [queryUserMembershipsFn, deleteUserAndMembershipsFn],
+      pipelineConfig: [queryUserMembershipsFn, deleteUserAndMembershipsFn, deleteCognitoUserFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) {
@@ -1437,7 +1489,7 @@ export function request(ctx) {
   const expValues = { ':updatedAt': util.dynamodb.toDynamoDB(now) };
   let updateExp = 'SET #updatedAt = :updatedAt';
 
-  const fields = ['name', 'description', 'type', 'parentId', 'sprintId', 'status', 'priority', 'estimatedHours', 'actualHours', 'dueDate', 'owner', 'tags'];
+  const fields = ['name', 'description', 'type', 'parentId', 'sprintId', 'status', 'priority', 'estimatedHours', 'actualHours', 'dueDate', 'owner', 'tags', 'acceptanceCriteria'];
   for (const field of fields) {
     if (input[field] !== undefined) {
       expNames['#' + field] = field;
@@ -4283,6 +4335,29 @@ export function response(ctx) {
             status: ctx.arguments.status,
             result: ctx.arguments.result,
             error: ctx.arguments.error,
+          };
+        }
+      `),
+    });
+
+    // Resolver: Mutation.publishComponentChange - triggers onComponentChange subscription
+    // Frontend calls this after component CRUD operations to notify other users viewing the project
+    new appsync.Resolver(this, 'PublishComponentChangeResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'publishComponentChange',
+      dataSource: noneDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+        export function request(ctx) {
+          return { payload: ctx.arguments };
+        }
+        export function response(ctx) {
+          return {
+            projectId: ctx.arguments.projectId,
+            componentId: ctx.arguments.componentId,
+            action: ctx.arguments.action,
+            component: ctx.arguments.component,
           };
         }
       `),
