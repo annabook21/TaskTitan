@@ -2,9 +2,12 @@
 
 [![Build](https://github.com/annabook21/TaskTitan/actions/workflows/build.yml/badge.svg)](https://github.com/annabook21/TaskTitan/actions/workflows/build.yml)
 
+**Last Updated:** February 3, 2026  
+**Version:** FORGE v3.0
+
 TaskTitan is an AI-powered project planning tool that helps development teams break down projects into manageable components, track decisions, visualize dependencies, and coordinate sprints — eliminating merge conflicts before they happen.
 
-**Live App:** [https://d1nms7auefufdj.cloudfront.net](https://d1nms7auefufdj.cloudfront.net)
+**Live App:** [https://dxbbappo989sa.cloudfront.net](https://dxbbappo989sa.cloudfront.net)
 
 ## Features
 
@@ -23,10 +26,15 @@ TaskTitan is an AI-powered project planning tool that helps development teams br
 - **Retrospective Analysis**: AI analyzes sprint performance and suggests improvements
 
 ### Team Collaboration
+- **Team Invites**: Share 8-character team invite codes with members
+- **Project Share Links**: 6-character codes for guest access to specific projects
+- **Guest Access**: Users can join and collaborate without creating an account
+- **Guest Migration**: Seamless upgrade from guest to authenticated user with data preservation
 - **Decision Journal**: Document why decisions were made, not just what
-- **Real-time Updates**: Live sync when team members make changes
+- **Real-time Updates**: Live sync when team members make changes via AppSync Events
 - **GitHub Integration**: Link PRs to components with automatic status updates
 - **Team Metrics**: Track cycle time, throughput, and status distribution
+- **Owner-Based Permissions**: Project owners and admins control team assignments (NEW: Feb 3, 2026)
 
 ### Workflow Support
 - **Scrum**: 2-week sprints with planning and retrospectives
@@ -40,7 +48,10 @@ TaskTitan is built on a fully serverless AWS architecture:
 
 ![TaskTitan Architecture](./architecture-2-3-26.drawio.svg)
 
-> For detailed architecture documentation including AWS Well-Architected alignment, see [ARCHITECTURE.md](ARCHITECTURE.md).
+> **Updated:** February 3, 2026 - User-journey focused diagram showing the complete flow from access to real-time updates.  
+> **Source:** [architecture-2-3-26.drawio.xml](architecture-2-3-26.drawio.xml) (open in [draw.io](https://app.diagrams.net/) to view/edit)  
+> **Note:** Export the XML to SVG in draw.io for the image to display above.  
+> For detailed technical documentation including AWS Well-Architected alignment, see [ARCHITECTURE_TECHNICAL.md](ARCHITECTURE_TECHNICAL.md).
 
 ### Key Technologies
 
@@ -48,15 +59,39 @@ TaskTitan is built on a fully serverless AWS architecture:
 |-------|------------|
 | Frontend | Vite + React 18, Tailwind CSS, React Router |
 | CDN | Amazon CloudFront (edge caching, security headers) |
-| API | AWS AppSync GraphQL (Cognito + API Key auth) |
+| API | AWS AppSync GraphQL (Pipeline resolvers + owner-based authorization) |
 | Database | Amazon DynamoDB (single-table design with ElectroDB) |
-| Async Jobs | AWS Lambda (ARM64, Docker, 10-min timeout) |
-| Auth | Amazon Cognito (User Pool, OAuth 2.0) |
-| Real-time | AWS AppSync Events (WebSocket pub/sub) |
-| AI | Amazon Bedrock (Claude Sonnet 4.5) |
-| Security | AWS WAF (rate limiting, no payload inspection) |
+| Async Jobs | AWS Lambda (ARM64, Docker, 10-min timeout, 4 functions) |
+| Auth (Authenticated) | Amazon Cognito User Pool (OAuth 2.0, JWT tokens) |
+| Auth (Guest) | Amazon Cognito Identity Pool (unauthenticated access) |
+| Real-time | AWS AppSync Events (WebSocket pub/sub for live updates) |
+| AI | Amazon Bedrock (Claude Sonnet 4.5, global inference profile) |
+| Security | AWS WAF (rate limiting) + AppSync authorization pipeline |
 | Infrastructure | AWS CDK (TypeScript, two-stack deployment) |
-| Observability | CloudWatch Dashboard, X-Ray Tracing |
+| Observability | CloudWatch Dashboard, X-Ray Tracing, Alarms |
+
+### Recent Improvements (February 3, 2026)
+
+**Security & Authorization:**
+- ✅ Backend authorization pipeline for assignment mutations
+- ✅ Only project owners and team admins can manage assignments
+- ✅ OAuth state validation tokens (CSRF protection)
+- ✅ Single-assignment model with permission enforcement
+
+**Guest Access:**
+- ✅ Guest users can now sign in from share links without creating duplicates
+- ✅ Automatic guest-to-authenticated migration
+- ✅ Auto-detection of orphaned guest sessions after cache clear
+
+**State Management:**
+- ✅ Callback-based state synchronization (no memory leaks)
+- ✅ Real-time subscription updates for both component list and modal
+- ✅ Reliable user ID via `fetchAuthSession` (OAuth compatible)
+
+**Bug Fixes:**
+- ✅ AI refinement changes now persist correctly
+- ✅ Existing users can log in when entering team invite codes
+- ✅ Subscription state synchronization prevents stale data
 
 ### Cost Estimate
 
@@ -69,6 +104,28 @@ TaskTitan is built on a fully serverless AWS architecture:
 | WAF | ~$5-10 |
 | Other (Cognito, CloudWatch, S3) | ~$3-10 |
 | **Total** | **~$25-90/month** |
+
+## Security Features
+
+**Multi-Layer Authorization:**
+- AWS WAF rate limiting (protects against DDoS)
+- Cognito User Pool authentication (OAuth 2.0)
+- AppSync pipeline resolvers with custom authorization logic
+- Owner-based access control for sensitive operations
+- OAuth state validation tokens (prevents CSRF attacks)
+
+**Access Control Model:**
+- **Project Owners**: Full control over project and assignments
+- **Team Admins**: Can manage team members and assignments
+- **Team Members**: Can view and update assigned components
+- **Team Viewers**: Read-only access
+- **Guests**: Project-scoped access via share codes (unauthenticated)
+
+**Data Protection:**
+- All API traffic over HTTPS/TLS
+- JWT token validation on every request
+- Backend authorization enforcement (can't be bypassed by frontend)
+- Automatic guest session cleanup after migration
 
 ## Prerequisites
 
@@ -183,16 +240,17 @@ User ──┬── Membership ──── Team ──┬── Project ──
        │                          │             │               │
        └── Activity ◀─────────────┘             │               └── Dependency
                                                 │
-                                                └── Sprint
+Guest ─────────────────────────────┘            └── Sprint
 ```
 
-- **User**: Authenticated users (Cognito)
-- **Team**: Groups with roles (Owner, Admin, Member, Viewer)
+- **User**: Authenticated users (Cognito User Pool)
+- **Guest**: Unauthenticated users (Cognito Identity Pool, project-scoped)
+- **Team**: Groups with roles (Owner, Admin, Member, Viewer, Guest)
 - **Project**: Software project being planned
 - **Component**: Work items (Epic, Feature, Story, Task, Bug)
 - **Sprint**: Time-boxed iterations with capacity
 - **Dependency**: Relationships between components
-- **Assignment**: Who is responsible for each component
+- **Assignment**: Single assignment per component (owner/admin controlled)
 
 ## Contributing
 
