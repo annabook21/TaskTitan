@@ -3059,8 +3059,8 @@ const GuestUpdateStatus = /* GraphQL */ `
 `;
 
 const GuestRefineComponent = /* GraphQL */ `
-  mutation GuestRefineComponent($guestId: ID!, $componentId: ID!, $refinementRequest: String!) {
-    guestRefineComponent(guestId: $guestId, componentId: $componentId, refinementRequest: $refinementRequest) {
+  mutation GuestRefineComponent($input: GuestRefineComponentInput!) {
+    guestRefineComponent(input: $input) {
       component {
         name
         description
@@ -3078,8 +3078,8 @@ const GuestRefineComponent = /* GraphQL */ `
 `;
 
 const GuestUpdateComponent = /* GraphQL */ `
-  mutation GuestUpdateComponent($guestId: ID!, $input: GuestUpdateComponentInput!) {
-    guestUpdateComponent(guestId: $guestId, input: $input) {
+  mutation GuestUpdateComponent($input: GuestUpdateComponentInput!) {
+    guestUpdateComponent(input: $input) {
       id
       name
       description
