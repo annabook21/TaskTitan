@@ -5080,7 +5080,39 @@ export function response(ctx) {
       fieldName: 'validateShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromAsset(join(__dirname, 'appsync-graphql/resolvers/share-codes/Query.validateShareCode.js')),
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.args.code.toUpperCase();
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  
+  const codeItem = ctx.result;
+  if (!codeItem) {
+    return { valid: false, projectId: null, projectName: null };
+  }
+  
+  // Check expiration
+  const nowEpoch = util.time.nowEpochSeconds();
+  if (codeItem.ttl && codeItem.ttl < nowEpoch) {
+    return { valid: false, projectId: null, projectName: null };
+  }
+  
+  return {
+    valid: true,
+    projectId: codeItem.projectId,
+    projectName: codeItem.projectName || null
+  };
+}
+`.trim()),
     });
 
     // Function: Verify user is team member before generating share code
