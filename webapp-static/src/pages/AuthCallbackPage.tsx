@@ -147,6 +147,33 @@ export function AuthCallbackPage() {
         }
       }
 
+      // Auto-detect and migrate existing guest sessions (fallback if flag is missing)
+      // This handles cases where user cleared cache or flag was lost
+      const guestSessionRaw = localStorage.getItem('tasktitan_guest_session');
+      if (guestSessionRaw && !pendingMigration && isMounted) {
+        try {
+          const guestSession = JSON.parse(guestSessionRaw);
+          if (guestSession.guestId && guestSession.teamId) {
+            setStatus('Detected guest session, migrating...');
+            console.log('[AuthCallbackPage] Auto-detected guest session:', guestSession);
+            
+            const result = await migrateGuestToUser(guestSession.guestId, guestSession.teamId);
+            console.log('[AuthCallbackPage] Auto-migration result:', result);
+            
+            // Clear the guest session after migration
+            localStorage.removeItem('tasktitan_guest_session');
+            localStorage.removeItem('guestSession');
+            
+            if (!result.success) {
+              console.warn('[AuthCallbackPage] Auto-migration partial:', result.message);
+            }
+          }
+        } catch (err) {
+          console.error('[AuthCallbackPage] Auto-migration error:', err);
+          // Don't fail - user is still authenticated
+        }
+      }
+
       // Check for pending team invite (user clicked "Sign In" on team invite page)
       const pendingTeamInvite = sessionStorage.getItem('pendingTeamInvite');
       if (pendingTeamInvite && isMounted) {

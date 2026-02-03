@@ -167,12 +167,9 @@ export function AcceptTeamInvitePage() {
     });
   }, [checkAuth]);
 
-  // If already in a guest session, redirect
-  useEffect(() => {
-    if (guestSession) {
-      navigate('/guest');
-    }
-  }, [guestSession, navigate]);
+  // Note: Removed redirect to /guest when guestSession exists
+  // This was preventing guests from signing in from the invite page
+  // Users can still navigate to /guest manually if needed
 
   // If authenticated and we have a code, auto-accept
   useEffect(() => {
@@ -325,6 +322,16 @@ export function AcceptTeamInvitePage() {
       // Set expiry to 10 minutes from now
       sessionStorage.setItem('oauthStateExpiry', String(Date.now() + 600000));
     }
+    
+    // If user has a guest session, trigger migration after sign-in
+    if (guestSession && inviteInfo?.teamId) {
+      localStorage.setItem('pendingGuestMigration', JSON.stringify({
+        guestId: guestSession.guestId,
+        teamId: inviteInfo.teamId,
+        timestamp: Date.now(),
+      }));
+    }
+    
     signInWithRedirect();
   };
 
