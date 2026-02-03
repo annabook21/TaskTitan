@@ -2364,6 +2364,39 @@ export function response(ctx) {
 `.trim()),
     });
 
+    // Check for existing assignments before allowing new ones
+    const checkNoExistingAssignmentsFn = new appsync.AppsyncFunction(this, 'CheckNoExistingAssignmentsFn', {
+      api: this.api,
+      name: 'checkNoExistingAssignments',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  // Query for any existing ASSIGNEE# entries for this component
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'COMPONENT#' + componentId,
+        ':skPrefix': 'ASSIGNEE#'
+      })
+    },
+    limit: 1
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (ctx.result.items && ctx.result.items.length > 0) {
+    util.error('This component is already assigned to someone', 'ComponentAlreadyAssigned');
+  }
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
     const createAssignmentFn = new appsync.AppsyncFunction(this, 'CreateAssignmentFn', {
       api: this.api,
       name: 'createAssignment',
@@ -2421,7 +2454,7 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'assignUserToComponent',
-      pipelineConfig: [getComponentForAssignmentFn, createAssignmentFn],
+      pipelineConfig: [getComponentForAssignmentFn, checkNoExistingAssignmentsFn, createAssignmentFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) { return {}; }
@@ -5166,7 +5199,40 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Function 2: Create assignment with denormalized component data
+    // Function 2: Check no existing assignments before allowing new ones
+    const checkNoExistingGuestAssignmentsFn = new appsync.AppsyncFunction(this, 'CheckNoExistingGuestAssignmentsFn', {
+      api: this.api,
+      name: 'checkNoExistingGuestAssignments',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  // Query for any existing ASSIGNEE# entries for this component
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'COMPONENT#' + componentId,
+        ':skPrefix': 'ASSIGNEE#'
+      })
+    },
+    limit: 1
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (ctx.result.items && ctx.result.items.length > 0) {
+    util.error('This component is already assigned to someone', 'ComponentAlreadyAssigned');
+  }
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // Function 3: Create assignment with denormalized component data
     const createGuestAssignmentFn = new appsync.AppsyncFunction(this, 'CreateGuestAssignmentFn', {
       api: this.api,
       name: 'createGuestAssignment',
@@ -5246,7 +5312,7 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'guestAssignSelf',
-      pipelineConfig: [fetchComponentForAssignmentFn, createGuestAssignmentFn, createActivityFn],
+      pipelineConfig: [fetchComponentForAssignmentFn, checkNoExistingGuestAssignmentsFn, createGuestAssignmentFn, createActivityFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) {
