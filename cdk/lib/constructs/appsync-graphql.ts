@@ -5266,7 +5266,8 @@ export function response(ctx) {
       fieldName: 'listShareCodesForProject',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const projectId = ctx.args.projectId;
@@ -5285,7 +5286,8 @@ export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result.items || [];
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Fetch share code and extract projectId/teamId for authorization
