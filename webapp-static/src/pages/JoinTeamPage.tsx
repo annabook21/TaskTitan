@@ -13,7 +13,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Users, ArrowRight, Loader2, AlertCircle, CheckCircle2, UserPlus, LogIn } from 'lucide-react';
-import { getCurrentUser } from 'aws-amplify/auth';
+import { getCurrentUser, signInWithRedirect } from 'aws-amplify/auth';
 import {
   validateTeamInvite,
   joinTeamWithCode,
@@ -170,6 +170,22 @@ export function JoinTeamPage() {
     }
   };
 
+  // Handle sign-in redirect with invite code preservation
+  const handleSignIn = () => {
+    // Store code in sessionStorage to retrieve after sign-in
+    const codeFromUrl = searchParams.get('code');
+    if (codeFromUrl) {
+      // Generate random state token for validation (CSRF protection)
+      const stateToken = crypto.randomUUID();
+      
+      sessionStorage.setItem('pendingTeamInvite', codeFromUrl.toUpperCase());
+      sessionStorage.setItem('oauthStateToken', stateToken);
+      // Set expiry to 10 minutes from now
+      sessionStorage.setItem('oauthStateExpiry', String(Date.now() + 600000));
+    }
+    signInWithRedirect();
+  };
+
   // Loading state while checking auth
   if (authState === 'loading') {
     return (
@@ -200,13 +216,13 @@ export function JoinTeamPage() {
             <p className="text-slate-300 mb-4">
               You need to sign in to join a team.
             </p>
-            <Link
-              to="/sign-in"
+            <button
+              onClick={handleSignIn}
               className="inline-flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white rounded-lg font-medium transition-colors"
             >
               Sign In
               <ArrowRight className="w-5 h-5" />
-            </Link>
+            </button>
           </div>
 
           {/* Footer - link to guest join */}

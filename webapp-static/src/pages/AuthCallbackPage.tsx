@@ -150,42 +150,63 @@ export function AuthCallbackPage() {
       // Check for pending team invite (user clicked "Sign In" on team invite page)
       const pendingTeamInvite = sessionStorage.getItem('pendingTeamInvite');
       if (pendingTeamInvite && isMounted) {
-        let teamIdToRedirect: string | null = null;
+        // Validate OAuth state token and expiry (CSRF protection)
+        const stateToken = sessionStorage.getItem('oauthStateToken');
+        const stateExpiry = sessionStorage.getItem('oauthStateExpiry');
 
-        try {
-          setStatus('Accepting team invitation...');
-          console.log('[AuthCallbackPage] Accepting pending team invite:', pendingTeamInvite);
+        if (!stateToken || !stateExpiry) {
+          console.warn('[AuthCallbackPage] Pending invite missing state validation, ignoring');
+          sessionStorage.removeItem('pendingTeamInvite');
+          sessionStorage.removeItem('oauthStateToken');
+          sessionStorage.removeItem('oauthStateExpiry');
+        } else if (Date.now() > Number(stateExpiry)) {
+          console.warn('[AuthCallbackPage] Pending invite expired, ignoring');
+          sessionStorage.removeItem('pendingTeamInvite');
+          sessionStorage.removeItem('oauthStateToken');
+          sessionStorage.removeItem('oauthStateExpiry');
+        } else {
+          // State is valid, proceed with invite
+          let teamIdToRedirect: string | null = null;
 
-          // First validate the invite to get the teamId (in case acceptTeamInvite fails)
           try {
-            const inviteInfo = await validateTeamInvite(pendingTeamInvite);
-            if (inviteInfo.valid && inviteInfo.teamId) {
-              teamIdToRedirect = inviteInfo.teamId;
+            setStatus('Accepting team invitation...');
+            console.log('[AuthCallbackPage] Accepting pending team invite:', pendingTeamInvite);
+
+            // First validate the invite to get the teamId (in case acceptTeamInvite fails)
+            try {
+              const inviteInfo = await validateTeamInvite(pendingTeamInvite);
+              if (inviteInfo.valid && inviteInfo.teamId) {
+                teamIdToRedirect = inviteInfo.teamId;
+              }
+            } catch (validateErr) {
+              console.warn('[AuthCallbackPage] Could not validate invite:', validateErr);
             }
-          } catch (validateErr) {
-            console.warn('[AuthCallbackPage] Could not validate invite:', validateErr);
-          }
 
-          const result = await acceptTeamInvite({ code: pendingTeamInvite });
-          console.log('[AuthCallbackPage] Team invite accepted:', result);
+            const result = await acceptTeamInvite({ code: pendingTeamInvite });
+            console.log('[AuthCallbackPage] Team invite accepted:', result);
 
-          // Clear the pending invite and redirect to the team
-          sessionStorage.removeItem('pendingTeamInvite');
-          if (isMounted && result?.teamId) {
-            navigate(`/team/${result.teamId}`, { replace: true });
-            return;
-          }
-        } catch (err) {
-          console.error('[AuthCallbackPage] Team invite accept error:', err);
-          sessionStorage.removeItem('pendingTeamInvite');
-
-          // Check if user is already a member - still redirect to team
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          if (errorMessage.includes('already') || errorMessage.includes('AlreadyMember')) {
-            console.log('[AuthCallbackPage] User already a member, redirecting to team');
-            if (isMounted && teamIdToRedirect) {
-              navigate(`/team/${teamIdToRedirect}`, { replace: true });
+            // Clear the pending invite and state tokens, then redirect to the team
+            sessionStorage.removeItem('pendingTeamInvite');
+            sessionStorage.removeItem('oauthStateToken');
+            sessionStorage.removeItem('oauthStateExpiry');
+            if (isMounted && result?.teamId) {
+              navigate(`/team/${result.teamId}`, { replace: true });
               return;
+            }
+          } catch (err) {
+            console.error('[AuthCallbackPage] Team invite accept error:', err);
+            sessionStorage.removeItem('pendingTeamInvite');
+            sessionStorage.removeItem('oauthStateToken');
+            sessionStorage.removeItem('oauthStateExpiry');
+
+            // Check if user is already a member - still redirect to team
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            if (errorMessage.includes('already') || errorMessage.includes('AlreadyMember')) {
+              console.log('[AuthCallbackPage] User already a member, redirecting to team');
+              if (isMounted && teamIdToRedirect) {
+                navigate(`/team/${teamIdToRedirect}`, { replace: true });
+                return;
+              }
             }
           }
         }

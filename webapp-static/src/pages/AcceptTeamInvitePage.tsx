@@ -317,7 +317,13 @@ export function AcceptTeamInvitePage() {
   const handleSignInAndAccept = () => {
     // Store code in sessionStorage to retrieve after sign-in
     if (code) {
+      // Generate random state token for validation (CSRF protection)
+      const stateToken = crypto.randomUUID();
+      
       sessionStorage.setItem('pendingTeamInvite', code);
+      sessionStorage.setItem('oauthStateToken', stateToken);
+      // Set expiry to 10 minutes from now
+      sessionStorage.setItem('oauthStateExpiry', String(Date.now() + 600000));
     }
     signInWithRedirect();
   };
