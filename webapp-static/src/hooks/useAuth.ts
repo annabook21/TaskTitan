@@ -29,9 +29,11 @@ export function useAuth() {
   const checkAuth = useCallback(async () => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
-      // First check Amplify auth state (Cognito)
-      const amplifyUser = await getAmplifyUser();
-      const cognitoUserId = amplifyUser?.userId ?? null;
+      // AWS Best Practice: Use fetchAuthSession to get user ID from token 'sub' claim
+      // This is more reliable than getCurrentUser().userId when using signInWithRedirect
+      // Reference: https://docs.amplify.aws/react/build-a-backend/auth/connect-your-frontend/manage-user-sessions/
+      const session = await fetchAuthSession();
+      const cognitoUserId = session.tokens?.idToken?.payload.sub as string | undefined;
 
       if (!cognitoUserId) {
         setState({

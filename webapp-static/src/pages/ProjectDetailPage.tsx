@@ -29,7 +29,7 @@ import { getMemberDisplayName } from '../utils/userDisplay';
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, cognitoUserId } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [components, setComponents] = useState<Component[]>([]);
   const [loading, setLoading] = useState(true);
@@ -168,10 +168,17 @@ export function ProjectDetailPage() {
     }
   };
 
-  const handleComponentUpdate = (updated: Component) => {
+  const handleComponentUpdate = (updated: Component, onComplete?: () => void) => {
     setComponents((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    // Update selectedComponent if it's the same component being updated
+    // This ensures the modal shows the latest data after save
+    if (selectedComponent?.id === updated.id) {
+      setSelectedComponent(updated);
+    }
     // Notify other users viewing this project
     publish(updated.id, 'UPDATED', updated);
+    // Notify caller that update is complete
+    onComplete?.();
   };
 
   const handleComponentDeleted = (componentId: string) => {
@@ -458,6 +465,8 @@ export function ProjectDetailPage() {
         <ComponentDetailModal
           component={selectedComponent}
           projectId={id}
+          projectOwnerId={project?.ownerId}
+          currentUserId={cognitoUserId ?? undefined}
           teamMembers={teamMembers}
           onClose={() => setSelectedComponent(null)}
           onUpdate={handleComponentUpdate}

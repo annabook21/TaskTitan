@@ -2611,7 +2611,9 @@ export function response(ctx) {
 
     // Resolver: Mutation.assignUserToComponent (Pipeline)
     // Step 1: Fetch component to get name, status, type, projectId for denormalization
-    // Step 2: Create assignment with denormalized data
+    // Step 2: Authorize user (must be project owner or team OWNER/ADMIN)
+    // Step 3: Check for existing assignments
+    // Step 4: Create assignment with denormalized data
     const getComponentForAssignmentFn = new appsync.AppsyncFunction(this, 'GetComponentForAssignmentFn', {
       api: this.api,
       name: 'getComponentForAssignment',
@@ -2637,6 +2639,112 @@ export function response(ctx) {
   // Store component data for next function
   ctx.stash.component = ctx.result;
   return ctx.result;
+}
+`.trim()),
+    });
+
+    // AWS Best Practice: Authorization check - verify user is project owner or team admin
+    // Fetches project and checks ctx.identity.sub against project.ownerId or team membership role
+    const authorizeAssignmentFn = new appsync.AppsyncFunction(this, 'AuthorizeAssignmentFn', {
+      api: this.api,
+      name: 'authorizeAssignment',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const component = ctx.stash.component;
+  const projectId = component.projectId;
+  
+  if (!projectId) {
+    util.error('Component has no projectId', 'InvalidComponent');
+  }
+  
+  // Store current user ID for authorization check
+  ctx.stash.currentUserId = ctx.identity.sub;
+  
+  // Fetch project to check ownership
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + projectId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Project not found', 'ProjectNotFound');
+  
+  const project = ctx.result;
+  const currentUserId = ctx.stash.currentUserId;
+  const component = ctx.stash.component;
+  
+  // Check 1: Is user the project owner?
+  if (project.ownerId === currentUserId) {
+    ctx.stash.project = project;
+    return ctx.prev.result;
+  }
+  
+  // Check 2: Is user a team OWNER or ADMIN?
+  // Store teamId for team membership check in next pipeline step
+  ctx.stash.teamId = project.teamId;
+  ctx.stash.needsTeamRoleCheck = true;
+  ctx.stash.project = project;
+  
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // AWS Best Practice: Check team membership role if not project owner
+    const checkTeamRoleForAssignmentFn = new appsync.AppsyncFunction(this, 'CheckTeamRoleForAssignmentFn', {
+      api: this.api,
+      name: 'checkTeamRoleForAssignment',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  // If user is already authorized as project owner, skip this check
+  if (!ctx.stash.needsTeamRoleCheck) {
+    return { operation: 'GetItem', key: { pk: 'SKIP', sk: 'SKIP' } };
+  }
+  
+  const teamId = ctx.stash.teamId;
+  const userId = ctx.stash.currentUserId;
+  
+  // Fetch team membership to check role
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  
+  // If we skipped the check (user is project owner), continue
+  if (!ctx.stash.needsTeamRoleCheck) {
+    return ctx.prev.result;
+  }
+  
+  // User must be a team member with OWNER or ADMIN role
+  if (!ctx.result) {
+    util.error('Unauthorized: You must be a team member to manage assignments', 'Unauthorized');
+  }
+  
+  const membership = ctx.result;
+  const role = membership.role;
+  
+  if (role !== 'OWNER' && role !== 'ADMIN') {
+    util.error('Unauthorized: Only project owners or team admins can manage assignments', 'Unauthorized');
+  }
+  
+  // User is authorized
+  return ctx.prev.result;
 }
 `.trim()),
     });
@@ -2764,7 +2872,14 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'assignUserToComponent',
-      pipelineConfig: [getComponentForAssignmentFn, checkNoExistingAssignmentsFn, createAssignmentFn, updateComponentOwnerFn],
+      pipelineConfig: [
+        getComponentForAssignmentFn,
+        authorizeAssignmentFn,
+        checkTeamRoleForAssignmentFn,
+        checkNoExistingAssignmentsFn,
+        createAssignmentFn,
+        updateComponentOwnerFn
+      ],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) { return {}; }
@@ -2773,7 +2888,38 @@ export function response(ctx) { return ctx.prev.result; }
     });
 
     // Resolver: Mutation.unassignUserFromComponent (Pipeline)
-    // Step 1: Delete the assignment record
+    // Step 1: Fetch component for authorization
+    // Step 2: Authorize user (must be project owner or team OWNER/ADMIN)
+    // Step 3: Delete the assignment record
+    const getComponentForUnassignmentFn = new appsync.AppsyncFunction(this, 'GetComponentForUnassignmentFn', {
+      api: this.api,
+      name: 'getComponentForUnassignment',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.args.componentId;
+  ctx.stash.componentId = componentId;
+  ctx.stash.userId = ctx.args.userId;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Component not found', 'ComponentNotFound');
+  // Store component data for authorization check
+  ctx.stash.component = ctx.result;
+  return ctx.result;
+}
+`.trim()),
+    });
+
     const deleteAssignmentFn = new appsync.AppsyncFunction(this, 'DeleteAssignmentFn', {
       api: this.api,
       name: 'deleteAssignment',
@@ -2841,7 +2987,13 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'unassignUserFromComponent',
-      pipelineConfig: [deleteAssignmentFn, clearComponentOwnerFn],
+      pipelineConfig: [
+        getComponentForUnassignmentFn,
+        authorizeAssignmentFn,
+        checkTeamRoleForAssignmentFn,
+        deleteAssignmentFn,
+        clearComponentOwnerFn
+      ],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) { return {}; }

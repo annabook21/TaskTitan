@@ -33,15 +33,19 @@ const REFINE_QUICK_ACTIONS = [
 interface ComponentDetailModalProps {
   component: Component;
   projectId: string;
+  projectOwnerId?: string;
+  currentUserId?: string;
   teamMembers?: Membership[];
   onClose: () => void;
-  onUpdate: (updated: Component) => void;
+  onUpdate: (updated: Component, onComplete?: () => void) => void;
   onDeleted?: (componentId: string) => void;
 }
 
 export function ComponentDetailModal({
   component: initialComponent,
   projectId,
+  projectOwnerId,
+  currentUserId,
   teamMembers,
   onClose,
   onUpdate,
@@ -224,8 +228,12 @@ export function ComponentDetailModal({
         estimatedHours: parsedHours,
         acceptanceCriteria: acceptanceCriteria.length > 0 ? acceptanceCriteria : undefined,
       });
-      onUpdate(updated);
-      onClose();
+      // Update local state to reflect changes immediately
+      setComponent(updated);
+      // Call onUpdate with callback - only close when parent confirms update is complete
+      onUpdate(updated, () => {
+        onClose();
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -418,6 +426,8 @@ export function ComponentDetailModal({
                   <AssigneeSelector
                     componentId={displayComponent.id}
                     teamMembers={teamMembers}
+                    currentUserId={currentUserId}
+                    projectOwnerId={projectOwnerId}
                     onAssignmentChange={async () => {
                       // Re-fetch component to get updated owner field
                       try {

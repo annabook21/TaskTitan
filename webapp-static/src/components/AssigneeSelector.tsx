@@ -11,6 +11,8 @@ import { getMemberDisplayName } from '../utils/userDisplay';
 interface AssigneeSelectorProps {
   componentId: string;
   teamMembers: Membership[];
+  currentUserId?: string;
+  projectOwnerId?: string;
   onAssignmentChange?: () => void;
 }
 
@@ -34,6 +36,8 @@ function extractErrorMessage(err: unknown, fallback: string): string {
 export function AssigneeSelector({
   componentId,
   teamMembers,
+  currentUserId,
+  projectOwnerId,
   onAssignmentChange,
 }: AssigneeSelectorProps) {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -81,60 +85,60 @@ export function AssigneeSelector({
     }
   };
 
-  // Get assigned user IDs for filtering
-  const assignedUserIds = new Set(assignments.map((a) => a.userId));
-  const availableMembers = teamMembers.filter((m) => !assignedUserIds.has(m.userId));
+  // Get first assignment (single assignment model)
+  const assignment = assignments[0];
+  const assignedMember = assignment ? teamMembers.find((m) => m.userId === assignment.userId) : null;
 
-  // Map user IDs to member info for display
-  const memberMap = new Map(teamMembers.map((m) => [m.userId, m]));
+  // Check if current user is project owner
+  const isOwner = currentUserId && projectOwnerId && currentUserId === projectOwnerId;
+
+  // Available members (only show if no one is assigned)
+  const availableMembers = assignment ? [] : teamMembers;
 
   if (loading) {
-    return <p className="text-sm text-slate-400">Loading assignees...</p>;
+    return <p className="text-sm text-slate-400">Loading assignee...</p>;
   }
 
   return (
     <div className="space-y-3">
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      {/* Current Assignees */}
       <div>
         <label className="block text-sm font-medium text-slate-300 mb-2">
           Assigned To
         </label>
-        {assignments.length === 0 ? (
-          <p className="text-sm text-slate-500">No one assigned</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {assignments.map((assignment) => {
-              const member = memberMap.get(assignment.userId);
-              return (
-                <div
-                  key={assignment.userId}
-                  className="flex items-center gap-2 px-2 py-1 bg-slate-700 rounded text-sm"
-                >
-                  <span className="text-slate-200">
-                    {member ? getMemberDisplayName(member) : assignment.userId}
-                  </span>
-                  <button
-                    onClick={() => handleUnassign(assignment.userId)}
-                    className="text-slate-400 hover:text-red-400 text-xs"
-                    title="Remove assignee"
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
-      {/* Add Assignee */}
-      {availableMembers.length > 0 && (
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">
-            Add Assignee
-          </label>
+        {/* Show assigned user */}
+        {assignment && assignedMember ? (
+          <div className="flex items-center justify-between p-3 bg-slate-800 border border-slate-700 rounded-lg">
+            <span className="text-slate-200 text-sm">
+              {getMemberDisplayName(assignedMember)}
+            </span>
+            {isOwner && (
+              <button
+                onClick={() => handleUnassign(assignment.userId)}
+                className="px-3 py-1 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded transition-colors"
+                title="Remove assignment"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        ) : assignment && !assignedMember ? (
+          <div className="flex items-center justify-between p-3 bg-slate-800 border border-slate-700 rounded-lg">
+            <span className="text-slate-400 text-sm">{assignment.userId}</span>
+            {isOwner && (
+              <button
+                onClick={() => handleUnassign(assignment.userId)}
+                className="px-3 py-1 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded transition-colors"
+                title="Remove assignment"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        ) : (
+          /* Show dropdown when no one is assigned */
           <select
             onChange={(e) => {
               if (e.target.value) {
@@ -143,7 +147,7 @@ export function AssigneeSelector({
               }
             }}
             disabled={assigning}
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-50"
           >
             <option value="">Select a team member...</option>
             {availableMembers.map((member) => (
@@ -152,8 +156,8 @@ export function AssigneeSelector({
               </option>
             ))}
           </select>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
