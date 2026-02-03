@@ -5080,7 +5080,8 @@ export function response(ctx) {
       fieldName: 'validateShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
+      code: appsync.Code.fromInline(
+        `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.args.code.toUpperCase();
@@ -5112,7 +5113,8 @@ export function response(ctx) {
     projectName: codeItem.projectName || null
   };
 }
-`.trim()),
+`.trim(),
+      ),
     });
 
     // Function: Verify user is team member before generating share code
