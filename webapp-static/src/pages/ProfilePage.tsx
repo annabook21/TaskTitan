@@ -2,14 +2,19 @@
  * ProfilePage - displays the current authenticated user's profile.
  * Uses useAuth hook to get user data from AppSync.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { signInWithRedirect } from 'aws-amplify/auth';
+import { deleteCurrentUser } from '../api/appsync';
+import { Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 
 export function ProfilePage() {
   const navigate = useNavigate();
   const { isLoading, isAuthenticated, user, cognitoUserId, error, signOut, refreshUser } = useAuth();
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Fetch user profile when authenticated (also auto-creates if not exists)
   useEffect(() => {
@@ -54,6 +59,22 @@ export function ProfilePage() {
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      await deleteCurrentUser();
+      // Sign out after deletion
+      await signOut();
+      navigate('/');
+    } catch (err) {
+      console.error('[ProfilePage] Delete account error:', err);
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete account');
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -107,12 +128,81 @@ export function ProfilePage() {
         </div>
       )}
 
-      <button
-        onClick={handleSignOut}
-        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium"
-      >
-        Sign Out
-      </button>
+      <div className="flex gap-3">
+        <button
+          onClick={handleSignOut}
+          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium"
+        >
+          Sign Out
+        </button>
+
+        <button
+          onClick={() => setShowDeleteModal(true)}
+          className="px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-400 hover:text-red-300 border border-red-600/30 rounded-lg font-medium flex items-center gap-2"
+        >
+          <Trash2 className="w-4 h-4" />
+          Delete Account
+        </button>
+      </div>
+
+      {/* Delete Account Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-xl max-w-md w-full p-6 border border-slate-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Delete Account</h3>
+                <p className="text-sm text-slate-400">This action cannot be undone</p>
+              </div>
+            </div>
+
+            <p className="text-slate-300 mb-4">
+              Are you sure you want to delete your account? This will:
+            </p>
+            <ul className="list-disc list-inside text-slate-400 text-sm mb-6 space-y-1">
+              <li>Remove your user profile</li>
+              <li>Remove you from all teams</li>
+              <li>Delete all your assignments</li>
+            </ul>
+
+            {deleteError && (
+              <div className="p-3 bg-red-900/30 border border-red-600/30 rounded-lg text-red-400 text-sm mb-4">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteError(null);
+                }}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete Account'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
