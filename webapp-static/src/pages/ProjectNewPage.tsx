@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createProject,
   listTeamsForUser,
@@ -16,6 +16,8 @@ import { Sparkles, Loader2 } from 'lucide-react';
 
 export function ProjectNewPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const preselectedTeamId = searchParams.get('teamId');
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -45,7 +47,9 @@ export function ProjectNewPage() {
         const data = await listTeamsForUser();
         setTeams(data);
         if (data.length > 0) {
-          setTeamId(data[0].team.id);
+          // Use preselected team from URL if valid, otherwise use first team
+          const validPreselection = preselectedTeamId && data.some((tw) => tw.team.id === preselectedTeamId);
+          setTeamId(validPreselection ? preselectedTeamId : data[0].team.id);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load teams');
@@ -55,7 +59,7 @@ export function ProjectNewPage() {
     }
 
     fetchTeams();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, preselectedTeamId]);
 
   // Fetch team's workflow config when team changes
   useEffect(() => {

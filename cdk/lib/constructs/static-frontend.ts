@@ -19,6 +19,7 @@ import {
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { Construct } from 'constructs';
 
@@ -63,6 +64,13 @@ export class StaticFrontend extends Construct {
 
     const s3Origin = S3BucketOrigin.withOriginAccessControl(this.bucket);
 
+    // Import existing ACM certificate for custom domain
+    const certificate = acm.Certificate.fromCertificateArn(
+      this,
+      'Certificate',
+      'arn:aws:acm:us-east-1:232894901916:certificate/b23ebe27-d839-4b87-b117-0148907aa109'
+    );
+
     // AWS Best Practice: Security headers policy
     // https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-response-headers-policies.html
     const securityHeadersPolicy = new ResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
@@ -104,6 +112,8 @@ export class StaticFrontend extends Construct {
 
     this.distribution = new Distribution(this, 'Distribution', {
       comment: `${Stack.of(this).stackName} static frontend`,
+      domainNames: ['tasktitan.live'],
+      certificate: certificate,
       defaultBehavior: {
         origin: s3Origin,
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,

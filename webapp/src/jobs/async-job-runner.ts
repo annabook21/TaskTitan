@@ -58,6 +58,10 @@ import {
   handleStartAIGeneration,
   type StartAIGenerationInput,
 } from '@/jobs/async-job/appsync-ai-progress';
+import {
+  handleAppSyncMigrateGuestToUser,
+  type MigrateGuestInput,
+} from '@/jobs/async-job/appsync-migrate-guest';
 
 const jobPayloadPropsSchema = z.discriminatedUnion('type', [
   notifyJobSchema,
@@ -279,6 +283,20 @@ function isAppSyncStartAIGeneration(event: unknown): event is StartAIGenerationI
   );
 }
 
+/** AppSync invokes migrateGuestToUser with { guestId, teamId, userId } */
+function isAppSyncMigrateGuestToUser(event: unknown): event is MigrateGuestInput {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    'guestId' in event &&
+    'teamId' in event &&
+    'userId' in event &&
+    typeof (event as { guestId: unknown }).guestId === 'string' &&
+    typeof (event as { teamId: unknown }).teamId === 'string' &&
+    typeof (event as { userId: unknown }).userId === 'string'
+  );
+}
+
 export const handler: Handler<unknown> = async (event, context) => {
   logger.info('Async job received', { event });
 
@@ -287,6 +305,12 @@ export const handler: Handler<unknown> = async (event, context) => {
   if (isAppSyncStartAIGeneration(event)) {
     await handleStartAIGeneration(event);
     return { success: true };
+  }
+
+  // Guest Migration: migrateGuestToUser (migrate guest data to authenticated user)
+  if (isAppSyncMigrateGuestToUser(event)) {
+    const result = await handleAppSyncMigrateGuestToUser(event);
+    return result;
   }
 
   // Phase 2: AppSync mutation generateComponentViaAI (sync Bedrock)

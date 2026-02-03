@@ -3,9 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getTeamWithMembers,
   listProjectsByTeam,
-  createProject,
   deleteTeam,
-  getCurrentUserId,
   type Project,
   type Membership,
 } from '../api/appsync';
@@ -28,16 +26,19 @@ import {
   Trash2,
   Loader2,
   ChevronRight,
+  UserPlus,
 } from 'lucide-react';
 import { MemberWorkloadModal } from '../components/MemberWorkloadModal';
+import { TeamInviteModal } from '../components/TeamInviteModal';
 
-type TeamRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+type TeamRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST';
 
 const roleIcons: Record<TeamRole, typeof Crown> = {
   OWNER: Crown,
   ADMIN: Shield,
   MEMBER: UserIcon,
   VIEWER: Eye,
+  GUEST: UserIcon,
 };
 
 const roleColors: Record<TeamRole, string> = {
@@ -45,6 +46,7 @@ const roleColors: Record<TeamRole, string> = {
   ADMIN: 'text-violet-400 bg-violet-500/10',
   MEMBER: 'text-cyan-400 bg-cyan-500/10',
   VIEWER: 'text-slate-400 bg-slate-500/10',
+  GUEST: 'text-orange-400 bg-orange-500/10',
 };
 
 interface TeamData {
@@ -57,19 +59,12 @@ interface TeamData {
 export function TeamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, cognitoUserId } = useAuth();
   const [team, setTeam] = useState<TeamData | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [members, setMembers] = useState<Membership[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Create project form
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [creating, setCreating] = useState(false);
 
   // Delete confirmation
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -82,6 +77,9 @@ export function TeamDetailPage() {
     name: string;
   } | null>(null);
 
+  // Team invite modal
+  const [showInviteModal, setShowInviteModal] = useState(false);
+
   useEffect(() => {
     if (!id || authLoading) return;
     if (!isAuthenticated) {
@@ -91,15 +89,13 @@ export function TeamDetailPage() {
 
     async function loadData() {
       try {
-        const [teamWithMembers, projectsList, userId] = await Promise.all([
+        const [teamWithMembers, projectsList] = await Promise.all([
           getTeamWithMembers(id!),
           listProjectsByTeam(id!),
-          getCurrentUserId(),
         ]);
         setTeam(teamWithMembers?.team ?? null);
         setProjects(projectsList);
         setMembers(teamWithMembers?.members ?? []);
-        setCurrentUserId(userId);
       } catch (err) {
         // Extract error message from various error shapes (Amplify v6, GraphQL, standard)
         let message = 'Failed to load team';
@@ -129,31 +125,6 @@ export function TeamDetailPage() {
     loadData();
   }, [id, isAuthenticated, authLoading]);
 
-  const handleCreateProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!id || !newName.trim() || !currentUserId) return;
-
-    setCreating(true);
-    setError(null);
-    try {
-      const project = await createProject({
-        id: crypto.randomUUID(),
-        teamId: id,
-        ownerId: currentUserId,
-        name: newName.trim(),
-        description: newDesc.trim() || undefined,
-      });
-      setProjects((prev) => [...prev, project]);
-      setNewName('');
-      setNewDesc('');
-      setShowCreateForm(false);
-    } catch (err) {
-      setError((err as Error)?.message ?? 'Create failed');
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const handleDeleteTeam = async () => {
     if (!id || deleteConfirmText !== team?.name) return;
 
@@ -167,8 +138,8 @@ export function TeamDetailPage() {
     }
   };
 
-  // Get current user's role
-  const currentUserMember = members.find((m) => m.userId === currentUserId);
+  // Get current user's role using cognitoUserId from useAuth
+  const currentUserMember = members.find((m) => m.userId === cognitoUserId);
   const userRole = (currentUserMember?.role || 'MEMBER') as TeamRole;
   const isOwnerOrAdmin = userRole === 'OWNER' || userRole === 'ADMIN';
   const isOwner = userRole === 'OWNER';
@@ -285,15 +256,24 @@ export function TeamDetailPage() {
             Metrics
           </Link>
           {isOwnerOrAdmin && (
-            <Link
-              to={`/team/${team.id}/workflow`}
-              className="px-4 py-2.5 bg-slate-500/10 hover:bg-slate-500/20 border border-slate-500/30 rounded-xl text-slate-300 font-medium transition-colors inline-flex items-center gap-2"
-            >
-              <Settings className="w-5 h-5" />
-              Settings
-            </Link>
+            <>
+              <button
+                onClick={() => setShowInviteModal(true)}
+                className="px-4 py-2.5 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 rounded-xl text-violet-300 font-medium transition-colors inline-flex items-center gap-2"
+              >
+                <UserPlus className="w-5 h-5" />
+                Invite Members
+              </button>
+              <Link
+                to={`/team/${team.id}/workflow`}
+                className="px-4 py-2.5 bg-slate-500/10 hover:bg-slate-500/20 border border-slate-500/30 rounded-xl text-slate-300 font-medium transition-colors inline-flex items-center gap-2"
+              >
+                <Settings className="w-5 h-5" />
+                Settings
+              </Link>
+            </>
           )}
-          <button onClick={() => setShowCreateForm(true)} className="btn-primary">
+          <button onClick={() => navigate(`/project/new?teamId=${id}`)} className="btn-primary">
             <Plus className="w-5 h-5" />
             New Project
           </button>
@@ -304,70 +284,6 @@ export function TeamDetailPage() {
       {error && (
         <div className="mb-6 p-4 bg-red-900/30 border border-red-600/30 rounded-lg">
           <p className="text-red-400">{error}</p>
-        </div>
-      )}
-
-      {/* Create Project Modal */}
-      {showCreateForm && (
-        <div className="mb-6 component-card">
-          <h3 className="text-lg font-semibold mb-4">Create New Project</h3>
-          <form onSubmit={handleCreateProject} className="space-y-4">
-            <div>
-              <label htmlFor="projectName" className="block text-sm font-medium text-slate-300 mb-1">
-                Project Name *
-              </label>
-              <input
-                id="projectName"
-                type="text"
-                placeholder="Enter project name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                disabled={creating}
-              />
-            </div>
-            <div>
-              <label htmlFor="projectDesc" className="block text-sm font-medium text-slate-300 mb-1">
-                Description
-              </label>
-              <textarea
-                id="projectDesc"
-                placeholder="Brief description (optional)"
-                value={newDesc}
-                onChange={(e) => setNewDesc(e.target.value)}
-                rows={2}
-                className="w-full px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
-                disabled={creating}
-              />
-            </div>
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={creating || !newName.trim()}
-                className="btn-primary disabled:opacity-50"
-              >
-                {creating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-4 h-4" />
-                    Create Project
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCreateForm(false)}
-                disabled={creating}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
         </div>
       )}
 
@@ -385,7 +301,7 @@ export function TeamDetailPage() {
               <FolderKanban className="w-12 h-12 text-slate-600 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-slate-300 mb-2">No projects yet</h3>
               <p className="text-slate-500 mb-6">Create your first project for this team</p>
-              <button onClick={() => setShowCreateForm(true)} className="btn-primary">
+              <button onClick={() => navigate(`/project/new?teamId=${id}`)} className="btn-primary">
                 <Plus className="w-5 h-5" />
                 Create Project
               </button>
@@ -438,10 +354,13 @@ export function TeamDetailPage() {
               {members.map((member) => {
                 const role = (member.role || 'MEMBER') as TeamRole;
                 const RoleIcon = roleIcons[role];
-                const displayName = member.user?.name || member.user?.email || 'Unknown User';
-                const displayEmail = member.user?.email || member.userId;
-                const initial = (member.user?.name?.[0] || member.user?.email?.[0] || 'U').toUpperCase();
-                const canViewWorkload = isOwnerOrAdmin;
+                const isGuest = member.isGuest || role === 'GUEST';
+                const displayName = isGuest
+                  ? (member.guestName || 'Guest User')
+                  : (member.user?.name || member.user?.email || 'Unknown User');
+                const displayEmail = isGuest ? 'Guest' : (member.user?.email || member.userId);
+                const initial = displayName[0]?.toUpperCase() || 'U';
+                const canViewWorkload = isOwnerOrAdmin && !isGuest;
                 
                 return (
                   <button
@@ -563,6 +482,16 @@ export function TeamDetailPage() {
           teamId={id}
           userId={selectedMember.userId}
           userName={selectedMember.name}
+        />
+      )}
+
+      {/* Team Invite Modal */}
+      {team && (
+        <TeamInviteModal
+          isOpen={showInviteModal}
+          onClose={() => setShowInviteModal(false)}
+          teamId={team.id}
+          teamName={team.name}
         />
       )}
     </div>

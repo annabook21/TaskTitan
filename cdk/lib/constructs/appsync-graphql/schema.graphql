@@ -38,6 +38,7 @@ enum MemberRole {
   ADMIN
   MEMBER
   VIEWER
+  GUEST
 }
 
 enum ComponentType {
@@ -117,8 +118,11 @@ type Membership {
   hoursPerDay: Int
   availability: Int
   user: User
+  # Guest-specific fields (populated when role=GUEST)
   displayName: String # For guest members (when userId starts with "GUEST#")
   projectId: String # For guest members from project share codes
+  isGuest: Boolean
+  guestName: String
 }
 
 # Dependency represents a "depends on" relationship between components
@@ -413,6 +417,48 @@ input GuestJoinInput {
   displayName: String!
 }
 
+# ============================================
+# Team Invite Code System (Authenticated Users)
+# ============================================
+
+# Team invite code for inviting authenticated users to join a team
+# pk=TEAM_INVITE#<code>, sk=METADATA, ttl=Unix epoch for auto-expiration
+# GSI: gsi1pk=TEAM#<teamId>, gsi1sk=TEAM_INVITE#<code> (for listing codes by team)
+type TeamInviteCode {
+  code: String!
+  teamId: ID!
+  teamName: String!
+  role: MemberRole!
+  expiresAt: String!
+  createdAt: String!
+  createdBy: ID!
+  usageCount: Int!
+  maxUses: Int  # null = unlimited
+}
+
+# Result of migrating guest data to authenticated user
+type MigrationResult {
+  success: Boolean!
+  migratedAssignments: Int!
+  migratedComments: Int!
+  message: String
+}
+
+input GenerateTeamInviteInput {
+  teamId: ID!
+  role: MemberRole         # Default: MEMBER
+  expiresInHours: Int      # Default: 168 (7 days)
+  maxUses: Int             # Optional: limit uses (null = unlimited)
+}
+
+type TeamInviteValidation @aws_api_key @aws_cognito_user_pools {
+  valid: Boolean!
+  teamId: ID
+  teamName: String
+  role: MemberRole
+  message: String
+}
+
 type Query {
   # Get the current authenticated user (DynamoDB: pk=USER#sub, sk=METADATA)
   getCurrentUser: User
@@ -517,6 +563,16 @@ type Query {
 
   # Guest: Count unread notifications (IAM auth)
   guestCountUnreadNotifications(guestId: ID!): Int! @aws_iam
+
+  # ============================================
+  # Team Invite Code Queries
+  # ============================================
+
+  # Validate team invite code (API key allowed for guest access)
+  validateTeamInvite(code: String!): TeamInviteValidation! @aws_api_key @aws_cognito_user_pools
+
+  # List active invite codes for a team (owner/admin only)
+  listTeamInviteCodes(teamId: ID!): [TeamInviteCode!]!
 }
 
 input CreateProjectInput {
@@ -1160,6 +1216,29 @@ type Mutation {
   # Guest: Mark all notifications as read (IAM auth)
   # Uses timestamp-based marker for O(1) operation
   guestMarkAllNotificationsRead(guestId: ID!): Int! @aws_iam
+
+  # ============================================
+  # Team Invite Code Mutations
+  # ============================================
+
+  # Generate invite code for team (owner/admin only)
+  # Creates TEAM_INVITE#<code> item in DynamoDB with TTL for auto-expiration
+  generateTeamInvite(input: GenerateTeamInviteInput!): TeamInviteCode!
+
+  # Join team with invite code (Cognito auth required)
+  # Creates team membership record with specified role
+  joinTeamWithCode(code: String!): Membership!
+
+  # Revoke team invite code (owner/admin only)
+  revokeTeamInvite(code: String!): Boolean!
+
+  # ============================================
+  # Guest to User Migration
+  # ============================================
+
+  # Migrate guest data (assignments, comments) to authenticated user
+  # Called after guest signs in and creates an account
+  migrateGuestToUser(guestId: ID!, teamId: ID!): MigrationResult!
 }
 
 type Subscription {

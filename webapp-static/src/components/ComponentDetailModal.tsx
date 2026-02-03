@@ -12,7 +12,7 @@ import {
 } from '../api/appsync';
 import { Loader2 } from 'lucide-react';
 import { AssigneeSelector } from './AssigneeSelector';
-import { CommentSection } from './CommentSection';
+// CommentSection removed (guest functionality deleted)
 
 const COMPONENT_TYPES: ComponentType[] = ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'];
 const COMPONENT_STATUSES: ComponentStatus[] = ['PLANNING', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'COMPLETED'];
@@ -572,7 +572,7 @@ export function ComponentDetailModal({
 
               {/* Comments Section */}
               <div className="border-t border-slate-700 pt-4 mt-4">
-                <CommentSection componentId={displayComponent.id} />
+                {/* CommentSection removed - guest functionality deleted */}
               </div>
             </div>
 

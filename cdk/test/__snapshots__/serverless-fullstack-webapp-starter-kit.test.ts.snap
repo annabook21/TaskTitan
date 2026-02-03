@@ -966,6 +966,7 @@ enum MemberRole {
   ADMIN
   MEMBER
   VIEWER
+  GUEST
 }
 
 enum ComponentType {
@@ -1045,6 +1046,9 @@ type Membership {
   hoursPerDay: Int
   availability: Int
   user: User
+  # Guest-specific fields (populated when role=GUEST)
+  isGuest: Boolean
+  guestName: String
 }
 
 # Dependency represents a "depends on" relationship between components
@@ -1257,7 +1261,7 @@ input SyncUserProfileInput {
   name: String!
 }
 
-type RegisterUserResult {
+type RegisterUserResult @aws_api_key @aws_cognito_user_pools {
   success: Boolean!
   message: String!
 }
@@ -1337,6 +1341,48 @@ input GenerateShareCodeInput {
 input GuestJoinInput {
   code: String!
   displayName: String!
+}
+
+# ============================================
+# Team Invite Code System (Authenticated Users)
+# ============================================
+
+# Team invite code for inviting authenticated users to join a team
+# pk=TEAM_INVITE#<code>, sk=METADATA, ttl=Unix epoch for auto-expiration
+# GSI: gsi1pk=TEAM#<teamId>, gsi1sk=TEAM_INVITE#<code> (for listing codes by team)
+type TeamInviteCode {
+  code: String!
+  teamId: ID!
+  teamName: String!
+  role: MemberRole!
+  expiresAt: String!
+  createdAt: String!
+  createdBy: ID!
+  usageCount: Int!
+  maxUses: Int  # null = unlimited
+}
+
+# Result of migrating guest data to authenticated user
+type MigrationResult {
+  success: Boolean!
+  migratedAssignments: Int!
+  migratedComments: Int!
+  message: String
+}
+
+input GenerateTeamInviteInput {
+  teamId: ID!
+  role: MemberRole         # Default: MEMBER
+  expiresInHours: Int      # Default: 168 (7 days)
+  maxUses: Int             # Optional: limit uses (null = unlimited)
+}
+
+type TeamInviteValidation {
+  valid: Boolean!
+  teamId: ID
+  teamName: String
+  role: MemberRole
+  message: String
 }
 
 type Query {
@@ -1443,6 +1489,16 @@ type Query {
 
   # Guest: Count unread notifications (IAM auth)
   guestCountUnreadNotifications(guestId: ID!): Int! @aws_iam
+
+  # ============================================
+  # Team Invite Code Queries
+  # ============================================
+
+  # Validate team invite code (Cognito auth required - user must be logged in to join)
+  validateTeamInvite(code: String!): TeamInviteValidation!
+
+  # List active invite codes for a team (owner/admin only)
+  listTeamInviteCodes(teamId: ID!): [TeamInviteCode!]!
 }
 
 input CreateProjectInput {
@@ -1717,7 +1773,7 @@ type ApplyPlanResult {
 }
 
 # Result of component refinement
-type RefineComponentResult {
+type RefineComponentResult @aws_iam @aws_cognito_user_pools {
   component: GeneratedComponentOutput!
   explanation: String!
   suggestedFollowUps: [String!]!
@@ -2086,6 +2142,29 @@ type Mutation {
   # Guest: Mark all notifications as read (IAM auth)
   # Uses timestamp-based marker for O(1) operation
   guestMarkAllNotificationsRead(guestId: ID!): Int! @aws_iam
+
+  # ============================================
+  # Team Invite Code Mutations
+  # ============================================
+
+  # Generate invite code for team (owner/admin only)
+  # Creates TEAM_INVITE#<code> item in DynamoDB with TTL for auto-expiration
+  generateTeamInvite(input: GenerateTeamInviteInput!): TeamInviteCode!
+
+  # Join team with invite code (Cognito auth required)
+  # Creates team membership record with specified role
+  joinTeamWithCode(code: String!): Membership!
+
+  # Revoke team invite code (owner/admin only)
+  revokeTeamInvite(code: String!): Boolean!
+
+  # ============================================
+  # Guest to User Migration
+  # ============================================
+
+  # Migrate guest data (assignments, comments) to authenticated user
+  # Called after guest signs in and creates an account
+  migrateGuestToUser(guestId: ID!, teamId: ID!): MigrationResult!
 }
 
 type Subscription {
@@ -3349,6 +3428,72 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlCreateGuestTeamMembershipFnD61F8BFD": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.stash.cognitoIdentityId;
+  const teamId = ctx.stash.teamId;
+  const now = util.time.nowISO8601();
+
+  // Create team membership with GUEST role
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + guestId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: teamId + '#' + guestId,
+      teamId: teamId,
+      userId: guestId,
+      role: 'GUEST',
+      isGuest: true,
+      guestName: ctx.stash.displayName,
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      gsi1pk: 'USER#' + guestId,
+      gsi1sk: 'TEAM#' + teamId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    // Log but don't fail - membership creation is secondary
+    console.log('Guest membership creation warning:', ctx.error.message);
+  }
+
+  // Return the guest session (from stash)
+  return {
+    guestId: ctx.stash.cognitoIdentityId,
+    displayName: ctx.stash.displayName,
+    projectId: ctx.stash.projectId,
+    projectName: ctx.stash.projectName,
+    teamId: ctx.stash.teamId,
+    teamName: ctx.stash.teamName
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createGuestTeamMembership",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlCreateProjectResolverAE2D7277": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -3409,6 +3554,89 @@ export function response(ctx) {
         "TypeName": "Mutation",
       },
       "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlCreateShareCodeFn3F0B9792": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.stash.userId;
+  const input = ctx.stash.input;
+  const projectId = input.projectId;
+
+  const autoId = util.autoId().split('-').join('').toUpperCase();
+  const code = autoId.substring(0, 6);
+
+  const requestedHours = input.expiresInHours || 168;
+  const expiresInHours = requestedHours > 720 ? 720 : requestedHours;
+  const nowMs = util.time.nowEpochMilliSeconds();
+  const ttlMs = nowMs + (expiresInHours * 3600 * 1000);
+  const ttl = ttlMs / 1000;
+  const expiresAt = util.time.epochMilliSecondsToISO8601(ttlMs);
+  const createdAt = util.time.nowISO8601();
+
+  ctx.stash.code = code;
+  ctx.stash.expiresAt = expiresAt;
+  ctx.stash.createdAt = createdAt;
+
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + code,
+      sk: 'METADATA'
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      code: code,
+      projectId: projectId,
+      projectName: input.projectName || null,
+      teamId: input.teamId || '',
+      teamName: input.teamName || null,
+      createdBy: userId,
+      ttl: ttl,
+      expiresAt: expiresAt,
+      createdAt: createdAt,
+      gsi1pk: 'PROJECT#' + projectId,
+      gsi1sk: 'SHARE_CODE#' + code
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  const input = ctx.stash.input;
+  return {
+    code: ctx.stash.code,
+    projectId: input.projectId,
+    projectName: input.projectName || null,
+    teamId: input.teamId,
+    teamName: input.teamName || null,
+    expiresAt: ctx.stash.expiresAt,
+    createdAt: ctx.stash.createdAt,
+    createdBy: ctx.stash.userId
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createShareCode",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlCreateSmartComponentResolverC35DB735": {
       "DependsOn": [
@@ -3501,6 +3729,153 @@ export function response(ctx) {
         "TypeName": "Mutation",
       },
       "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlCreateTeamInviteCodeFn5AC364C3": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.stash.code;
+  const teamId = ctx.stash.teamId;
+  const role = ctx.stash.role;
+  const expiresAt = ctx.stash.expiresAt;
+  const createdAt = ctx.stash.createdAt;
+  const createdBy = ctx.stash.createdBy;
+  const maxUses = ctx.stash.maxUses;
+  const teamName = ctx.stash.teamName;
+  const ttlSeconds = Math.floor(new Date(expiresAt).getTime() / 1000);
+
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      code: code,
+      teamId: teamId,
+      teamName: teamName,
+      role: role,
+      expiresAt: expiresAt,
+      createdAt: createdAt,
+      createdBy: createdBy,
+      usageCount: 0,
+      maxUses: maxUses,
+      ttl: ttlSeconds,
+      gsi1pk: 'TEAM#' + teamId,
+      gsi1sk: 'TEAM_INVITE#' + code
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  return {
+    code: ctx.stash.code,
+    teamId: ctx.stash.teamId,
+    teamName: ctx.stash.teamName,
+    role: ctx.stash.role,
+    expiresAt: ctx.stash.expiresAt,
+    createdAt: ctx.stash.createdAt,
+    createdBy: ctx.stash.createdBy,
+    usageCount: 0,
+    maxUses: ctx.stash.maxUses
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createTeamInviteCode",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCreateTeamMembershipFromInviteFnF33B7DBF": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.stash.userId;
+  const teamId = ctx.stash.teamId;
+  const role = ctx.stash.role;
+  const now = util.time.nowISO8601();
+  const membershipId = util.autoId();
+
+  ctx.stash.membershipId = membershipId;
+  ctx.stash.joinedAt = now;
+
+  // Create membership with condition to prevent duplicates
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: membershipId,
+      userId: userId,
+      teamId: teamId,
+      role: role,
+      joinedAt: now,
+      hoursPerDay: 6,
+      availability: 100,
+      gsi1pk: 'USER#' + userId,
+      gsi1sk: 'TEAM#' + teamId
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'ConditionalCheckFailedException') {
+      util.error('You are already a member of this team', 'AlreadyMember');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  return {
+    id: ctx.stash.membershipId,
+    userId: ctx.stash.userId,
+    teamId: ctx.stash.teamId,
+    role: ctx.stash.role,
+    joinedAt: ctx.stash.joinedAt,
+    hoursPerDay: 6,
+    availability: 100
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createTeamMembershipFromInvite",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlCreateTeamResolver3EF60344": {
       "DependsOn": [
@@ -3726,6 +4101,44 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlDeleteShareCodeFn6741C1BE": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + ctx.stash.code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "deleteShareCode",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlDeleteSprintResolverF8A43826": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -3768,6 +4181,44 @@ export function response(ctx) {
         "TypeName": "Mutation",
       },
       "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlDeleteTeamInviteFn4CE29F2D": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + ctx.stash.code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "deleteTeamInvite",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlFetchAssignmentForUnassignFnE9C8BEB0": {
       "DependsOn": [
@@ -3836,6 +4287,45 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlFetchComponentAfterUpdateFn64F2A5CF": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "fetchComponentAfterUpdate",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlFetchComponentForAssignmentFnC5DB1370": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -3894,6 +4384,106 @@ export function response(ctx) {
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "fetchComponentForAssignment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlFetchInviteForRevokeFn753F5787": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.args.code.toUpperCase();
+  ctx.stash.code = code;
+  ctx.stash.userId = ctx.identity.sub;
+
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const invite = ctx.result;
+  if (!invite) {
+    util.error('Invite code not found', 'NotFound');
+  }
+
+  ctx.stash.teamId = invite.teamId;
+  return invite;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "fetchInviteForRevoke",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlFetchShareCodeForRevokeFn53E3D7E5": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.args.code.toUpperCase();
+  ctx.stash.code = code;
+  ctx.stash.userId = ctx.identity.sub;
+
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SHARE_CODE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const shareCode = ctx.result;
+  if (!shareCode) {
+    util.error('Share code not found', 'NotFound');
+  }
+
+  ctx.stash.projectId = shareCode.projectId;
+  ctx.stash.teamId = shareCode.teamId;
+  ctx.stash.createdBy = shareCode.createdBy;
+  return shareCode;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "fetchShareCodeForRevoke",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -4017,7 +4607,6 @@ export function response(ctx) {
     },
     "AppSyncGraphqlGenerateShareCodeResolverB56419A7": {
       "DependsOn": [
-        "AppSyncGraphqlApiDynamoDBA02B9D11",
         "AppSyncGraphqlApiSchemaC2E94F39",
       ],
       "Properties": {
@@ -4027,10 +4616,73 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/8793c3f68d4a3d81572ac6f2b3ff06c0c64ac5925b7ee43208f8e7c836b96911.js",
-        "DataSourceName": "DynamoDB",
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
         "FieldName": "generateShareCode",
-        "Kind": "UNIT",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyTeamMemberForShareCodeFn798F9287",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateShareCodeFn3F0B9792",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlGenerateTeamInviteResolver36238EEA": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
+        "FieldName": "generateTeamInvite",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyTeamOwnerAdminFn26B26326",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateTeamInviteCodeFn5AC364C3",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -5184,6 +5836,12 @@ export function response(ctx) {
                 "FunctionId",
               ],
             },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateGuestTeamMembershipFnD61F8BFD",
+                "FunctionId",
+              ],
+            },
           ],
         },
         "Runtime": {
@@ -5700,6 +6358,12 @@ export function response(ctx) {
                 "FunctionId",
               ],
             },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlFetchComponentAfterUpdateFn64F2A5CF",
+                "FunctionId",
+              ],
+            },
           ],
         },
         "Runtime": {
@@ -5746,6 +6410,99 @@ export function response(ctx) {
             {
               "Fn::GetAtt": [
                 "AppSyncGraphqlCreateActivityFn4E5FD306",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlIncrementInviteUsageCountFnD1F80600": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.stash.code;
+
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET usageCount = usageCount + :one',
+      expressionValues: util.dynamodb.toMapValues({
+        ':one': 1
+      })
+    }
+  };
+}
+export function response(ctx) {
+  // Return the membership from previous function
+  return ctx.prev.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "incrementInviteUsageCount",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlJoinTeamWithCodeResolver9740FF47": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
+        "FieldName": "joinTeamWithCode",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlValidateInviteCodeFn39F68A23",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateTeamMembershipFromInviteFnF33B7DBF",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlIncrementInviteUsageCountFnD1F80600",
                 "FunctionId",
               ],
             },
@@ -6335,6 +7092,49 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlListTeamInviteCodesResolver85569C09": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
+        "FieldName": "listTeamInviteCodes",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyTeamOwnerAdminForListFn3CD9739D",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlQueryTeamInvitesFn9185FF11",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
     "AppSyncGraphqlListTeamsForUserResolver8DABE6AF": {
       "DependsOn": [
         "AppSyncGraphqlApiSchemaC2E94F39",
@@ -6470,6 +7270,52 @@ export function response(ctx) {
             },
           ],
         },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlMigrateGuestToUserResolver54982B4F": {
+      "DependsOn": [
+        "AppSyncGraphqlApiBedrockLambda55C98CBB",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  // Get the authenticated user ID from Cognito
+  const userId = ctx.identity.sub || ctx.identity.username;
+  if (!userId) {
+    util.error('Not authenticated', 'Unauthorized');
+  }
+
+  return {
+    operation: 'Invoke',
+    payload: {
+      guestId: ctx.args.guestId,
+      teamId: ctx.args.teamId,
+      userId: userId
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return ctx.result;
+}",
+        "DataSourceName": "BedrockLambda",
+        "FieldName": "migrateGuestToUser",
+        "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -6878,6 +7724,66 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlQueryTeamInvitesFn9185FF11": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId,
+        ':sk': 'TEAM_INVITE#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const nowEpoch = util.time.nowEpochSeconds();
+
+  // Filter out expired codes and map to output format
+  return (ctx.result.items || [])
+    .filter(item => !item.ttl || item.ttl >= nowEpoch)
+    .map(item => ({
+      code: item.code,
+      teamId: item.teamId,
+      teamName: item.teamName,
+      role: item.role,
+      expiresAt: item.expiresAt,
+      createdAt: item.createdAt,
+      createdBy: item.createdBy,
+      usageCount: item.usageCount || 0,
+      maxUses: item.maxUses
+    }));
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "queryTeamInvites",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlQueryTeamMembersForMentionFnCE2BB236": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -7228,7 +8134,6 @@ export function response(ctx) {
     },
     "AppSyncGraphqlRevokeShareCodeResolver1E82FAE8": {
       "DependsOn": [
-        "AppSyncGraphqlApiDynamoDBA02B9D11",
         "AppSyncGraphqlApiSchemaC2E94F39",
       ],
       "Properties": {
@@ -7238,10 +8143,85 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/ca6a9991dd1eb766d4771d5b557aead6075694ff58c836f558728ac21f008eaa.js",
-        "DataSourceName": "DynamoDB",
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
         "FieldName": "revokeShareCode",
-        "Kind": "UNIT",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlFetchShareCodeForRevokeFn53E3D7E5",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyShareCodeRevokeFnA04D79A8",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlDeleteShareCodeFn6741C1BE",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlRevokeTeamInviteResolver1A649235": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
+        "FieldName": "revokeTeamInvite",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlFetchInviteForRevokeFn753F5787",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlVerifyTeamOwnerAdminForRevokeFn40F469CF",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlDeleteTeamInviteFn4CE29F2D",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -7606,6 +8586,8 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
+  // Store componentId for the next function to fetch
+  ctx.stash.needsFetch = true;
   return ctx.result;
 }",
         "DataSourceName": "DynamoDB",
@@ -8160,6 +9142,74 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlValidateInviteCodeFn39F68A23": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.args.code.toUpperCase();
+  const userId = ctx.identity.sub;
+
+  ctx.stash.code = code;
+  ctx.stash.userId = userId;
+
+  // Get the invite code to validate it
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const invite = ctx.result;
+  if (!invite) {
+    util.error('Invalid invite code', 'InvalidInviteCode');
+  }
+
+  // Check expiration
+  const nowEpoch = util.time.nowEpochSeconds();
+  if (invite.ttl && invite.ttl < nowEpoch) {
+    util.error('Invite code has expired', 'ExpiredInviteCode');
+  }
+
+  // Check max uses
+  if (invite.maxUses && invite.usageCount >= invite.maxUses) {
+    util.error('Invite code has reached maximum uses', 'MaxUsesReached');
+  }
+
+  // Store invite info for next step
+  ctx.stash.teamId = invite.teamId;
+  ctx.stash.teamName = invite.teamName;
+  ctx.stash.role = invite.role;
+  ctx.stash.usageCount = invite.usageCount || 0;
+
+  return invite;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "validateInviteCode",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlValidateShareCodeFn87C31CEE": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -8247,6 +9297,70 @@ export function response(ctx) {
         "CodeS3Location": "s3://cdk-hnb659fds-assets-123456789012-us-east-2/b160591e4f4b1dcdcf0fc5b8acaf7a63ba827c4b079b45e3c96ac63b65514b90.js",
         "DataSourceName": "DynamoDB",
         "FieldName": "validateShareCode",
+        "Kind": "UNIT",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Query",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlValidateTeamInviteResolver917E9DF8": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.args.code.toUpperCase();
+
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    return { valid: false, message: 'Error checking invite code' };
+  }
+
+  const invite = ctx.result;
+  if (!invite) {
+    return { valid: false, message: 'Invalid invite code' };
+  }
+
+  // Check expiration
+  const nowEpoch = util.time.nowEpochSeconds();
+  if (invite.ttl && invite.ttl < nowEpoch) {
+    return { valid: false, message: 'Invite code has expired' };
+  }
+
+  // Check max uses
+  if (invite.maxUses && invite.usageCount >= invite.maxUses) {
+    return { valid: false, message: 'Invite code has reached maximum uses' };
+  }
+
+  return {
+    valid: true,
+    teamId: invite.teamId,
+    teamName: invite.teamName,
+    role: invite.role,
+    message: null
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FieldName": "validateTeamInvite",
         "Kind": "UNIT",
         "Runtime": {
           "Name": "APPSYNC_JS",
@@ -8568,6 +9682,296 @@ export function response(ctx) {
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "verifyGuestForListComments",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlVerifyShareCodeRevokeFnA04D79A8": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+  const userId = ctx.stash.userId;
+
+  // If no teamId, check if user is the creator
+  if (!teamId) {
+    if (ctx.stash.createdBy === userId) {
+      ctx.stash.authorized = true;
+      return { operation: 'GetItem', key: util.dynamodb.toMapValues({ pk: 'SKIP', sk: 'SKIP' }) };
+    }
+    util.error('Not authorized to revoke this share code', 'Unauthorized');
+  }
+
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.stash.authorized) {
+    return { authorized: true };
+  }
+
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const membership = ctx.result;
+  // Allow OWNER, ADMIN, or the creator of the share code
+  const isTeamOwnerAdmin = membership && (membership.role === 'OWNER' || membership.role === 'ADMIN');
+  const isCreator = ctx.stash.createdBy === ctx.stash.userId;
+
+  if (!isTeamOwnerAdmin && !isCreator) {
+    util.error('Not authorized to revoke this share code', 'Unauthorized');
+  }
+
+  return { authorized: true };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyShareCodeRevoke",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlVerifyTeamMemberForShareCodeFn798F9287": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const input = ctx.args.input;
+  const teamId = input.teamId;
+  const projectId = input.projectId;
+
+  ctx.stash.userId = userId;
+  ctx.stash.input = input;
+
+  // If no teamId provided, we can't verify membership - reject
+  if (!teamId) {
+    util.error('teamId is required to generate a share code', 'BadRequest');
+  }
+
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const membership = ctx.result;
+  if (!membership) {
+    util.error('Not authorized - not a team member', 'Unauthorized');
+  }
+
+  // Any team member can generate share codes (not just OWNER/ADMIN)
+  // This allows collaboration while still ensuring only team members can share
+  return membership;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyTeamMemberForShareCode",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlVerifyTeamOwnerAdminFn26B26326": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const userId = ctx.identity.sub;
+  const teamId = input.teamId;
+  const role = input.role || 'MEMBER';
+  const expiresInHours = input.expiresInHours || 168; // 7 days default
+  const maxUses = input.maxUses || null;
+
+  // Generate 8-character alphanumeric code
+  const code = util.autoId().substring(0, 8).toUpperCase();
+  const now = util.time.nowISO8601();
+  const ttlSeconds = util.time.nowEpochSeconds() + (expiresInHours * 3600);
+  const expiresAt = util.time.epochMilliSecondsToISO8601(ttlSeconds * 1000);
+
+  // Store in stash for next function
+  ctx.stash.code = code;
+  ctx.stash.teamId = teamId;
+  ctx.stash.role = role;
+  ctx.stash.expiresAt = expiresAt;
+  ctx.stash.createdAt = now;
+  ctx.stash.createdBy = userId;
+  ctx.stash.maxUses = maxUses;
+  ctx.stash.ttlSeconds = ttlSeconds;
+
+  // Check if user is owner/admin of the team
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const membership = ctx.result;
+  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    util.error('Only team owners and admins can generate invite codes', 'Unauthorized');
+  }
+
+  // Store team name from membership for denormalization
+  ctx.stash.teamName = membership.teamName || 'Team';
+
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyTeamOwnerAdmin",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlVerifyTeamOwnerAdminForListFn3CD9739D": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  const userId = ctx.identity.sub;
+
+  ctx.stash.teamId = teamId;
+
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const membership = ctx.result;
+  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    util.error('Only team owners and admins can list invite codes', 'Unauthorized');
+  }
+
+  return membership;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyTeamOwnerAdminForList",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlVerifyTeamOwnerAdminForRevokeFn40F469CF": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+  const userId = ctx.stash.userId;
+
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const membership = ctx.result;
+  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    util.error('Only team owners and admins can revoke invite codes', 'Unauthorized');
+  }
+
+  return membership;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "verifyTeamOwnerAdminForRevoke",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",

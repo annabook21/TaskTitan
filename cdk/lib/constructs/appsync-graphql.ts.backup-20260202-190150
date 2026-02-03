@@ -15,11 +15,13 @@ import { join } from 'path';
 import { TaskTitanTable } from './dynamodb';
 import { Auth } from './auth';
 import { AsyncJob } from './async-job';
+import { TeamInvitationResolvers } from './appsync-graphql/team-invitations';
 
 export interface AppSyncGraphqlProps {
   readonly dynamoTable: TaskTitanTable;
   readonly auth: Auth;
   readonly asyncJob: AsyncJob;
+  readonly frontendUrl: string;
 }
 
 export class AppSyncGraphql extends Construct {
@@ -29,7 +31,7 @@ export class AppSyncGraphql extends Construct {
 
   constructor(scope: Construct, id: string, props: AppSyncGraphqlProps) {
     super(scope, id);
-    const { dynamoTable, auth, asyncJob } = props;
+    const { dynamoTable, auth, asyncJob, frontendUrl } = props;
 
     // GraphQL API with Cognito User Pools as default auth (AWS best practice for user-facing APIs)
     // API_KEY added as additional auth for unauthenticated operations (registerUser)
@@ -80,7 +82,7 @@ export class AppSyncGraphql extends Construct {
     const registerUserLambda = new lambdaNode.NodejsFunction(this, 'RegisterUserHandler', {
       entry: join(__dirname, 'appsync-graphql', 'register-user-handler.ts'),
       handler: 'handler',
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: lambda.Runtime.NODEJS_22_X, // Upgraded from NODEJS_20_X (support ends April 2026)
       architecture: lambda.Architecture.ARM_64,
       memorySize: 256,
       timeout: Duration.seconds(10),
@@ -105,6 +107,27 @@ export class AppSyncGraphql extends Construct {
       requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments)'),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
+
+    // Lambda for inviting team members (AdminCreateUser + team membership)
+    // Uses AdminCreateUser to create users and send invitation emails automatically
+    const inviteTeamMemberLambda = new lambdaNode.NodejsFunction(this, 'InviteTeamMemberHandler', {
+      entry: join(__dirname, 'appsync-graphql', 'invite-team-member-handler.ts'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: Duration.seconds(10),
+      environment: {
+        USER_POOL_ID: auth.userPool.userPoolId,
+      },
+    });
+
+    // Grant Cognito AdminCreateUser and AdminGetUser permissions
+    auth.userPool.grant(inviteTeamMemberLambda, 'cognito-idp:AdminCreateUser');
+    auth.userPool.grant(inviteTeamMemberLambda, 'cognito-idp:AdminGetUser');
+
+    // Lambda data source for team invitations
+    const inviteTeamMemberDs = this.api.addLambdaDataSource('InviteTeamMemberLambda', inviteTeamMemberLambda);
 
     // Resolver: Query.getProject (JS) - GetItem pk=PROJECT#id, sk=METADATA (single-table key pattern)
     new appsync.Resolver(this, 'GetProjectResolver', {
@@ -266,7 +289,12 @@ export function request(ctx) {
   };
 }
 export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (ctx.error) {
+    // If UpdateItem fails because user doesn't exist, we need to handle it
+    // But UpdateItem with if_not_exists should create the record, so this shouldn't happen
+    // However, if it does, log and return error
+    util.error(ctx.error.message, ctx.error.type);
+  }
   return ctx.result;
 }
 `.trim()),
@@ -369,7 +397,7 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Function 2: Batch fetch user details for all members
+    // Function 2: Batch fetch user details for all members (both User and Guest records)
     const batchGetMemberUsersFn = new appsync.AppsyncFunction(this, 'BatchGetMemberUsersFn', {
       name: 'batchGetMemberUsers',
       api: this.api,
@@ -383,12 +411,32 @@ export function request(ctx) {
     // No members or no team, skip batch fetch
     return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
   }
-  // BatchGetItem for user details
-  const keys = members.map(m => util.dynamodb.toMapValues({ pk: 'USER#' + m.userId, sk: 'METADATA' }));
+  
+  // Separate regular members (USER#userId) from guest members (GUEST#guestId)
+  const userKeys = [];
+  const guestKeys = [];
+  
+  for (const member of members) {
+    if (member.userId && member.userId.startsWith('GUEST#')) {
+      // Guest member: userId is "GUEST#guestId", extract guestId
+      const guestId = member.userId.replace('GUEST#', '');
+      guestKeys.push(util.dynamodb.toMapValues({ pk: 'GUEST#' + guestId, sk: 'METADATA' }));
+    } else {
+      // Regular member: userId is the actual user ID
+      userKeys.push(util.dynamodb.toMapValues({ pk: 'USER#' + member.userId, sk: 'METADATA' }));
+    }
+  }
+  
+  // Combine all keys for BatchGetItem
+  const allKeys = [...userKeys, ...guestKeys];
+  if (allKeys.length === 0) {
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  }
+  
   return {
     operation: 'BatchGetItem',
     tables: {
-      '${dynamoTable.tableName}': { keys: keys }
+      '${dynamoTable.tableName}': { keys: allKeys }
     }
   };
 }
@@ -397,21 +445,64 @@ export function response(ctx) {
   const team = ctx.stash.team;
   if (!team) return null;
 
-  // Build user lookup map
+  // Build user/guest lookup maps
   const userMap = {};
-  const userData = ctx.result?.data?.['${dynamoTable.tableName}'] || [];
-  for (const user of userData) {
-    if (user && user.id) {
-      userMap[user.id] = user;
+  const guestMap = {};
+  const data = ctx.result?.data?.['${dynamoTable.tableName}'] || [];
+  
+  for (const item of data) {
+    if (!item) continue;
+    
+    if (item.pk && item.pk.startsWith('USER#')) {
+      // Regular user record
+      if (item.id) {
+        userMap[item.id] = item;
+      }
+    } else if (item.pk && item.pk.startsWith('GUEST#')) {
+      // Guest record - extract guestId from pk
+      const guestId = item.pk.replace('GUEST#', '');
+      guestMap[guestId] = item;
     }
   }
 
-  // Attach user details to each member
+  // Attach user/guest details to each member
   const members = ctx.stash.members || [];
-  const membersWithUsers = members.map(m => ({
-    ...m,
-    user: userMap[m.userId] || null
-  }));
+  const membersWithUsers = members.map(m => {
+    if (m.userId && m.userId.startsWith('GUEST#')) {
+      // Guest member: extract guestId and look up guest record
+      const guestId = m.userId.replace('GUEST#', '');
+      const guest = guestMap[guestId];
+      if (guest) {
+        // Create a user-like object from guest record for consistent frontend handling
+        return {
+          ...m,
+          user: {
+            id: m.userId,
+            email: null,
+            name: guest.displayName || 'Guest',
+            avatarUrl: null
+          },
+          displayName: guest.displayName || 'Guest'
+        };
+      }
+      return {
+        ...m,
+        user: {
+          id: m.userId,
+          email: null,
+          name: 'Guest',
+          avatarUrl: null
+        },
+        displayName: 'Guest'
+      };
+    } else {
+      // Regular member: look up user record
+      return {
+        ...m,
+        user: userMap[m.userId] || null
+      };
+    }
+  });
 
   return { team, members: membersWithUsers };
 }
@@ -835,6 +926,7 @@ export function response(ctx) {
 `.trim()),
     });
 
+
     // Resolver: Mutation.removeTeamMember (JS) - DeleteItem Membership with existence check
     new appsync.Resolver(this, 'RemoveTeamMemberResolver', {
       api: this.api,
@@ -1238,7 +1330,7 @@ export function request(ctx) {
 
   // Delete the component itself
   deleteRequests.push({
-    table: '${props.dynamoTable.tableName}',
+    table: '${dynamoTable.tableName}',
     operation: 'DeleteItem',
     key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + componentId, sk: 'METADATA' }),
     condition: { expression: 'attribute_exists(pk)' }
@@ -1247,7 +1339,7 @@ export function request(ctx) {
   // Delete dependencies (what this component depends on)
   for (const dep of dependencies) {
     deleteRequests.push({
-      table: '${props.dynamoTable.tableName}',
+      table: '${dynamoTable.tableName}',
       operation: 'DeleteItem',
       key: util.dynamodb.toMapValues({ pk: dep.pk, sk: dep.sk })
     });
@@ -1256,7 +1348,7 @@ export function request(ctx) {
   // Delete dependents (what depends on this component)
   for (const dep of dependents) {
     deleteRequests.push({
-      table: '${props.dynamoTable.tableName}',
+      table: '${dynamoTable.tableName}',
       operation: 'DeleteItem',
       key: util.dynamodb.toMapValues({ pk: dep.pk, sk: dep.sk })
     });
@@ -1400,21 +1492,21 @@ export function request(ctx) {
     transactItems: [
       // Check that the "from" component exists
       {
-        table: '${props.dynamoTable.tableName}',
+        table: '${dynamoTable.tableName}',
         operation: 'ConditionCheck',
         key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + fromId, sk: 'METADATA' }),
         condition: { expression: 'attribute_exists(pk)' }
       },
       // Check that the "to" component exists
       {
-        table: '${props.dynamoTable.tableName}',
+        table: '${dynamoTable.tableName}',
         operation: 'ConditionCheck',
         key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + toId, sk: 'METADATA' }),
         condition: { expression: 'attribute_exists(pk)' }
       },
       // Create the dependency (fail if already exists)
       {
-        table: '${props.dynamoTable.tableName}',
+        table: '${dynamoTable.tableName}',
         operation: 'PutItem',
         key: util.dynamodb.toMapValues({ pk: dependencyItem.pk, sk: dependencyItem.sk }),
         attributeValues: util.dynamodb.toMapValues(dependencyItem),
@@ -2020,53 +2112,20 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Resolver: Mutation.assignUserToComponent (Pipeline)
-    // Step 1: Fetch component to get name, status, type, projectId for denormalization
-    // Step 2: Create assignment with denormalized data
-    const getComponentForAssignmentFn = new appsync.AppsyncFunction(this, 'GetComponentForAssignmentFn', {
+    // Resolver: Mutation.assignUserToComponent (JS) - TransactWriteItems to validate component exists then create assignment
+    new appsync.Resolver(this, 'AssignUserToComponentResolver', {
       api: this.api,
-      name: 'getComponentForAssignment',
+      typeName: 'Mutation',
+      fieldName: 'assignUserToComponent',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.componentId;
-  ctx.stash.componentId = componentId;
-  ctx.stash.userId = ctx.args.userId;
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + componentId,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  if (!ctx.result) util.error('Component not found', 'ComponentNotFound');
-  // Store component data for next function
-  ctx.stash.component = ctx.result;
-  return ctx.result;
-}
-`.trim()),
-    });
-
-    const createAssignmentFn = new appsync.AppsyncFunction(this, 'CreateAssignmentFn', {
-      api: this.api,
-      name: 'createAssignment',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const componentId = ctx.stash.componentId;
-  const userId = ctx.stash.userId;
-  const component = ctx.stash.component;
+  const userId = ctx.args.userId;
   const now = util.time.nowISO8601();
   const id = util.autoId();
-
-  // Denormalize component data on assignment for efficient queries
   const assignment = {
     pk: 'COMPONENT#' + componentId,
     sk: 'ASSIGNEE#' + userId,
@@ -2075,45 +2134,47 @@ export function request(ctx) {
     userId: userId,
     assignedAt: now,
     gsi1pk: 'USER#' + userId,
-    gsi1sk: 'ASSIGNMENT#' + componentId,
-    // Denormalized component fields for listAssignmentsForTeamMember
-    projectId: component.projectId,
-    componentName: component.name,
-    componentStatus: component.status,
-    componentType: component.type
+    gsi1sk: 'ASSIGNMENT#' + componentId
   };
-
-  ctx.stash.assignment = assignment;
-
   return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({ pk: assignment.pk, sk: assignment.sk }),
-    attributeValues: util.dynamodb.toMapValues(assignment),
-    condition: { expression: 'attribute_not_exists(pk)' }
+    operation: 'TransactWriteItems',
+    transactItems: [
+      // Check that the component exists
+      {
+        table: '${dynamoTable.tableName}',
+        operation: 'ConditionCheck',
+        key: util.dynamodb.toMapValues({ pk: 'COMPONENT#' + componentId, sk: 'METADATA' }),
+        condition: { expression: 'attribute_exists(pk)' }
+      },
+      // Create the assignment (fail if already assigned)
+      {
+        table: '${dynamoTable.tableName}',
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ pk: assignment.pk, sk: assignment.sk }),
+        attributeValues: util.dynamodb.toMapValues(assignment),
+        condition: { expression: 'attribute_not_exists(pk)' }
+      }
+    ]
   };
 }
 export function response(ctx) {
   if (ctx.error) {
-    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-      util.error('User is already assigned to this component', 'AssignmentAlreadyExists');
+    if (ctx.result && ctx.result.cancellationReasons) {
+      const reasons = ctx.result.cancellationReasons;
+      if (reasons[0] && reasons[0].type === 'ConditionCheckFailed') {
+        util.error('Component not found', 'ComponentNotFound');
+      }
+      if (reasons[1] && reasons[1].type === 'ConditionCheckFailed') {
+        util.error('User is already assigned to this component', 'AssignmentAlreadyExists');
+      }
     }
     util.error(ctx.error.message, ctx.error.type);
   }
-  const a = ctx.stash.assignment;
-  return { id: a.id, componentId: a.componentId, userId: a.userId, assignedAt: a.assignedAt };
+  const componentId = ctx.args.componentId;
+  const userId = ctx.args.userId;
+  const now = util.time.nowISO8601();
+  return { id: util.autoId(), componentId, userId, assignedAt: now };
 }
-`.trim()),
-    });
-
-    new appsync.Resolver(this, 'AssignUserToComponentResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'assignUserToComponent',
-      pipelineConfig: [getComponentForAssignmentFn, createAssignmentFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) { return {}; }
-export function response(ctx) { return ctx.prev.result; }
 `.trim()),
     });
 
@@ -2479,880 +2540,6 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // ==================== COMMENTS RESOLVERS ====================
-    // Comments on components with support for both authenticated users and guests
-    // pk=COMPONENT#componentId, sk=COMMENT#createdAt#id
-
-    // Resolver: Query.listCommentsForComponent (JS) - Query pk=COMPONENT#id, sk begins_with COMMENT#
-    new appsync.Resolver(this, 'ListCommentsForComponentResolver', {
-      api: this.api,
-      typeName: 'Query',
-      fieldName: 'listCommentsForComponent',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const limit = ctx.args.limit || 50;
-  return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk AND begins_with(sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'COMPONENT#' + ctx.args.componentId,
-        ':sk': 'COMMENT#'
-      })
-    },
-    scanIndexForward: true,
-    limit: limit
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  return (ctx.result.items || []).map(item => ({
-    id: item.id,
-    componentId: item.componentId,
-    projectId: item.projectId,
-    authorId: item.authorId,
-    authorType: item.authorType,
-    authorName: item.authorName,
-    content: item.content,
-    mentions: item.mentions || [],
-    createdAt: item.createdAt
-  }));
-}
-`.trim()),
-    });
-
-    // Pipeline function: Get component and project info for comment creation
-    const getComponentForCommentFn = new appsync.AppsyncFunction(this, 'GetComponentForCommentFn', {
-      name: 'getComponentForComment',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + ctx.args.componentId,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  if (!ctx.result) util.error('Component not found', 'NotFoundError');
-  ctx.stash.component = ctx.result;
-  ctx.stash.projectId = ctx.result.projectId;
-  return ctx.result;
-}
-`.trim()),
-    });
-
-    // Pipeline function: Get user info for comment author
-    const getUserForCommentFn = new appsync.AppsyncFunction(this, 'GetUserForCommentFn', {
-      name: 'getUserForComment',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const userId = ctx.identity.sub;
-  ctx.stash.authorId = userId;
-  ctx.stash.authorType = 'USER';
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'USER#' + userId,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  ctx.stash.authorName = ctx.result?.name || ctx.result?.email || 'Unknown User';
-  return ctx.result;
-}
-`.trim()),
-    });
-
-    // Pipeline function: Create comment item
-    // Mentions are passed as an argument from the frontend (extracted there)
-    const createCommentItemFn = new appsync.AppsyncFunction(this, 'CreateCommentItemFn', {
-      name: 'createCommentItem',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const id = util.autoId();
-  const now = util.time.nowISO8601();
-  const content = ctx.args.content;
-  const mentions = ctx.args.mentions || [];
-
-  const item = {
-    pk: 'COMPONENT#' + ctx.args.componentId,
-    sk: 'COMMENT#' + now + '#' + id,
-    id: id,
-    componentId: ctx.args.componentId,
-    projectId: ctx.stash.projectId,
-    authorId: ctx.stash.authorId,
-    authorType: ctx.stash.authorType,
-    authorName: ctx.stash.authorName,
-    content: content,
-    mentions: mentions,
-    createdAt: now,
-    gsi1pk: 'AUTHOR#' + ctx.stash.authorId,
-    gsi1sk: 'COMMENT#' + now + '#' + id
-  };
-
-  ctx.stash.comment = item;
-  ctx.stash.mentions = mentions;
-
-  return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({
-      pk: item.pk,
-      sk: item.sk
-    }),
-    attributeValues: util.dynamodb.toMapValues(item)
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  const comment = ctx.stash.comment;
-  return {
-    id: comment.id,
-    componentId: comment.componentId,
-    projectId: comment.projectId,
-    authorId: comment.authorId,
-    authorType: comment.authorType,
-    authorName: comment.authorName,
-    content: comment.content,
-    mentions: comment.mentions || [],
-    createdAt: comment.createdAt
-  };
-}
-`.trim()),
-    });
-
-    // Resolver: Mutation.createComment (Pipeline) - Creates comment with author info
-    new appsync.Resolver(this, 'CreateCommentResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'createComment',
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) { return {}; }
-export function response(ctx) { return ctx.prev.result; }
-`.trim()),
-      pipelineConfig: [getComponentForCommentFn, getUserForCommentFn, createCommentItemFn],
-    });
-
-    // ==================== GUEST COMMENTS RESOLVERS ====================
-    // Guest access to comments uses IAM auth via Cognito Identity Pool
-    // Security: Verify cognitoIdentityId matches guestId for all operations
-
-    // Pipeline function: Verify guest access for listing comments
-    const verifyGuestForListCommentsFn = new appsync.AppsyncFunction(this, 'VerifyGuestForListCommentsFn', {
-      name: 'verifyGuestForListComments',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const guestId = ctx.args.guestId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the requested guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
-  }
-
-  // Store componentId for response
-  ctx.stash.componentId = ctx.args.componentId;
-  ctx.stash.guestId = guestId;
-  ctx.stash.limit = ctx.args.limit || 50;
-
-  // First verify the guest exists
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'GUEST#' + guestId,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-
-  const guest = ctx.result;
-  if (!guest) {
-    util.error('Guest session not found. Please rejoin the project.', 'GuestNotFound');
-  }
-
-  // Store guest info for the next step
-  ctx.stash.guest = guest;
-  return guest;
-}
-`.trim()),
-    });
-
-    // Pipeline function: Query comments for component (guest)
-    const queryCommentsForGuestFn = new appsync.AppsyncFunction(this, 'QueryCommentsForGuestFn', {
-      name: 'queryCommentsForGuest',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const limit = ctx.args.limit || 50;
-  return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk AND begins_with(sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'COMPONENT#' + ctx.stash.componentId,
-        ':sk': 'COMMENT#'
-      })
-    },
-    scanIndexForward: true,
-    limit: limit
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  return (ctx.result.items || []).map(item => ({
-    id: item.id,
-    componentId: item.componentId,
-    projectId: item.projectId,
-    authorId: item.authorId,
-    authorType: item.authorType,
-    authorName: item.authorName,
-    content: item.content,
-    mentions: item.mentions || [],
-    createdAt: item.createdAt
-  }));
-}
-`.trim()),
-    });
-
-    // Resolver: Query.guestListComments (Pipeline) - List comments with guest verification
-    new appsync.Resolver(this, 'GuestListCommentsResolver', {
-      api: this.api,
-      typeName: 'Query',
-      fieldName: 'guestListComments',
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) { return {}; }
-export function response(ctx) { return ctx.prev.result; }
-`.trim()),
-      pipelineConfig: [verifyGuestForListCommentsFn, queryCommentsForGuestFn],
-    });
-
-    // ============================================
-    // SHARED PIPELINE FUNCTION: createActivityFn
-    // Reusable function for creating Activity records
-    // Uses ctx.stash: activityType, activityMetadata, projectId, authorId
-    // ============================================
-
-    const createActivityFn = new appsync.AppsyncFunction(this, 'CreateActivityFn', {
-      api: this.api,
-      name: 'createActivity',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  // Skip if no activity data provided
-  if (!ctx.stash.activityType) {
-    return { payload: null };
-  }
-
-  const activityId = util.autoId();
-  const now = util.time.nowISO8601();
-  const projectId = ctx.stash.projectId;
-  const activityType = ctx.stash.activityType;
-  const authorId = ctx.stash.authorId || ctx.stash.guestId;
-  const metadata = ctx.stash.activityMetadata || {};
-
-  return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'PROJECT#' + projectId,
-      sk: 'ACTIVITY#' + now + '#' + activityId
-    }),
-    attributeValues: util.dynamodb.toMapValues({
-      pk: 'PROJECT#' + projectId,
-      sk: 'ACTIVITY#' + now + '#' + activityId,
-      id: activityId,
-      type: activityType,
-      projectId: projectId,
-      userId: authorId,
-      metadata: JSON.stringify(metadata),
-      createdAt: now,
-      gsi1pk: 'USER#' + authorId,
-      gsi1sk: 'ACTIVITY#' + now + '#' + activityId,
-      gsi2pk: 'PROJECT#' + projectId + '#TYPE#' + activityType,
-      gsi2sk: 'ACTIVITY#' + now + '#' + activityId
-    })
-  };
-}
-export function response(ctx) {
-  // Return the main result regardless of activity creation outcome
-  // Activity creation is a side effect and should not fail the main operation
-  return ctx.stash.mainResult || ctx.prev.result;
-}
-`.trim()),
-    });
-
-    // Pipeline function: Verify guest and get component for guest comment
-    const verifyGuestAndGetComponentFn = new appsync.AppsyncFunction(this, 'VerifyGuestAndGetComponentFn', {
-      name: 'verifyGuestAndGetComponent',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const guestId = ctx.args.guestId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the requested guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
-  }
-
-  ctx.stash.guestId = guestId;
-  ctx.stash.componentId = ctx.args.componentId;
-  ctx.stash.content = ctx.args.content;
-  ctx.stash.mentions = ctx.args.mentions || [];
-
-  // Get the guest record
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'GUEST#' + guestId,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-
-  const guest = ctx.result;
-  if (!guest) {
-    util.error('Guest session not found. Please rejoin the project.', 'GuestNotFound');
-  }
-
-  ctx.stash.guest = guest;
-  ctx.stash.authorId = guest.cognitoIdentityId;
-  ctx.stash.authorType = 'GUEST';
-  ctx.stash.authorName = guest.displayName || 'Guest';
-
-  return guest;
-}
-`.trim()),
-    });
-
-    // Pipeline function: Get component for guest comment
-    const getComponentForGuestCommentFn = new appsync.AppsyncFunction(this, 'GetComponentForGuestCommentFn', {
-      name: 'getComponentForGuestComment',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + ctx.stash.componentId,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  if (!ctx.result) util.error('Component not found', 'NotFoundError');
-
-  // Verify guest has access to this component's project
-  if (ctx.result.projectId !== ctx.stash.guest.projectId) {
-    util.error('Access denied: You do not have access to this component', 'Unauthorized');
-  }
-
-  ctx.stash.projectId = ctx.result.projectId;
-  return ctx.result;
-}
-`.trim()),
-    });
-
-    // Pipeline function: Create comment for guest
-    // Mentions are passed as an argument from the frontend (extracted there)
-    const createGuestCommentItemFn = new appsync.AppsyncFunction(this, 'CreateGuestCommentItemFn', {
-      name: 'createGuestCommentItem',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const id = util.autoId();
-  const now = util.time.nowISO8601();
-  const content = ctx.stash.content;
-  const mentions = ctx.stash.mentions || [];
-
-  const item = {
-    pk: 'COMPONENT#' + ctx.stash.componentId,
-    sk: 'COMMENT#' + now + '#' + id,
-    id: id,
-    componentId: ctx.stash.componentId,
-    projectId: ctx.stash.projectId,
-    authorId: ctx.stash.authorId,
-    authorType: ctx.stash.authorType,
-    authorName: ctx.stash.authorName,
-    content: content,
-    mentions: mentions,
-    createdAt: now,
-    gsi1pk: 'AUTHOR#' + ctx.stash.authorId,
-    gsi1sk: 'COMMENT#' + now + '#' + id
-  };
-
-  ctx.stash.comment = item;
-
-  return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({
-      pk: item.pk,
-      sk: item.sk
-    }),
-    attributeValues: util.dynamodb.toMapValues(item)
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  const comment = ctx.stash.comment;
-  const result = {
-    id: comment.id,
-    componentId: comment.componentId,
-    projectId: comment.projectId,
-    authorId: comment.authorId,
-    authorType: comment.authorType,
-    authorName: comment.authorName,
-    content: comment.content,
-    mentions: comment.mentions || [],
-    createdAt: comment.createdAt
-  };
-
-  // Set activity data for createActivityFn
-  ctx.stash.mainResult = result;
-  ctx.stash.activityType = 'COMMENT_ADDED';
-  ctx.stash.authorId = ctx.stash.guestId;
-  ctx.stash.activityMetadata = {
-    componentId: comment.componentId,
-    componentName: ctx.stash.componentName,
-    authorType: 'GUEST',
-    authorName: comment.authorName
-  };
-
-  return result;
-}
-`.trim()),
-    });
-
-    // Resolver: Mutation.guestCreateComment (Pipeline) - Creates comment for guest
-    new appsync.Resolver(this, 'GuestCreateCommentResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestCreateComment',
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) { return {}; }
-export function response(ctx) { return ctx.prev.result; }
-`.trim()),
-      pipelineConfig: [verifyGuestAndGetComponentFn, getComponentForGuestCommentFn, createGuestCommentItemFn, createActivityFn],
-    });
-
-    // ==================== @MENTIONS AUTOCOMPLETE ====================
-    // Search team members and guests for @mention autocomplete
-
-    // Pipeline function: Query team members
-    const queryTeamMembersForMentionFn = new appsync.AppsyncFunction(this, 'QueryTeamMembersForMentionFn', {
-      name: 'queryTeamMembersForMention',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  ctx.stash.query = ctx.args.query.toLowerCase();
-  ctx.stash.teamId = ctx.args.teamId;
-
-  // Query all team members
-  return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk AND begins_with(sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'TEAM#' + ctx.args.teamId,
-        ':sk': 'MEMBER#'
-      })
-    },
-    limit: 100
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-
-  // Store member user IDs for batch get
-  const members = ctx.result.items || [];
-  ctx.stash.members = members;
-  ctx.stash.userIds = members.map(m => m.userId);
-
-  return members;
-}
-`.trim()),
-    });
-
-    // Pipeline function: Batch get user details for team members
-    // Note: Table name injected via CDK string interpolation
-    const tableName = dynamoTable.tableName;
-    const batchGetUsersForMentionFn = new appsync.AppsyncFunction(this, 'BatchGetUsersForMentionFn', {
-      name: 'batchGetUsersForMention',
-      api: this.api,
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const userIds = ctx.stash.userIds || [];
-
-  if (userIds.length === 0) {
-    return { operation: 'GetItem', key: util.dynamodb.toMapValues({ pk: 'NONE', sk: 'NONE' }) };
-  }
-
-  // Batch get up to 100 users (DynamoDB limit)
-  const keys = userIds.slice(0, 100).map(userId =>
-    util.dynamodb.toMapValues({ pk: 'USER#' + userId, sk: 'METADATA' })
-  );
-
-  return {
-    operation: 'BatchGetItem',
-    tables: {
-      '${tableName}': { keys: keys }
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-
-  // Build map of userId -> user info
-  const userMap = {};
-  const items = ctx.result?.data?.['${tableName}'] || [];
-  for (const item of items) {
-    if (item && item.id) {
-      userMap[item.id] = { name: item.name || item.email || 'User', email: item.email };
-    }
-  }
-  ctx.stash.userMap = userMap;
-
-  // Filter members by query and build suggestions
-  const query = ctx.stash.query;
-  const suggestions = [];
-
-  for (const member of ctx.stash.members) {
-    const user = userMap[member.userId] || {};
-    const name = user.name || member.title || 'Team Member';
-    const nameMatch = name.toLowerCase().indexOf(query) !== -1;
-    const emailMatch = user.email && user.email.toLowerCase().indexOf(query) !== -1;
-
-    if (nameMatch || emailMatch) {
-      suggestions.push({
-        id: member.userId,
-        name: name,
-        isGuest: false
-      });
-    }
-  }
-
-  return suggestions;
-}
-`.trim()),
-    });
-
-    // Resolver: Query.searchTeamMembersForMention (Pipeline)
-    new appsync.Resolver(this, 'SearchTeamMembersForMentionResolver', {
-      api: this.api,
-      typeName: 'Query',
-      fieldName: 'searchTeamMembersForMention',
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) { return {}; }
-export function response(ctx) { return ctx.prev.result || []; }
-`.trim()),
-      pipelineConfig: [queryTeamMembersForMentionFn, batchGetUsersForMentionFn],
-    });
-
-    // ==================== GUEST NOTIFICATIONS ====================
-    // Notifications for guests using IAM auth via Cognito Identity Pool
-    // Uses notificationsReadUntil timestamp pattern for O(1) mark-all-read
-
-    // Resolver: Query.guestListNotifications (IAM) - List notifications for guest
-    new appsync.Resolver(this, 'GuestListNotificationsResolver', {
-      api: this.api,
-      typeName: 'Query',
-      fieldName: 'guestListNotifications',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const guestId = ctx.args.guestId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the requested guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only access your own notifications', 'Unauthorized');
-  }
-
-  const limit = ctx.args.limit || 20;
-
-  return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk AND begins_with(sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'GUEST#' + guestId,
-        ':sk': 'NOTIFICATION#'
-      })
-    },
-    scanIndexForward: false,
-    limit: limit
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-
-  return (ctx.result.items || []).map(item => ({
-    id: item.id,
-    guestId: item.guestId,
-    type: item.type,
-    title: item.title,
-    message: item.message,
-    componentId: item.componentId || null,
-    projectId: item.projectId || null,
-    read: item.read || false,
-    createdAt: item.createdAt
-  }));
-}
-`.trim()),
-    });
-
-    // Resolver: Query.guestCountUnreadNotifications (IAM) - Count unread notifications
-    new appsync.Resolver(this, 'GuestCountUnreadNotificationsResolver', {
-      api: this.api,
-      typeName: 'Query',
-      fieldName: 'guestCountUnreadNotifications',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const guestId = ctx.args.guestId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the requested guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only access your own notifications', 'Unauthorized');
-  }
-
-  return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk AND begins_with(sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'GUEST#' + guestId,
-        ':sk': 'NOTIFICATION#'
-      })
-    },
-    filter: {
-      expression: '#read = :false',
-      expressionNames: { '#read': 'read' },
-      expressionValues: util.dynamodb.toMapValues({ ':false': false })
-    },
-    select: 'COUNT'
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  return ctx.result.scannedCount || 0;
-}
-`.trim()),
-    });
-
-    // Resolver: Mutation.guestMarkNotificationRead (IAM) - Mark single notification as read
-    new appsync.Resolver(this, 'GuestMarkNotificationReadResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestMarkNotificationRead',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const guestId = ctx.args.guestId;
-  const notificationId = ctx.args.notificationId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the requested guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only modify your own notifications', 'Unauthorized');
-  }
-
-  ctx.stash.guestId = guestId;
-  ctx.stash.notificationId = notificationId;
-
-  // First get the notification to find its sk (which includes createdAt)
-  return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk AND begins_with(sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'GUEST#' + guestId,
-        ':sk': 'NOTIFICATION#'
-      })
-    },
-    filter: {
-      expression: '#id = :id',
-      expressionNames: { '#id': 'id' },
-      expressionValues: util.dynamodb.toMapValues({ ':id': notificationId })
-    },
-    limit: 1
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-
-  const items = ctx.result.items || [];
-  if (items.length === 0) {
-    util.error('Notification not found', 'NotFoundError');
-  }
-
-  const notification = items[0];
-  notification.read = true;
-
-  return notification;
-}
-`.trim()),
-    });
-
-    // Resolver: Mutation.guestMarkAllNotificationsRead (IAM) - Mark all as read
-    new appsync.Resolver(this, 'GuestMarkAllNotificationsReadResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestMarkAllNotificationsRead',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const guestId = ctx.args.guestId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the requested guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only modify your own notifications', 'Unauthorized');
-  }
-
-  const now = util.time.nowISO8601();
-
-  // Update the guest record with notificationsReadUntil timestamp
-  return {
-    operation: 'UpdateItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'GUEST#' + guestId,
-      sk: 'METADATA'
-    }),
-    update: {
-      expression: 'SET #notificationsReadUntil = :now, #updatedAt = :now',
-      expressionNames: {
-        '#notificationsReadUntil': 'notificationsReadUntil',
-        '#updatedAt': 'updatedAt'
-      },
-      expressionValues: util.dynamodb.toMapValues({
-        ':now': now
-      })
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-  return 0;
-}
-`.trim()),
-    });
-
-    // ==================== GUEST ACTIVITY FEED ====================
-    // Activity feed for guests - shows recent activity on components they're assigned to
-
-    // Resolver: Query.guestListActivityFeed (IAM) - List activity for guest's project
-    new appsync.Resolver(this, 'GuestListActivityFeedResolver', {
-      api: this.api,
-      typeName: 'Query',
-      fieldName: 'guestListActivityFeed',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const guestId = ctx.args.guestId;
-  const projectId = ctx.args.projectId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the requested guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only access your own activity feed', 'Unauthorized');
-  }
-
-  const limit = ctx.args.limit || 20;
-
-  // Query activities for the project
-  return {
-    operation: 'Query',
-    query: {
-      expression: 'pk = :pk AND begins_with(sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'PROJECT#' + projectId,
-        ':sk': 'ACTIVITY#'
-      })
-    },
-    scanIndexForward: false,
-    limit: limit
-  };
-}
-export function response(ctx) {
-  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
-
-  return (ctx.result.items || []).map(item => ({
-    id: item.id,
-    type: item.type,
-    projectId: item.projectId,
-    authorId: item.userId || item.authorId || 'Unknown',
-    authorName: item.userName || item.authorName || null,
-    authorType: item.authorType || 'USER',
-    metadata: item.metadata ? JSON.stringify(item.metadata) : null,
-    createdAt: item.createdAt
-  }));
-}
-`.trim()),
-    });
-
     // ==================== Phase 9: Workflow Config & Metrics ====================
     // AWS Best Practices Applied:
     // - Direct DynamoDB GetItem for O(1) config reads (no Lambda overhead)
@@ -3586,199 +2773,6 @@ export function response(ctx) {
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
-    // Resolver: Mutation.guestRefineComponent (Lambda + IAM auth) - chat-based component refinement for guests
-    new appsync.Resolver(this, 'GuestRefineComponentResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestRefineComponent',
-      dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
-      responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
-    });
-
-    // ============================================
-    // PIPELINE RESOLVER: guestUpdateComponent
-    // Allows guests to update component fields (apply AI refinement)
-    // Step 1: Verify guest is assigned to component
-    // Step 2: Update component fields in DynamoDB
-    // ============================================
-
-    // Function 1: Verify guest assignment for component update
-    const verifyGuestComponentUpdateFn = new appsync.AppsyncFunction(this, 'VerifyGuestComponentUpdateFn', {
-      api: this.api,
-      name: 'verifyGuestComponentUpdate',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const input = ctx.args.input;
-  const guestId = input.guestId;
-  const componentId = input.componentId;
-  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
-  // Security: Verify the caller's identity matches the guestId
-  if (guestId !== cognitoIdentityId) {
-    util.error('Access denied: You can only update components for your own assignments', 'Unauthorized');
-  }
-
-  // Store input for next function
-  ctx.stash.input = input;
-  ctx.stash.componentId = componentId;
-  ctx.stash.guestId = guestId;
-
-  // Verify the guest is assigned to this component
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + componentId,
-      sk: 'ASSIGNEE#GUEST#' + guestId
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  const assignment = ctx.result;
-  if (!assignment) {
-    util.error('You must be assigned to this component to update it', 'NotAssigned');
-  }
-
-  // Verify the assignment belongs to this identity
-  if (assignment.cognitoIdentityId && assignment.cognitoIdentityId !== ctx.identity.cognitoIdentityId) {
-    util.error('Access denied: Assignment does not belong to you', 'Unauthorized');
-  }
-
-  ctx.stash.assignmentVerified = true;
-  return assignment;
-}
-`.trim()),
-    });
-
-    // Function 2: Update component fields in DynamoDB
-    const updateComponentFieldsFn = new appsync.AppsyncFunction(this, 'UpdateComponentFieldsFn', {
-      api: this.api,
-      name: 'updateComponentFields',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const input = ctx.stash.input;
-  const componentId = ctx.stash.componentId;
-  const now = util.time.nowISO8601();
-
-  // Build dynamic update expression for provided fields only
-  const expressionParts = ['#updatedAt = :now'];
-  const expressionNames = { '#updatedAt': 'updatedAt' };
-  const expressionValues = { ':now': now };
-
-  if (input.name !== undefined && input.name !== null) {
-    expressionParts.push('#name = :name');
-    expressionNames['#name'] = 'name';
-    expressionValues[':name'] = input.name;
-  }
-
-  if (input.description !== undefined && input.description !== null) {
-    expressionParts.push('#description = :description');
-    expressionNames['#description'] = 'description';
-    expressionValues[':description'] = input.description;
-  }
-
-  if (input.type !== undefined && input.type !== null) {
-    expressionParts.push('#type = :type');
-    expressionNames['#type'] = 'type';
-    expressionValues[':type'] = input.type;
-  }
-
-  if (input.estimatedHours !== undefined && input.estimatedHours !== null) {
-    expressionParts.push('#estimatedHours = :estimatedHours');
-    expressionNames['#estimatedHours'] = 'estimatedHours';
-    expressionValues[':estimatedHours'] = input.estimatedHours;
-  }
-
-  if (input.priority !== undefined && input.priority !== null) {
-    expressionParts.push('#priority = :priority');
-    expressionNames['#priority'] = 'priority';
-    expressionValues[':priority'] = input.priority;
-  }
-
-  if (input.acceptanceCriteria !== undefined && input.acceptanceCriteria !== null) {
-    expressionParts.push('#acceptanceCriteria = :acceptanceCriteria');
-    expressionNames['#acceptanceCriteria'] = 'acceptanceCriteria';
-    expressionValues[':acceptanceCriteria'] = input.acceptanceCriteria;
-  }
-
-  return {
-    operation: 'UpdateItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + componentId,
-      sk: 'METADATA'
-    }),
-    update: {
-      expression: 'SET ' + expressionParts.join(', '),
-      expressionNames: expressionNames,
-      expressionValues: util.dynamodb.toMapValues(expressionValues)
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  // Store componentId for the next function to fetch
-  ctx.stash.needsFetch = true;
-  return ctx.result;
-}
-`.trim()),
-    });
-
-    // Function 3: Fetch component after update to return complete data
-    const fetchComponentAfterUpdateFn = new appsync.AppsyncFunction(this, 'FetchComponentAfterUpdateFn', {
-      api: this.api,
-      name: 'fetchComponentAfterUpdate',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const componentId = ctx.stash.componentId;
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + componentId,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  return ctx.result;
-}
-`.trim()),
-    });
-
-    // Pipeline Resolver: guestUpdateComponent
-    new appsync.Resolver(this, 'GuestUpdateComponentResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestUpdateComponent',
-      pipelineConfig: [verifyGuestComponentUpdateFn, updateComponentFieldsFn, fetchComponentAfterUpdateFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
-}
-`.trim()),
-    });
-
     // Resolver: Mutation.refineBulkPlan (Lambda) - chat-based bulk plan refinement
     new appsync.Resolver(this, 'RefineBulkPlanResolver', {
       api: this.api,
@@ -3943,43 +2937,129 @@ export function response(ctx) {
       `),
     });
 
-    // ============================================
-    // Share Code / Guest Access Resolvers
-    // AWS Best Practice: Cognito Identity Pool + IAM auth for guests
-    // ============================================
 
-    // Resolver: Query.validateShareCode (API_KEY auth) - Check if code is valid
-    new appsync.Resolver(this, 'ValidateShareCodeResolver', {
+    // ============================================
+    // Team Invitation Resolvers (using Cognito AdminCreateUser)
+    // Modularized to avoid monolithic code
+    // ============================================
+    new TeamInvitationResolvers(this, 'TeamInvitationResolvers', {
       api: this.api,
-      typeName: 'Query',
-      fieldName: 'validateShareCode',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromAsset(join(__dirname, 'appsync-graphql/resolvers/share-codes/Query.validateShareCode.js')),
+      dynamoDs: dynamoDs,
+      inviteTeamMemberDs: inviteTeamMemberDs,
     });
 
-    // Function: Verify user is team member before generating share code
-    const verifyTeamMemberForShareCodeFn = new appsync.AppsyncFunction(this, 'VerifyTeamMemberForShareCodeFn', {
+    // ============================================
+    // Guest Operations Resolvers (IAM auth)
+    // ============================================
+
+    // Resolver: Query.guestGetProject (IAM auth) - Get project for guest
+    // AWS Best Practice: Verify cognitoIdentityId matches the guestId
+    new appsync.Resolver(this, 'GuestGetProjectResolver', {
       api: this.api,
-      name: 'verifyTeamMemberForShareCode',
+      typeName: 'Query',
+      fieldName: 'guestGetProject',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const projectId = ctx.args.projectId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own guest project', 'Unauthorized');
+  }
+  
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + projectId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const project = ctx.result;
+  if (!project) {
+    util.error('Project not found', 'NotFound');
+  }
+  
+  return project;
+}
+`.trim()),
+    });
+
+    // ============================================
+    // Guest Operations Resolvers (IAM auth)
+    // ============================================
+
+    // Resolver: Query.guestGetProject (IAM auth) - Get project for guest
+    // AWS Best Practice: Verify cognitoIdentityId matches the guestId
+    new appsync.Resolver(this, 'GuestGetProjectResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'guestGetProject',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const projectId = ctx.args.projectId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
+  }
+  
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + projectId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const project = ctx.result;
+  if (!project) {
+    util.error('Project not found', 'NotFound');
+  }
+  
+  return project;
+}
+`.trim()),
+    });
+
+    // Pipeline resolver: Mutation.generateTeamInvite
+    // Step 1: Verify user is team OWNER/ADMIN
+    // Step 2: Generate code and create invitation
+    const verifyTeamOwnerAdminForInviteCodeFn = new appsync.AppsyncFunction(this, 'VerifyTeamOwnerAdminForInviteCodeFn', {
+      name: 'verifyTeamOwnerAdminForInviteCode',
+      api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const userId = ctx.identity.sub;
-  const input = ctx.args.input;
-  const teamId = input.teamId;
-  const projectId = input.projectId;
-
+  const teamId = ctx.args.input.teamId;
+  
   ctx.stash.userId = userId;
-  ctx.stash.input = input;
-
-  // If no teamId provided, we can't verify membership - reject
-  if (!teamId) {
-    util.error('teamId is required to generate a share code', 'BadRequest');
-  }
-
+  ctx.stash.teamId = teamId;
+  
+  // Verify user is OWNER or ADMIN
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
@@ -3992,68 +3072,168 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-
+  
   const membership = ctx.result;
   if (!membership) {
-    util.error('Not authorized - not a team member', 'Unauthorized');
+    util.error('You must be a member of this team', 'Unauthorized');
   }
-
-  // Any team member can generate share codes (not just OWNER/ADMIN)
-  // This allows collaboration while still ensuring only team members can share
+  
+  const role = membership.role;
+  if (role !== 'OWNER' && role !== 'ADMIN') {
+    util.error('Only team owners and admins can generate invitation codes', 'Forbidden');
+  }
+  
+  ctx.stash.authorized = true;
   return membership;
 }
 `.trim()),
     });
 
-    // Function: Create the share code
-    const createShareCodeFn = new appsync.AppsyncFunction(this, 'CreateShareCodeFn', {
+    const createTeamInviteFn = new appsync.AppsyncFunction(this, 'CreateTeamInviteFn', {
+      name: 'createTeamInvite',
       api: this.api,
-      name: 'createShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
-  const userId = ctx.stash.userId;
-  const input = ctx.stash.input;
-  const projectId = input.projectId;
-
-  const autoId = util.autoId().split('-').join('').toUpperCase();
-  const code = autoId.substring(0, 6);
-
-  const requestedHours = input.expiresInHours || 168;
-  const expiresInHours = requestedHours > 720 ? 720 : requestedHours;
-  const nowMs = util.time.nowEpochMilliSeconds();
-  const ttlMs = nowMs + (expiresInHours * 3600 * 1000);
-  const ttl = ttlMs / 1000;
-  const expiresAt = util.time.epochMilliSecondsToISO8601(ttlMs);
-  const createdAt = util.time.nowISO8601();
-
+  const input = ctx.args.input;
+  const teamId = input.teamId;
+  const teamName = input.teamName || null;
+  const role = input.role || 'MEMBER';
+  const expiresInHours = input.expiresInHours || 168; // Default 7 days
+  
+  // Generate 6-character code (alphanumeric, uppercase)
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  const now = util.time.nowISO8601();
+  const nowEpoch = util.time.nowEpochSeconds();
+  const expiresAt = new Date((nowEpoch + expiresInHours * 3600) * 1000).toISOString();
+  const ttl = nowEpoch + expiresInHours * 3600;
+  
   ctx.stash.code = code;
+  ctx.stash.teamId = teamId;
+  ctx.stash.teamName = teamName;
+  ctx.stash.role = role;
   ctx.stash.expiresAt = expiresAt;
-  ctx.stash.createdAt = createdAt;
-
+  
+  // Create invitation code record
   return {
     operation: 'PutItem',
     key: util.dynamodb.toMapValues({
-      pk: 'SHARE_CODE#' + code,
+      pk: 'TEAM_INVITE#' + code,
       sk: 'METADATA'
     }),
     attributeValues: util.dynamodb.toMapValues({
       code: code,
-      projectId: projectId,
-      projectName: input.projectName || null,
-      teamId: input.teamId || '',
-      teamName: input.teamName || null,
-      createdBy: userId,
-      ttl: ttl,
+      teamId: teamId,
+      teamName: teamName,
+      role: role,
       expiresAt: expiresAt,
-      createdAt: createdAt,
-      gsi1pk: 'PROJECT#' + projectId,
-      gsi1sk: 'SHARE_CODE#' + code
-    }),
-    condition: {
-      expression: 'attribute_not_exists(pk)'
+      createdAt: now,
+      createdBy: ctx.stash.userId,
+      ttl: ttl,
+      gsi1pk: 'TEAM#' + teamId,
+      gsi1sk: 'INVITE#' + code
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  return {
+    code: ctx.stash.code,
+    teamId: ctx.stash.teamId,
+    teamName: ctx.stash.teamName,
+    role: ctx.stash.role,
+    expiresAt: ctx.stash.expiresAt,
+    createdAt: util.time.nowISO8601(),
+    createdBy: ctx.stash.userId
+  };
+}
+`.trim()),
+    });
+
+    new appsync.Resolver(this, 'GenerateTeamInviteResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'generateTeamInvite',
+      pipelineConfig: [verifyTeamOwnerAdminForInviteCodeFn, createTeamInviteFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
+`.trim()),
+    });
+
+    // Resolver: Query.listTeamInvites (Cognito auth) - List invitation codes for a team
+    const verifyTeamOwnerAdminForListInvitesFn = new appsync.AppsyncFunction(this, 'VerifyTeamOwnerAdminForListInvitesFn', {
+      name: 'verifyTeamOwnerAdminForListInvites',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const teamId = ctx.args.teamId;
+  
+  // Verify user is OWNER or ADMIN
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const membership = ctx.result;
+  if (!membership) {
+    util.error('You must be a member of this team', 'Unauthorized');
+  }
+  
+  const role = membership.role;
+  if (role !== 'OWNER' && role !== 'ADMIN') {
+    util.error('Only team owners and admins can list invitation codes', 'Forbidden');
+  }
+  
+  ctx.stash.teamId = ctx.args.teamId;
+  return membership;
+}
+`.trim()),
+    });
+
+    const queryTeamInvitesFn = new appsync.AppsyncFunction(this, 'QueryTeamInvitesFn', {
+      name: 'queryTeamInvites',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+  
+  // Query GSI1 for team's invitation codes
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId,
+        ':sk': 'INVITE#'
+      })
     }
   };
 }
@@ -4061,53 +3241,42 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-  const input = ctx.stash.input;
-  return {
-    code: ctx.stash.code,
-    projectId: input.projectId,
-    projectName: input.projectName || null,
-    teamId: input.teamId,
-    teamName: input.teamName || null,
-    expiresAt: ctx.stash.expiresAt,
-    createdAt: ctx.stash.createdAt,
-    createdBy: ctx.stash.userId
-  };
+  
+  const nowEpoch = util.time.nowEpochSeconds();
+  const invites = (ctx.result.items || []).filter(invite => {
+    // Filter out expired invites
+    return !invite.ttl || invite.ttl >= nowEpoch;
+  });
+  
+  return invites.map(invite => ({
+    code: invite.code,
+    teamId: invite.teamId,
+    teamName: invite.teamName,
+    role: invite.role,
+    expiresAt: invite.expiresAt,
+    createdAt: invite.createdAt,
+    createdBy: invite.createdBy
+  }));
 }
 `.trim()),
     });
 
-    // Pipeline Resolver: Mutation.generateShareCode (Cognito auth) - Generate share code for project
-    // Security: Verifies user is a team member before allowing share code generation
-    new appsync.Resolver(this, 'GenerateShareCodeResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'generateShareCode',
-      pipelineConfig: [verifyTeamMemberForShareCodeFn, createShareCodeFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
-}
-`.trim()),
-    });
-
-    // Resolver: Query.listShareCodesForProject (Cognito auth) - List share codes for a project
-    new appsync.Resolver(this, 'ListShareCodesForProjectResolver', {
+    new appsync.Resolver(this, 'ListTeamInvitesResolver', {
       api: this.api,
       typeName: 'Query',
-      fieldName: 'listShareCodesForProject',
-      dataSource: dynamoDs,
+      fieldName: 'listTeamInvites',
+      pipelineConfig: [verifyTeamOwnerAdminForListInvitesFn, queryTeamInvitesFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromAsset(join(__dirname, 'appsync-graphql/resolvers/share-codes/Query.listShareCodesForProject.js')),
+      code: appsync.Code.fromInline(`
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
+`.trim()),
     });
 
-    // Function: Fetch share code and extract projectId/teamId for authorization
-    const fetchShareCodeForRevokeFn = new appsync.AppsyncFunction(this, 'FetchShareCodeForRevokeFn', {
+    // Pipeline resolver: Mutation.revokeTeamInvite
+    const fetchInviteForRevokeFn = new appsync.AppsyncFunction(this, 'FetchInviteForRevokeFn', {
+      name: 'fetchInviteForRevoke',
       api: this.api,
-      name: 'fetchShareCodeForRevoke',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -4115,12 +3284,11 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const code = ctx.args.code.toUpperCase();
   ctx.stash.code = code;
-  ctx.stash.userId = ctx.identity.sub;
-
+  
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
-      pk: 'SHARE_CODE#' + code,
+      pk: 'TEAM_INVITE#' + code,
       sk: 'METADATA'
     })
   };
@@ -4129,41 +3297,29 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-
-  const shareCode = ctx.result;
-  if (!shareCode) {
-    util.error('Share code not found', 'NotFound');
+  
+  const invite = ctx.result;
+  if (!invite) {
+    util.error('Invitation code not found', 'NotFound');
   }
-
-  ctx.stash.projectId = shareCode.projectId;
-  ctx.stash.teamId = shareCode.teamId;
-  ctx.stash.createdBy = shareCode.createdBy;
-  return shareCode;
+  
+  ctx.stash.teamId = invite.teamId;
+  return invite;
 }
 `.trim()),
     });
 
-    // Function: Verify user is team member (or share code creator) before allowing revoke
-    const verifyShareCodeRevokeFn = new appsync.AppsyncFunction(this, 'VerifyShareCodeRevokeFn', {
+    const verifyTeamOwnerAdminForRevokeInviteFn = new appsync.AppsyncFunction(this, 'VerifyTeamOwnerAdminForRevokeInviteFn', {
+      name: 'verifyTeamOwnerAdminForRevokeInvite',
       api: this.api,
-      name: 'verifyShareCodeRevoke',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
+  const userId = ctx.identity.sub;
   const teamId = ctx.stash.teamId;
-  const userId = ctx.stash.userId;
-
-  // If no teamId, check if user is the creator
-  if (!teamId) {
-    if (ctx.stash.createdBy === userId) {
-      ctx.stash.authorized = true;
-      return { operation: 'GetItem', key: util.dynamodb.toMapValues({ pk: 'SKIP', sk: 'SKIP' }) };
-    }
-    util.error('Not authorized to revoke this share code', 'Unauthorized');
-  }
-
+  
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
@@ -4173,41 +3329,39 @@ export function request(ctx) {
   };
 }
 export function response(ctx) {
-  if (ctx.stash.authorized) {
-    return { authorized: true };
-  }
-
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-
+  
   const membership = ctx.result;
-  // Allow OWNER, ADMIN, or the creator of the share code
-  const isTeamOwnerAdmin = membership && (membership.role === 'OWNER' || membership.role === 'ADMIN');
-  const isCreator = ctx.stash.createdBy === ctx.stash.userId;
-
-  if (!isTeamOwnerAdmin && !isCreator) {
-    util.error('Not authorized to revoke this share code', 'Unauthorized');
+  if (!membership) {
+    util.error('You must be a member of this team', 'Unauthorized');
   }
-
-  return { authorized: true };
+  
+  const role = membership.role;
+  if (role !== 'OWNER' && role !== 'ADMIN') {
+    util.error('Only team owners and admins can revoke invitation codes', 'Forbidden');
+  }
+  
+  return membership;
 }
 `.trim()),
     });
 
-    // Function: Delete the share code
-    const deleteShareCodeFn = new appsync.AppsyncFunction(this, 'DeleteShareCodeFn', {
+    const deleteTeamInviteFn = new appsync.AppsyncFunction(this, 'DeleteTeamInviteFn', {
+      name: 'deleteTeamInvite',
       api: this.api,
-      name: 'deleteShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
+  const code = ctx.stash.code;
+  
   return {
     operation: 'DeleteItem',
     key: util.dynamodb.toMapValues({
-      pk: 'SHARE_CODE#' + ctx.stash.code,
+      pk: 'TEAM_INVITE#' + code,
       sk: 'METADATA'
     })
   };
@@ -4221,34 +3375,22 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Pipeline Resolver: Mutation.revokeShareCode (Cognito auth) - Delete share code
-    // Security: Verifies user is team OWNER/ADMIN or the share code creator
-    new appsync.Resolver(this, 'RevokeShareCodeResolver', {
+    new appsync.Resolver(this, 'RevokeTeamInviteResolver', {
       api: this.api,
       typeName: 'Mutation',
-      fieldName: 'revokeShareCode',
-      pipelineConfig: [fetchShareCodeForRevokeFn, verifyShareCodeRevokeFn, deleteShareCodeFn],
+      fieldName: 'revokeTeamInvite',
+      pipelineConfig: [fetchInviteForRevokeFn, verifyTeamOwnerAdminForRevokeInviteFn, deleteTeamInviteFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
-}
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
 `.trim()),
     });
 
-    // ============================================
-    // PIPELINE RESOLVER: guestJoinProject
-    // Step 1: Validate share code
-    // Step 2: Create GUEST# record in DynamoDB
-    // ============================================
-
-    // Function 1: Validate share code and store info in stash
-    const validateShareCodeFn = new appsync.AppsyncFunction(this, 'ValidateShareCodeFn', {
+    // Pipeline resolver: Mutation.guestJoinTeam (similar to guestJoinProject)
+    const validateTeamInviteFn = new appsync.AppsyncFunction(this, 'ValidateTeamInviteFn', {
+      name: 'validateTeamInvite',
       api: this.api,
-      name: 'validateShareCode',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -4264,16 +3406,15 @@ export function request(ctx) {
     util.error('Invalid authentication', 'Unauthorized');
   }
   
-  // Store in stash for next function
   ctx.stash.cognitoIdentityId = cognitoIdentityId;
   ctx.stash.displayName = displayName;
   ctx.stash.code = code;
   
-  // Get the share code to validate it
+  // Get the invitation code to validate it
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
-      pk: 'SHARE_CODE#' + code,
+      pk: 'TEAM_INVITE#' + code,
       sk: 'METADATA'
     })
   };
@@ -4283,32 +3424,31 @@ export function response(ctx) {
     util.error(ctx.error.message, ctx.error.type);
   }
   
-  const codeItem = ctx.result;
-  if (!codeItem) {
-    util.error('Invalid share code', 'InvalidShareCode');
+  const invite = ctx.result;
+  if (!invite) {
+    util.error('Invalid invitation code', 'InvalidTeamInvite');
   }
   
   // Check expiration
   const nowEpoch = util.time.nowEpochSeconds();
-  if (codeItem.ttl && codeItem.ttl < nowEpoch) {
-    util.error('Share code has expired', 'ExpiredShareCode');
+  if (invite.ttl && invite.ttl < nowEpoch) {
+    util.error('Invitation code has expired', 'ExpiredTeamInvite');
   }
   
-  // Store code info for the next function in the pipeline
-  ctx.stash.projectId = codeItem.projectId;
-  ctx.stash.projectName = codeItem.projectName || null;
-  ctx.stash.teamId = codeItem.teamId;
-  ctx.stash.teamName = codeItem.teamName || null;
+  // Store invite info for next function
+  ctx.stash.teamId = invite.teamId;
+  ctx.stash.teamName = invite.teamName || null;
+  // Guests always get GUEST role, regardless of invite role
+  ctx.stash.role = 'GUEST';
   
-  return codeItem;
+  return invite;
 }
 `.trim()),
     });
 
-    // Function 2: Create GUEST# record in DynamoDB
-    const createGuestRecordFn = new appsync.AppsyncFunction(this, 'CreateGuestRecordFn', {
+    const createGuestTeamRecordFn = new appsync.AppsyncFunction(this, 'CreateGuestTeamRecordFn', {
+      name: 'createGuestTeamRecord',
       api: this.api,
-      name: 'createGuestRecord',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -4317,7 +3457,7 @@ export function request(ctx) {
   const guestId = ctx.stash.cognitoIdentityId;
   const now = util.time.nowISO8601();
   
-  // Create GUEST# record in DynamoDB
+  // Create GUEST# record
   return {
     operation: 'PutItem',
     key: util.dynamodb.toMapValues({
@@ -4328,14 +3468,12 @@ export function request(ctx) {
       id: guestId,
       cognitoIdentityId: guestId,
       displayName: ctx.stash.displayName,
-      projectId: ctx.stash.projectId,
-      projectName: ctx.stash.projectName,
       teamId: ctx.stash.teamId,
       teamName: ctx.stash.teamName,
       joinedAt: now,
       createdAt: now,
       updatedAt: now,
-      gsi1pk: 'PROJECT#' + ctx.stash.projectId,
+      gsi1pk: 'TEAM#' + ctx.stash.teamId,
       gsi1sk: 'GUEST#' + guestId
     })
   };
@@ -4344,24 +3482,15 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-  
-  // Return the guest session
-  return {
-    guestId: ctx.stash.cognitoIdentityId,
-    displayName: ctx.stash.displayName,
-    projectId: ctx.stash.projectId,
-    projectName: ctx.stash.projectName,
-    teamId: ctx.stash.teamId,
-    teamName: ctx.stash.teamName
-  };
+  // Pass through stash for next function (don't return PutItem result)
+  return ctx.stash;
 }
 `.trim()),
     });
 
-    // Function 3: Create GUEST team membership record
     const createGuestTeamMembershipFn = new appsync.AppsyncFunction(this, 'CreateGuestTeamMembershipFn', {
-      api: this.api,
       name: 'createGuestTeamMembership',
+      api: this.api,
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -4369,61 +3498,311 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const guestId = ctx.stash.cognitoIdentityId;
   const teamId = ctx.stash.teamId;
+  const role = ctx.stash.role;
   const now = util.time.nowISO8601();
-
-  // Create team membership with GUEST role
+  const membershipId = guestId + '#' + teamId;
+  
+  // Create guest team membership with condition to prevent duplicates
   return {
     operation: 'PutItem',
     key: util.dynamodb.toMapValues({
       pk: 'TEAM#' + teamId,
-      sk: 'MEMBER#' + guestId
+      sk: 'MEMBER#GUEST#' + guestId
     }),
     attributeValues: util.dynamodb.toMapValues({
-      id: teamId + '#' + guestId,
+      id: membershipId,
+      userId: 'GUEST#' + guestId,
       teamId: teamId,
-      userId: guestId,
-      role: 'GUEST',
-      isGuest: true,
-      guestName: ctx.stash.displayName,
+      role: role,
       joinedAt: now,
       createdAt: now,
       updatedAt: now,
-      gsi1pk: 'USER#' + guestId,
+      gsi1pk: 'GUEST#' + guestId,
       gsi1sk: 'TEAM#' + teamId
-    })
+    }),
+    condition: { expression: 'attribute_not_exists(pk)' }
   };
 }
 export function response(ctx) {
   if (ctx.error) {
-    // Log but don't fail - membership creation is secondary
-    console.log('Guest membership creation warning:', ctx.error.message);
+    // Handle duplicate membership gracefully (idempotent operation)
+    // Check both error type formats that AppSync might use
+    const errorType = ctx.error.type || ctx.error.errorType || '';
+    const errorMessage = ctx.error.message || '';
+    
+    if (errorType === 'DynamoDB:ConditionalCheckFailedException' || 
+        errorMessage.includes('ConditionalCheckFailedException') ||
+        errorMessage.includes('conditional request failed')) {
+      // Guest already joined - return success (idempotent)
+      // This makes the operation safe to retry
+      return {
+        guestId: ctx.stash.cognitoIdentityId,
+        displayName: ctx.stash.displayName,
+        teamId: ctx.stash.teamId,
+        teamName: ctx.stash.teamName,
+        role: ctx.stash.role || 'GUEST'
+      };
+    }
+    // For other errors, propagate them
+    util.error(ctx.error.message || errorMessage, errorType || ctx.error.type);
   }
-
-  // Return the guest session (from stash)
+  
+  // Return the guest team session on success
   return {
     guestId: ctx.stash.cognitoIdentityId,
     displayName: ctx.stash.displayName,
-    projectId: ctx.stash.projectId,
-    projectName: ctx.stash.projectName,
     teamId: ctx.stash.teamId,
-    teamName: ctx.stash.teamName
+    teamName: ctx.stash.teamName,
+    role: ctx.stash.role || 'GUEST'
   };
 }
 `.trim()),
     });
 
-    // Pipeline Resolver: guestJoinProject
-    new appsync.Resolver(this, 'GuestJoinProjectResolver', {
+    new appsync.Resolver(this, 'GuestJoinTeamResolver', {
       api: this.api,
       typeName: 'Mutation',
-      fieldName: 'guestJoinProject',
-      pipelineConfig: [validateShareCodeFn, createGuestRecordFn, createGuestTeamMembershipFn],
+      fieldName: 'guestJoinTeam',
+      pipelineConfig: [validateTeamInviteFn, createGuestTeamRecordFn, createGuestTeamMembershipFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   return {};
 }
 export function response(ctx) {
+  // If there was an error that wasn't handled by previous functions, propagate it
+  if (ctx.error) {
+    // Check if it's a ConditionalCheckFailedException that should have been handled
+    const errorType = ctx.error.type || '';
+    const errorMessage = ctx.error.message || '';
+    if (errorType === 'DynamoDB:ConditionalCheckFailedException' || 
+        errorMessage.includes('ConditionalCheckFailedException') ||
+        errorMessage.includes('conditional request failed')) {
+      // This should have been caught by createGuestTeamMembershipFn, but if it wasn't,
+      // try to construct a response from stash if available
+      if (ctx.stash && ctx.stash.cognitoIdentityId) {
+        return {
+          guestId: ctx.stash.cognitoIdentityId,
+          displayName: ctx.stash.displayName || 'Guest',
+          teamId: ctx.stash.teamId,
+          teamName: ctx.stash.teamName || null,
+          role: ctx.stash.role || 'GUEST'
+        };
+      }
+    }
+    // For other errors, propagate them
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  // Return the result from the last function (createGuestTeamMembershipFn)
+  // This will be either the success response or the handled error response
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // Pipeline resolver: Mutation.acceptTeamInvite (for authenticated users)
+    const validateTeamInviteForAcceptFn = new appsync.AppsyncFunction(this, 'ValidateTeamInviteForAcceptFn', {
+      name: 'validateTeamInviteForAccept',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.args.input.code.toUpperCase();
+  ctx.stash.code = code;
+  ctx.stash.userId = ctx.identity.sub;
+  
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const invite = ctx.result;
+  if (!invite) {
+    util.error('Invalid invitation code', 'InvalidTeamInvite');
+  }
+  
+  // Check expiration
+  const nowEpoch = util.time.nowEpochSeconds();
+  if (invite.ttl && invite.ttl < nowEpoch) {
+    util.error('Invitation code has expired', 'ExpiredTeamInvite');
+  }
+  
+  ctx.stash.teamId = invite.teamId;
+  ctx.stash.role = invite.role;
+  
+  return invite;
+}
+`.trim()),
+    });
+
+    const checkExistingMembershipFn = new appsync.AppsyncFunction(this, 'CheckExistingMembershipFn', {
+      name: 'checkExistingMembership',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.stash.userId;
+  const teamId = ctx.stash.teamId;
+  
+  // Check if membership already exists
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  // If membership exists, return it
+  if (ctx.result && ctx.result.id) {
+    return ctx.result;
+  }
+  
+  // Membership doesn't exist - stash info for next function
+  ctx.stash.membershipExists = false;
+  return null;
+}
+`.trim()),
+    });
+
+    const createTeamMembershipFn = new appsync.AppsyncFunction(this, 'CreateTeamMembershipFn', {
+      name: 'createTeamMembership',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  // If previous function returned a membership, skip creation
+  if (ctx.prev.result && ctx.prev.result.id) {
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'SKIP' }) } };
+  }
+  
+  const userId = ctx.stash.userId;
+  const teamId = ctx.stash.teamId;
+  const role = ctx.stash.role;
+  const now = util.time.nowISO8601();
+  const membershipId = teamId + '#' + userId;
+  
+  // Create new membership with condition to prevent duplicates
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: membershipId,
+      userId: userId,
+      teamId: teamId,
+      role: role,
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      gsi1pk: 'USER#' + userId,
+      gsi1sk: 'TEAM#' + teamId
+    }),
+    condition: { expression: 'attribute_not_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    // Pass error to next function if it's a ConditionalCheckFailedException
+    // (membership already exists - we'll fetch it)
+    if (ctx.error.type !== 'DynamoDB:ConditionalCheckFailedException') {
+      util.error(ctx.error.message, ctx.error.type);
+    }
+    // For ConditionalCheckFailedException, let it pass through to next function
+    return null;
+  }
+  
+  // Return membership from previous function if it existed, otherwise return created one
+  if (ctx.prev.result && ctx.prev.result.id) {
+    return ctx.prev.result;
+  }
+  
+  return ctx.result;
+}
+`.trim()),
+    });
+
+    // Function to fetch existing membership if creation failed due to race condition
+    const fetchExistingMembershipFn = new appsync.AppsyncFunction(this, 'FetchExistingMembershipFn', {
+      name: 'fetchExistingMembership',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  // Only run if previous function had a ConditionalCheckFailedException
+  const prevError = ctx.prev.error || (ctx.prev.prev && ctx.prev.prev.error);
+  if (!prevError || prevError.type !== 'DynamoDB:ConditionalCheckFailedException') {
+    // Skip - return empty query
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'SKIP' }) } };
+  }
+  
+  const userId = ctx.stash.userId;
+  const teamId = ctx.stash.teamId;
+  
+  // Fetch the existing membership
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  // If we fetched a membership (idempotent success), return it
+  if (ctx.result && ctx.result.id) {
+    return ctx.result;
+  }
+  
+  // If previous function succeeded, return its result
+  if (ctx.prev.result && ctx.prev.result.id) {
+    return ctx.prev.result;
+  }
+  
+  // Fallback: return previous result
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    new appsync.Resolver(this, 'AcceptTeamInviteResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'acceptTeamInvite',
+      pipelineConfig: [validateTeamInviteForAcceptFn, checkExistingMembershipFn, createTeamMembershipFn, fetchExistingMembershipFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) { return {}; }
+export function response(ctx) {
+  // Return the final result (either existing from check, newly created, or fetched after error)
   return ctx.prev.result;
 }
 `.trim()),
@@ -4676,7 +4055,6 @@ export function response(ctx) {
     // PIPELINE RESOLVER: guestAssignSelf
     // Step 1: Fetch component details for denormalization
     // Step 2: Create assignment with denormalized component data
-    // Step 3: Create MEMBER_ASSIGNED activity record
     // ============================================
 
     // Function 1: Fetch component details
@@ -4782,27 +4160,14 @@ export function response(ctx) {
     }
     util.error(ctx.error.message, ctx.error.type);
   }
-
+  
   const item = ctx.result;
-  const result = {
+  return {
     id: item.id,
     componentId: item.componentId,
     userId: item.guestId,
     assignedAt: item.assignedAt
   };
-
-  // Set activity data for createActivityFn
-  ctx.stash.mainResult = result;
-  ctx.stash.activityType = 'MEMBER_ASSIGNED';
-  ctx.stash.authorId = ctx.stash.guestId;
-  ctx.stash.activityMetadata = {
-    componentId: ctx.stash.componentId,
-    componentName: ctx.stash.componentName,
-    guestId: ctx.stash.guestId,
-    authorType: 'GUEST'
-  };
-
-  return result;
 }
 `.trim()),
     });
@@ -4812,7 +4177,7 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'guestAssignSelf',
-      pipelineConfig: [fetchComponentForAssignmentFn, createGuestAssignmentFn, createActivityFn],
+      pipelineConfig: [fetchComponentForAssignmentFn, createGuestAssignmentFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) {
@@ -4824,17 +4189,12 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // ============================================
-    // PIPELINE RESOLVER: guestUnassignSelf
-    // Step 1: Fetch assignment to get component details
-    // Step 2: Delete the assignment
-    // Step 3: Create MEMBER_UNASSIGNED activity record
-    // ============================================
-
-    // Function 1: Fetch assignment details for activity record
-    const fetchAssignmentForUnassignFn = new appsync.AppsyncFunction(this, 'FetchAssignmentForUnassignFn', {
+    // Resolver: Mutation.guestUnassignSelf (IAM auth) - Guest removes self from component
+    // AWS Best Practice: Verify cognitoIdentityId matches guestId (can only unassign self)
+    new appsync.Resolver(this, 'GuestUnassignSelfResolver', {
       api: this.api,
-      name: 'fetchAssignmentForUnassign',
+      typeName: 'Mutation',
+      fieldName: 'guestUnassignSelf',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -4843,100 +4203,35 @@ export function request(ctx) {
   const guestId = ctx.args.guestId;
   const componentId = ctx.args.componentId;
   const cognitoIdentityId = ctx.identity.cognitoIdentityId;
-
+  
   // Security: Verify the caller can only unassign themselves
   if (guestId !== cognitoIdentityId) {
     util.error('Access denied: You can only unassign yourself', 'Unauthorized');
   }
-
-  ctx.stash.guestId = guestId;
-  ctx.stash.componentId = componentId;
-  ctx.stash.cognitoIdentityId = cognitoIdentityId;
-
-  // Fetch assignment to get component details
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + componentId,
-      sk: 'ASSIGNEE#GUEST#' + guestId
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  const assignment = ctx.result;
-  if (!assignment) {
-    util.error('Not assigned to this component', 'NotAssigned');
-  }
-
-  // Verify ownership
-  if (assignment.cognitoIdentityId !== ctx.stash.cognitoIdentityId) {
-    util.error('Access denied: Assignment does not belong to you', 'Unauthorized');
-  }
-
-  // Store for activity creation
-  ctx.stash.componentName = assignment.componentName;
-  ctx.stash.projectId = assignment.projectId;
-
-  return assignment;
-}
-`.trim()),
-    });
-
-    // Function 2: Delete the assignment
-    const deleteGuestAssignmentFn = new appsync.AppsyncFunction(this, 'DeleteGuestAssignmentFn', {
-      api: this.api,
-      name: 'deleteGuestAssignment',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
+  
   return {
     operation: 'DeleteItem',
     key: util.dynamodb.toMapValues({
-      pk: 'COMPONENT#' + ctx.stash.componentId,
-      sk: 'ASSIGNEE#GUEST#' + ctx.stash.guestId
-    })
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    }),
+    condition: {
+      // Verify the assignment exists and belongs to this guest
+      expression: 'attribute_exists(pk) AND cognitoIdentityId = :cognitoId',
+      expressionValues: util.dynamodb.toMapValues({
+        ':cognitoId': cognitoIdentityId
+      })
+    }
   };
 }
 export function response(ctx) {
   if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Not assigned to this component or unauthorized', 'NotAssigned');
+    }
     util.error(ctx.error.message, ctx.error.type);
   }
-
-  // Set activity data for createActivityFn
-  ctx.stash.mainResult = true;
-  ctx.stash.activityType = 'MEMBER_UNASSIGNED';
-  ctx.stash.authorId = ctx.stash.guestId;
-  ctx.stash.activityMetadata = {
-    componentId: ctx.stash.componentId,
-    componentName: ctx.stash.componentName,
-    guestId: ctx.stash.guestId,
-    authorType: 'GUEST'
-  };
-
   return true;
-}
-`.trim()),
-    });
-
-    // Pipeline Resolver: guestUnassignSelf
-    new appsync.Resolver(this, 'GuestUnassignSelfResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'guestUnassignSelf',
-      pipelineConfig: [fetchAssignmentForUnassignFn, deleteGuestAssignmentFn, createActivityFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
 }
 `.trim()),
     });
@@ -5038,10 +4333,10 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-
+  
   // Return the updated component
   const item = ctx.result;
-  const result = {
+  return {
     id: item.id || ctx.stash.componentId,
     name: item.name,
     description: item.description,
@@ -5053,21 +4348,6 @@ export function response(ctx) {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt
   };
-
-  // Set activity data for createActivityFn
-  ctx.stash.mainResult = result;
-  ctx.stash.projectId = item.projectId;
-  ctx.stash.activityType = 'COMPONENT_STATUS_CHANGED';
-  ctx.stash.authorId = ctx.stash.guestId;
-  ctx.stash.activityMetadata = {
-    componentId: ctx.stash.componentId,
-    componentName: item.name,
-    oldStatus: item.status,
-    newStatus: ctx.stash.status,
-    authorType: 'GUEST'
-  };
-
-  return result;
 }
 `.trim()),
     });
@@ -5077,7 +4357,7 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'guestUpdateStatus',
-      pipelineConfig: [verifyGuestAssignmentFn, updateComponentStatusFn, createActivityFn],
+      pipelineConfig: [verifyGuestAssignmentFn, updateComponentStatusFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) {
@@ -5089,17 +4369,262 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Resolver: Query.listAssignmentsForTeamMember (Cognito auth) - Owner views member's assignments
-    new appsync.Resolver(this, 'ListAssignmentsForTeamMemberResolver', {
+    // Resolver: Mutation.guestRefineComponent (Lambda) - AI refinement for guests
+    // Passes arguments and identity context for IAM auth validation
+    new appsync.Resolver(this, 'GuestRefineComponentResolver', {
       api: this.api,
-      typeName: 'Query',
-      fieldName: 'listAssignmentsForTeamMember',
+      typeName: 'Mutation',
+      fieldName: 'guestRefineComponent',
+      dataSource: lambdaDs,
+      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson({ arguments: $ctx.arguments, identity: $ctx.identity })'),
+      responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
+    });
+
+    // Function: Verify guest assignment for component updates
+    const verifyGuestAssignmentForUpdateFn = new appsync.AppsyncFunction(this, 'VerifyGuestAssignmentForUpdateFn', {
+      api: this.api,
+      name: 'verifyGuestAssignmentForUpdate',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
-  const userId = ctx.args.userId;
+  const guestId = ctx.args.guestId;
+  const componentId = ctx.args.input.componentId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  
+  // Security: Verify the caller's identity matches the guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only update components for your own assignments', 'Unauthorized');
+  }
+  
+  // Store args for next function
+  ctx.stash.componentId = componentId;
+  ctx.stash.guestId = guestId;
+  ctx.stash.input = ctx.args.input;
+  
+  // Verify the guest is assigned to this component
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'ASSIGNEE#GUEST#' + guestId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const assignment = ctx.result;
+  if (!assignment) {
+    util.error('You must be assigned to this component to update it', 'NotAssigned');
+  }
+  
+  // Verify the assignment belongs to this identity
+  if (assignment.cognitoIdentityId && assignment.cognitoIdentityId !== ctx.identity.cognitoIdentityId) {
+    util.error('Access denied: Assignment does not belong to you', 'Unauthorized');
+  }
+  
+  ctx.stash.assignmentVerified = true;
+  return assignment;
+}
+`.trim()),
+    });
+
+    // Function: Update component fields (description, estimatedHours, priority only)
+    const updateGuestComponentFieldsFn = new appsync.AppsyncFunction(this, 'UpdateGuestComponentFieldsFn', {
+      api: this.api,
+      name: 'updateGuestComponentFields',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  const input = ctx.stash.input;
+  const now = util.time.nowISO8601();
+  
+  // Build update expression - only allow description, estimatedHours, priority
+  const expNames = { '#updatedAt': 'updatedAt' };
+  const expValues = { ':updatedAt': util.dynamodb.toDynamoDB(now) };
+  let updateExp = 'SET #updatedAt = :updatedAt';
+  
+  if (input.description !== undefined && input.description !== null) {
+    expNames['#description'] = 'description';
+    expValues[':description'] = util.dynamodb.toDynamoDB(input.description);
+    updateExp += ', #description = :description';
+  }
+  
+  if (input.estimatedHours !== undefined && input.estimatedHours !== null) {
+    expNames['#estimatedHours'] = 'estimatedHours';
+    expValues[':estimatedHours'] = util.dynamodb.toDynamoDB(input.estimatedHours);
+    updateExp += ', #estimatedHours = :estimatedHours';
+  }
+  
+  if (input.priority !== undefined && input.priority !== null) {
+    expNames['#priority'] = 'priority';
+    expValues[':priority'] = util.dynamodb.toDynamoDB(input.priority);
+    updateExp += ', #priority = :priority';
+  }
+  
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: updateExp,
+      expressionNames: expNames,
+      expressionValues: util.dynamodb.toMapValues(expValues)
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  // Return the updated component
+  const item = ctx.result;
+  return {
+    id: item.id || ctx.stash.componentId,
+    name: item.name,
+    description: item.description,
+    type: item.type,
+    status: item.status,
+    projectId: item.projectId,
+    parentId: item.parentId,
+    estimatedHours: item.estimatedHours,
+    priority: item.priority,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  };
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: guestUpdateComponent
+    new appsync.Resolver(this, 'GuestUpdateComponentResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestUpdateComponent',
+      pipelineConfig: [verifyGuestAssignmentForUpdateFn, updateGuestComponentFieldsFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // Pipeline functions for listAssignmentsForTeamMember
+    // Function 1: Verify caller is team member and get team projects
+    const verifyTeamMemberForAssignmentsFn = new appsync.AppsyncFunction(this, 'VerifyTeamMemberForAssignmentsFn', {
+      name: 'verifyTeamMemberForAssignments',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const callerId = ctx.identity.sub;
+  const teamId = ctx.args.teamId;
+  const targetUserId = ctx.args.userId;
+  
+  // Store args for next functions
+  ctx.stash.teamId = teamId;
+  ctx.stash.targetUserId = targetUserId;
+  ctx.stash.callerId = callerId;
+  
+  // Verify caller is a member of the team
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + callerId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const callerMembership = ctx.result;
+  if (!callerMembership) {
+    util.error('You must be a member of this team to view member assignments', 'Unauthorized');
+  }
+  
+  // Allow if OWNER/ADMIN OR viewing own assignments
+  const callerRole = callerMembership.role;
+  const isViewingSelf = ctx.stash.callerId === ctx.stash.targetUserId;
+  const isOwnerOrAdmin = callerRole === 'OWNER' || callerRole === 'ADMIN';
+  
+  if (!isViewingSelf && !isOwnerOrAdmin) {
+    util.error('Only team owners and admins can view other members\' assignments', 'Forbidden');
+  }
+  
+  ctx.stash.authorized = true;
+  return callerMembership;
+}
+`.trim()),
+    });
+
+    // Function 2: Get team projects to filter assignments
+    const getTeamProjectsFn = new appsync.AppsyncFunction(this, 'GetTeamProjectsFn', {
+      name: 'getTeamProjects',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+  
+  // Query GSI2 for team's projects (gsi2pk=TEAM#teamId, gsi2sk=PROJECT#projectId)
+  return {
+    operation: 'Query',
+    index: 'gsi2',
+    query: {
+      expression: 'gsi2pk = :pk AND begins_with(gsi2sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId,
+        ':sk': 'PROJECT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const projects = ctx.result.items || [];
+  const projectIds = projects.map(p => p.id).filter(Boolean);
+  ctx.stash.teamProjectIds = projectIds;
+  
+  return projects;
+}
+`.trim()),
+    });
+
+    // Function 3: Query user's assignments
+    const queryAssignmentsForTeamMemberFn = new appsync.AppsyncFunction(this, 'QueryAssignmentsForTeamMemberFn', {
+      name: 'queryAssignmentsForTeamMember',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const targetUserId = ctx.stash.targetUserId;
+  
   // Query GSI1 for user's assignments
   return {
     operation: 'Query',
@@ -5107,7 +4632,7 @@ export function request(ctx) {
     query: {
       expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
       expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'USER#' + userId,
+        ':pk': 'USER#' + targetUserId,
         ':sk': 'ASSIGNMENT#'
       })
     }
@@ -5117,644 +4642,118 @@ export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-  // Map to AssignmentWithComponent format
-  // Filter out records without projectId (required field)
-  const items = (ctx.result.items || []).filter(item => item.projectId);
-  return items.map(item => ({
-    assignment: {
-      id: item.id,
-      componentId: item.componentId,
-      userId: item.userId,
-      assignedAt: item.assignedAt
-    },
-    component: {
-      id: item.componentId,
-      name: item.componentName || 'Component',
-      status: item.componentStatus || 'PLANNING',
-      type: item.componentType || 'TASK',
-      projectId: item.projectId
+  
+  const assignments = ctx.result.items || [];
+  const teamProjectIds = ctx.stash.teamProjectIds || [];
+  
+  // Filter assignments to only those in team's projects
+  // We'll filter after batch-getting components (in next function)
+  ctx.stash.assignments = assignments;
+  ctx.stash.teamProjectIds = teamProjectIds;
+  
+  return assignments;
+}
+`.trim()),
+    });
+
+    // Function 4: Batch-get component details and filter by team projects
+    const batchGetTeamMemberComponentsFn = new appsync.AppsyncFunction(this, 'BatchGetTeamMemberComponentsFn', {
+      name: 'batchGetTeamMemberComponents',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const assignments = ctx.stash.assignments || [];
+  if (assignments.length === 0) {
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  }
+  const keys = assignments.map(a => util.dynamodb.toMapValues({ pk: 'COMPONENT#' + a.componentId, sk: 'METADATA' }));
+  return {
+    operation: 'BatchGetItem',
+    tables: {
+      '#{tableName}': { keys: keys }
     }
-  }));
-}
-`.trim()),
-    });
-
-    // ============================================
-    // Team Invite Code Resolvers
-    // For inviting authenticated users to join teams
-    // ============================================
-
-    // Function: Verify user is team owner/admin and prepare invite data
-    const verifyTeamOwnerAdminFn = new appsync.AppsyncFunction(this, 'VerifyTeamOwnerAdminFn', {
-      api: this.api,
-      name: 'verifyTeamOwnerAdmin',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const input = ctx.args.input;
-  const userId = ctx.identity.sub;
-  const teamId = input.teamId;
-  const role = input.role || 'MEMBER';
-  const expiresInHours = input.expiresInHours || 168; // 7 days default
-  const maxUses = input.maxUses || null;
-
-  // Generate 8-character alphanumeric code
-  const code = util.autoId().substring(0, 8).toUpperCase();
-  const now = util.time.nowISO8601();
-  const ttlSeconds = util.time.nowEpochSeconds() + (expiresInHours * 3600);
-  const expiresAt = util.time.epochMilliSecondsToISO8601(ttlSeconds * 1000);
-
-  // Store in stash for next function
-  ctx.stash.code = code;
-  ctx.stash.teamId = teamId;
-  ctx.stash.role = role;
-  ctx.stash.expiresAt = expiresAt;
-  ctx.stash.createdAt = now;
-  ctx.stash.createdBy = userId;
-  ctx.stash.maxUses = maxUses;
-  ctx.stash.ttlSeconds = ttlSeconds;
-
-  // Check if user is owner/admin of the team
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM#' + teamId,
-      sk: 'MEMBER#' + userId
-    })
   };
 }
 export function response(ctx) {
   if (ctx.error) {
     util.error(ctx.error.message, ctx.error.type);
   }
-
-  const membership = ctx.result;
-  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    util.error('Only team owners and admins can generate invite codes', 'Unauthorized');
+  
+  const assignments = ctx.stash.assignments || [];
+  const teamProjectIds = ctx.stash.teamProjectIds || [];
+  const components = ctx.result.data ? (ctx.result.data['#{tableName}'] || []) : [];
+  
+  // Build component map
+  const componentMap = {};
+  for (const comp of components) {
+    if (comp && comp.id) {
+      componentMap[comp.id] = comp;
+    }
   }
-
-  // Store team name from membership for denormalization
-  ctx.stash.teamName = membership.teamName || 'Team';
-
-  return ctx.result;
-}
-`.trim()),
-    });
-
-    // Function: Create the team invite code record
-    const createTeamInviteCodeFn = new appsync.AppsyncFunction(this, 'CreateTeamInviteCodeFn', {
-      api: this.api,
-      name: 'createTeamInviteCode',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const code = ctx.stash.code;
-  const teamId = ctx.stash.teamId;
-  const role = ctx.stash.role;
-  const expiresAt = ctx.stash.expiresAt;
-  const createdAt = ctx.stash.createdAt;
-  const createdBy = ctx.stash.createdBy;
-  const maxUses = ctx.stash.maxUses;
-  const teamName = ctx.stash.teamName;
-  const ttlSeconds = ctx.stash.ttlSeconds;
-
-  return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM_INVITE#' + code,
-      sk: 'METADATA'
-    }),
-    attributeValues: util.dynamodb.toMapValues({
-      code: code,
-      teamId: teamId,
-      teamName: teamName,
-      role: role,
-      expiresAt: expiresAt,
-      createdAt: createdAt,
-      createdBy: createdBy,
-      usageCount: 0,
-      maxUses: maxUses,
-      ttl: ttlSeconds,
-      gsi1pk: 'TEAM#' + teamId,
-      gsi1sk: 'TEAM_INVITE#' + code
+  
+  // Map assignments to AssignmentWithComponent format
+  // Filter to only assignments in team's projects
+  return assignments
+    .map(a => {
+      const component = componentMap[a.componentId];
+      if (!component) return null;
+      
+      // Filter: only include assignments for components in team's projects
+      if (!teamProjectIds.includes(component.projectId)) {
+        return null;
+      }
+      
+      return {
+        assignment: {
+          id: a.id,
+          componentId: a.componentId,
+          userId: a.userId,
+          assignedAt: a.assignedAt
+        },
+        component: {
+          id: component.id,
+          name: component.name,
+          description: component.description,
+          type: component.type,
+          projectId: component.projectId,
+          parentId: component.parentId,
+          sprintId: component.sprintId,
+          status: component.status,
+          priority: component.priority,
+          estimatedHours: component.estimatedHours,
+          actualHours: component.actualHours,
+          dueDate: component.dueDate,
+          owner: component.owner,
+          tags: component.tags,
+          createdAt: component.createdAt,
+          updatedAt: component.updatedAt
+        }
+      };
     })
-  };
+    .filter(item => item !== null);
 }
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  return {
-    code: ctx.stash.code,
-    teamId: ctx.stash.teamId,
-    teamName: ctx.stash.teamName,
-    role: ctx.stash.role,
-    expiresAt: ctx.stash.expiresAt,
-    createdAt: ctx.stash.createdAt,
-    createdBy: ctx.stash.createdBy,
-    usageCount: 0,
-    maxUses: ctx.stash.maxUses
-  };
-}
-`.trim()),
+`.trim().replace(/#{tableName}/g, dynamoTable.tableName)),
     });
 
-    // Pipeline Resolver: Mutation.generateTeamInvite
-    new appsync.Resolver(this, 'GenerateTeamInviteResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'generateTeamInvite',
-      pipelineConfig: [verifyTeamOwnerAdminFn, createTeamInviteCodeFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
-}
-`.trim()),
-    });
-
-    // Resolver: Query.validateTeamInvite - Check if invite code is valid
-    new appsync.Resolver(this, 'ValidateTeamInviteResolver', {
+    // Resolver: Query.listAssignmentsForTeamMember (Pipeline) - Verify authorization → Get team projects → Query assignments → Batch-get components
+    new appsync.Resolver(this, 'ListAssignmentsForTeamMemberResolver', {
       api: this.api,
       typeName: 'Query',
-      fieldName: 'validateTeamInvite',
-      dataSource: dynamoDs,
+      fieldName: 'listAssignmentsForTeamMember',
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const code = ctx.args.code.toUpperCase();
-
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM_INVITE#' + code,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    return { valid: false, message: 'Error checking invite code' };
-  }
-
-  const invite = ctx.result;
-  if (!invite) {
-    return { valid: false, message: 'Invalid invite code' };
-  }
-
-  // Check expiration
-  const nowEpoch = util.time.nowEpochSeconds();
-  if (invite.ttl && invite.ttl < nowEpoch) {
-    return { valid: false, message: 'Invite code has expired' };
-  }
-
-  // Check max uses
-  if (invite.maxUses && invite.usageCount >= invite.maxUses) {
-    return { valid: false, message: 'Invite code has reached maximum uses' };
-  }
-
-  return {
-    valid: true,
-    teamId: invite.teamId,
-    teamName: invite.teamName,
-    role: invite.role,
-    message: null
-  };
-}
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
 `.trim()),
-    });
-
-    // Function: Verify user is team owner/admin before listing invite codes
-    const verifyTeamOwnerAdminForListFn = new appsync.AppsyncFunction(this, 'VerifyTeamOwnerAdminForListFn', {
-      api: this.api,
-      name: 'verifyTeamOwnerAdminForList',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const teamId = ctx.args.teamId;
-  const userId = ctx.identity.sub;
-
-  ctx.stash.teamId = teamId;
-
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM#' + teamId,
-      sk: 'MEMBER#' + userId
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  const membership = ctx.result;
-  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    util.error('Only team owners and admins can list invite codes', 'Unauthorized');
-  }
-
-  return membership;
-}
-`.trim()),
-    });
-
-    // Function: Query team invite codes
-    const queryTeamInvitesFn = new appsync.AppsyncFunction(this, 'QueryTeamInvitesFn', {
-      api: this.api,
-      name: 'queryTeamInvites',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const teamId = ctx.stash.teamId;
-
-  return {
-    operation: 'Query',
-    index: 'gsi1',
-    query: {
-      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
-      expressionValues: util.dynamodb.toMapValues({
-        ':pk': 'TEAM#' + teamId,
-        ':sk': 'TEAM_INVITE#'
-      })
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  const nowEpoch = util.time.nowEpochSeconds();
-
-  // Filter out expired codes and map to output format
-  return (ctx.result.items || [])
-    .filter(item => !item.ttl || item.ttl >= nowEpoch)
-    .map(item => ({
-      code: item.code,
-      teamId: item.teamId,
-      teamName: item.teamName,
-      role: item.role,
-      expiresAt: item.expiresAt,
-      createdAt: item.createdAt,
-      createdBy: item.createdBy,
-      usageCount: item.usageCount || 0,
-      maxUses: item.maxUses
-    }));
-}
-`.trim()),
-    });
-
-    // Pipeline Resolver: Query.listTeamInviteCodes - List active invite codes for a team (owner/admin only)
-    // Security: Verifies user is OWNER/ADMIN of the team before listing codes
-    new appsync.Resolver(this, 'ListTeamInviteCodesResolver', {
-      api: this.api,
-      typeName: 'Query',
-      fieldName: 'listTeamInviteCodes',
-      pipelineConfig: [verifyTeamOwnerAdminForListFn, queryTeamInvitesFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
-}
-`.trim()),
-    });
-
-    // Function: Validate invite code and prepare join data
-    const validateInviteCodeFn = new appsync.AppsyncFunction(this, 'ValidateInviteCodeFn', {
-      api: this.api,
-      name: 'validateInviteCode',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const code = ctx.args.code.toUpperCase();
-  const userId = ctx.identity.sub;
-
-  ctx.stash.code = code;
-  ctx.stash.userId = userId;
-
-  // Get the invite code to validate it
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM_INVITE#' + code,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  const invite = ctx.result;
-  if (!invite) {
-    util.error('Invalid invite code', 'InvalidInviteCode');
-  }
-
-  // Check expiration
-  const nowEpoch = util.time.nowEpochSeconds();
-  if (invite.ttl && invite.ttl < nowEpoch) {
-    util.error('Invite code has expired', 'ExpiredInviteCode');
-  }
-
-  // Check max uses
-  if (invite.maxUses && invite.usageCount >= invite.maxUses) {
-    util.error('Invite code has reached maximum uses', 'MaxUsesReached');
-  }
-
-  // Store invite info for next step
-  ctx.stash.teamId = invite.teamId;
-  ctx.stash.teamName = invite.teamName;
-  ctx.stash.role = invite.role;
-  ctx.stash.usageCount = invite.usageCount || 0;
-
-  return invite;
-}
-`.trim()),
-    });
-
-    // Function: Create membership record
-    const createTeamMembershipFromInviteFn = new appsync.AppsyncFunction(this, 'CreateTeamMembershipFromInviteFn', {
-      api: this.api,
-      name: 'createTeamMembershipFromInvite',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const userId = ctx.stash.userId;
-  const teamId = ctx.stash.teamId;
-  const role = ctx.stash.role;
-  const now = util.time.nowISO8601();
-  const membershipId = util.autoId();
-
-  ctx.stash.membershipId = membershipId;
-  ctx.stash.joinedAt = now;
-
-  // Create membership with condition to prevent duplicates
-  return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM#' + teamId,
-      sk: 'MEMBER#' + userId
-    }),
-    attributeValues: util.dynamodb.toMapValues({
-      id: membershipId,
-      userId: userId,
-      teamId: teamId,
-      role: role,
-      joinedAt: now,
-      hoursPerDay: 6,
-      availability: 100,
-      gsi1pk: 'USER#' + userId,
-      gsi1sk: 'TEAM#' + teamId
-    }),
-    condition: {
-      expression: 'attribute_not_exists(pk)'
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    if (ctx.error.type === 'ConditionalCheckFailedException') {
-      util.error('You are already a member of this team', 'AlreadyMember');
-    }
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  return {
-    id: ctx.stash.membershipId,
-    userId: ctx.stash.userId,
-    teamId: ctx.stash.teamId,
-    role: ctx.stash.role,
-    joinedAt: ctx.stash.joinedAt,
-    hoursPerDay: 6,
-    availability: 100
-  };
-}
-`.trim()),
-    });
-
-    // Function to increment usage count on invite code
-    const incrementInviteUsageCountFn = new appsync.AppsyncFunction(this, 'IncrementInviteUsageCountFn', {
-      api: this.api,
-      name: 'incrementInviteUsageCount',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const code = ctx.stash.code;
-
-  return {
-    operation: 'UpdateItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM_INVITE#' + code,
-      sk: 'METADATA'
-    }),
-    update: {
-      expression: 'SET usageCount = usageCount + :one',
-      expressionValues: util.dynamodb.toMapValues({
-        ':one': 1
-      })
-    }
-  };
-}
-export function response(ctx) {
-  // Return the membership from previous function
-  return ctx.prev.result;
-}
-`.trim()),
-    });
-
-    // Pipeline Resolver: Mutation.joinTeamWithCode
-    new appsync.Resolver(this, 'JoinTeamWithCodeResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'joinTeamWithCode',
-      pipelineConfig: [validateInviteCodeFn, createTeamMembershipFromInviteFn, incrementInviteUsageCountFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
-}
-`.trim()),
-    });
-
-    // Function: Fetch invite code and extract teamId for authorization
-    const fetchInviteForRevokeFn = new appsync.AppsyncFunction(this, 'FetchInviteForRevokeFn', {
-      api: this.api,
-      name: 'fetchInviteForRevoke',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const code = ctx.args.code.toUpperCase();
-  ctx.stash.code = code;
-  ctx.stash.userId = ctx.identity.sub;
-
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM_INVITE#' + code,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  const invite = ctx.result;
-  if (!invite) {
-    util.error('Invite code not found', 'NotFound');
-  }
-
-  ctx.stash.teamId = invite.teamId;
-  return invite;
-}
-`.trim()),
-    });
-
-    // Function: Verify user is team owner/admin before allowing revoke
-    const verifyTeamOwnerAdminForRevokeFn = new appsync.AppsyncFunction(this, 'VerifyTeamOwnerAdminForRevokeFn', {
-      api: this.api,
-      name: 'verifyTeamOwnerAdminForRevoke',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const teamId = ctx.stash.teamId;
-  const userId = ctx.stash.userId;
-
-  return {
-    operation: 'GetItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM#' + teamId,
-      sk: 'MEMBER#' + userId
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-
-  const membership = ctx.result;
-  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    util.error('Only team owners and admins can revoke invite codes', 'Unauthorized');
-  }
-
-  return membership;
-}
-`.trim()),
-    });
-
-    // Function: Delete the team invite code
-    const deleteTeamInviteFn = new appsync.AppsyncFunction(this, 'DeleteTeamInviteFn', {
-      api: this.api,
-      name: 'deleteTeamInvite',
-      dataSource: dynamoDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  return {
-    operation: 'DeleteItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM_INVITE#' + ctx.stash.code,
-      sk: 'METADATA'
-    })
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  return true;
-}
-`.trim()),
-    });
-
-    // Pipeline Resolver: Mutation.revokeTeamInvite - Delete invite code (owner/admin only)
-    // Security: Verifies user is OWNER/ADMIN of the team before allowing revoke
-    new appsync.Resolver(this, 'RevokeTeamInviteResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'revokeTeamInvite',
-      pipelineConfig: [fetchInviteForRevokeFn, verifyTeamOwnerAdminForRevokeFn, deleteTeamInviteFn],
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-export function request(ctx) {
-  return {};
-}
-export function response(ctx) {
-  return ctx.prev.result;
-}
-`.trim()),
-    });
-
-    // ============================================
-    // RESOLVER: migrateGuestToUser (Lambda)
-    // ============================================
-
-    // Resolver: Mutation.migrateGuestToUser - Migrate guest data to authenticated user
-    new appsync.Resolver(this, 'MigrateGuestToUserResolver', {
-      api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'migrateGuestToUser',
-      dataSource: lambdaDs,
-      runtime: appsync.FunctionRuntime.JS_1_0_0,
-      code: appsync.Code.fromInline(`
-import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  // Get the authenticated user ID from Cognito
-  const userId = ctx.identity.sub || ctx.identity.username;
-  if (!userId) {
-    util.error('Not authenticated', 'Unauthorized');
-  }
-
-  return {
-    operation: 'Invoke',
-    payload: {
-      guestId: ctx.args.guestId,
-      teamId: ctx.args.teamId,
-      userId: userId
-    }
-  };
-}
-export function response(ctx) {
-  if (ctx.error) {
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  return ctx.result;
-}
-`.trim()),
+      pipelineConfig: [
+        verifyTeamMemberForAssignmentsFn,
+        getTeamProjectsFn,
+        queryAssignmentsForTeamMemberFn,
+        batchGetTeamMemberComponentsFn,
+      ],
     });
 
     new CfnOutput(this, 'GraphQLApiUrl', {

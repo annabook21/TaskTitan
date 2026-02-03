@@ -8,24 +8,29 @@ const userPoolClientId = import.meta.env.VITE_USER_POOL_CLIENT_ID;
 const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
 const apiKey = import.meta.env.VITE_APPSYNC_API_KEY;
 const identityPoolId = import.meta.env.VITE_IDENTITY_POOL_ID;
-const appOrigin = import.meta.env.VITE_APP_ORIGIN || (typeof window !== 'undefined' ? window.location.origin : '');
 
 export const config = {
   Auth: {
     Cognito: {
       userPoolId: userPoolId || '',
       userPoolClientId: userPoolClientId || '',
-      // Identity Pool for guest (unauthenticated) access via share codes
-      // AWS Best Practice: Use Identity Pool with IAM for temporary guest credentials
       identityPoolId: identityPoolId || '',
-      // Enable guest access for Amplify v6 to use unauthenticated Identity Pool credentials
-      // Reference: https://docs.amplify.aws/gen2/build-a-backend/auth/connect-your-frontend/guest-access/
       allowGuestAccess: true,
       loginWith: {
         oauth: {
           domain: cognitoDomain || '',
-          redirectSignIn: [appOrigin ? `${appOrigin}/auth-callback` : 'http://localhost:5173/auth-callback'],
-          redirectSignOut: [appOrigin || 'http://localhost:5173'],
+          // AWS Amplify requires ALL possible redirect URLs in array
+          // Amplify automatically selects the correct one based on current origin
+          redirectSignIn: [
+            'http://localhost:5173/auth-callback',
+            'https://dxbbappo989sa.cloudfront.net/auth-callback',
+            'https://tasktitan.live/auth-callback',
+          ],
+          redirectSignOut: [
+            'http://localhost:5173',
+            'https://dxbbappo989sa.cloudfront.net',
+            'https://tasktitan.live',
+          ],
           responseType: 'code' as const,
           scopes: ['profile', 'openid', 'email', 'aws.cognito.signin.user.admin'],
         },

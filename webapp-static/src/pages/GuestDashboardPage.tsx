@@ -31,6 +31,7 @@ import {
   ListTodo,
   User,
   LogOut,
+  LogIn,
   Loader2,
   Plus,
   Minus,
@@ -42,6 +43,7 @@ import {
   Sparkles,
   GitBranch,
 } from 'lucide-react';
+import { signInWithRedirect } from 'aws-amplify/auth';
 import { GuestNotificationBell } from '../components/GuestNotificationBell';
 import { GuestActivityFeed } from '../components/GuestActivityFeed';
 import { GuestCommentSection } from '../components/GuestCommentSection';
@@ -239,6 +241,18 @@ export function GuestDashboardPage() {
     navigate('/join');
   };
 
+  const handleSignIn = () => {
+    // Store guest info for migration after sign-in
+    if (guestSession) {
+      localStorage.setItem('pendingGuestMigration', JSON.stringify({
+        guestId: guestSession.guestId,
+        teamId: guestSession.teamId,
+      }));
+    }
+    // Redirect to sign-in
+    signInWithRedirect();
+  };
+
   const handleRefresh = () => {
     loadData();
   };
@@ -308,6 +322,14 @@ export function GuestDashboardPage() {
               <User className="w-4 h-4" />
               <span>{guestSession.displayName}</span>
             </div>
+            <button
+              onClick={handleSignIn}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors"
+              title="Sign in to keep your progress"
+            >
+              <LogIn className="w-4 h-4" />
+              Sign In
+            </button>
             <button
               onClick={handleLeave}
               className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-400 hover:text-white transition-colors"

@@ -26,7 +26,9 @@ import { PrivacyPage } from './pages/PrivacyPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { JoinPage } from './pages/JoinPage';
+import { AcceptTeamInvitePage } from './pages/AcceptTeamInvitePage';
 import { GuestDashboardPage } from './pages/GuestDashboardPage';
+import { JoinTeamPage } from './pages/JoinTeamPage';
 
 export default function App() {
   return (
@@ -42,8 +44,12 @@ export default function App() {
           <Route path="privacy" element={<PrivacyPage />} />
 
           {/* Guest routes (share code access via Cognito Identity Pool) */}
-          <Route path="join" element={<JoinPage />} />
+          <Route path="join/:shareCode" element={<JoinPage />} />
           <Route path="guest" element={<GuestDashboardPage />} />
+
+          {/* Team invite routes (guest access supported) */}
+          <Route path="join-team" element={<AcceptTeamInvitePage />} />
+          <Route path="team/join/:inviteCode" element={<JoinTeamPage />} />
 
           {/* Protected routes (auth required) */}
           <Route element={<ProtectedRoute />}>

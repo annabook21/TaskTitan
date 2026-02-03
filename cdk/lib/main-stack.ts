@@ -100,17 +100,17 @@ export class MainStack extends Stack {
       webAclArn: props.webAclArn,
     });
 
-    // Configure Cognito OAuth callback URLs for CloudFront + local dev + custom domain
+    // Configure Cognito OAuth callback URLs for CloudFront + custom domain + local dev
     auth.updateAllowedCallbackUrls(
       [
         `${staticFrontend.distributionUrl}/auth-callback`,
-        'http://localhost:5173/auth-callback', // Vite dev server
         'https://tasktitan.live/auth-callback', // Custom domain
+        'http://localhost:5173/auth-callback', // Vite dev server
       ],
       [
         staticFrontend.distributionUrl,
-        'http://localhost:5173',
         'https://tasktitan.live',
+        'http://localhost:5173',
       ],
     );
 

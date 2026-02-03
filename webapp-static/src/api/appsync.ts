@@ -82,8 +82,11 @@ export type Membership = {
   hoursPerDay?: number | null;
   availability?: number | null;
   user?: User | null;
+  // Guest-specific fields (populated when role=GUEST)
   displayName?: string | null; // For guest members (when userId starts with "GUEST#")
   projectId?: string | null; // For guest members from project share codes
+  isGuest?: boolean | null;
+  guestName?: string | null;
 };
 
 export type TeamWithMembers = {
@@ -3054,7 +3057,7 @@ export async function guestUpdateComponent(
  * Used by owners/admins to view member workload.
  */
 export async function listAssignmentsForTeamMember(
-  teamId: string, 
+  teamId: string,
   userId: string
 ): Promise<AssignmentWithComponent[]> {
   const result = await getClient().graphql({
@@ -3064,3 +3067,284 @@ export async function listAssignmentsForTeamMember(
   extractGraphQLError(result, 'listAssignmentsForTeamMember');
   return (result as { data: { listAssignmentsForTeamMember: AssignmentWithComponent[] } }).data.listAssignmentsForTeamMember || [];
 }
+
+// ============================================
+// Team Invite Code API Functions
+// ============================================
+
+export type TeamInviteCode = {
+  code: string;
+  teamId: string;
+  teamName: string;
+  role: MemberRole;
+  expiresAt: string;
+  createdAt: string;
+  createdBy: string;
+  usageCount: number;
+  maxUses?: number | null;
+};
+
+export type TeamInviteValidation = {
+  valid: boolean;
+  teamId?: string | null;
+  teamName?: string | null;
+  role?: MemberRole | null;
+  message?: string | null;
+};
+
+export type TeamInviteInfo = {
+  valid: boolean;
+  teamId: string | null;
+  teamName: string | null;
+  role: MemberRole | null;
+  expiresAt: string | null;
+};
+
+export type GuestTeamSession = {
+  guestId: string;
+  displayName: string;
+  teamId: string;
+  teamName: string | null;
+  role: MemberRole;
+};
+
+export type GuestJoinTeamInput = {
+  code: string;
+  displayName: string;
+};
+
+export type AcceptTeamInviteInput = {
+  code: string;
+};
+
+export type GenerateTeamInviteInput = {
+  teamId: string;
+  role?: MemberRole;
+  expiresInHours?: number;
+  maxUses?: number | null;
+};
+
+const GenerateTeamInvite = /* GraphQL */ `
+  mutation GenerateTeamInvite($input: GenerateTeamInviteInput!) {
+    generateTeamInvite(input: $input) {
+      code
+      teamId
+      teamName
+      role
+      expiresAt
+      createdAt
+      createdBy
+      usageCount
+      maxUses
+    }
+  }
+`;
+
+const ValidateTeamInvite = /* GraphQL */ `
+  query ValidateTeamInvite($code: String!) {
+    validateTeamInvite(code: $code) {
+      valid
+      teamId
+      teamName
+      role
+    }
+  }
+`;
+
+const ListTeamInviteCodes = /* GraphQL */ `
+  query ListTeamInviteCodes($teamId: ID!) {
+    listTeamInviteCodes(teamId: $teamId) {
+      code
+      teamId
+      teamName
+      role
+      expiresAt
+      createdAt
+      createdBy
+      usageCount
+      maxUses
+    }
+  }
+`;
+
+const JoinTeamWithCode = /* GraphQL */ `
+  mutation JoinTeamWithCode($code: String!) {
+    joinTeamWithCode(code: $code) {
+      id
+      userId
+      teamId
+      role
+      joinedAt
+      hoursPerDay
+      availability
+    }
+  }
+`;
+
+const RevokeTeamInvite = /* GraphQL */ `
+  mutation RevokeTeamInvite($code: String!) {
+    revokeTeamInvite(code: $code)
+  }
+`;
+
+/**
+ * Generate a team invite code (Cognito auth - owner/admin only).
+ */
+export async function generateTeamInvite(input: GenerateTeamInviteInput): Promise<TeamInviteCode> {
+  const result = await getClient().graphql({
+    query: GenerateTeamInvite,
+    variables: { input },
+  });
+  extractGraphQLError(result, 'generateTeamInvite');
+  const code = (result as { data: { generateTeamInvite: TeamInviteCode } }).data.generateTeamInvite;
+  if (!code) throw new Error('generateTeamInvite returned null');
+  return code;
+}
+
+/**
+ * Validate a team invite code (unauthenticated - uses API_KEY auth).
+ * Returns validation result with team info if valid.
+ */
+export async function validateTeamInvite(code: string): Promise<TeamInviteInfo> {
+  const result = await getClient().graphql({
+    query: ValidateTeamInvite,
+    variables: { code },
+    authMode: 'apiKey',
+  });
+  extractGraphQLError(result, 'validateTeamInvite');
+  const validation = (result as { data: { validateTeamInvite: { valid: boolean; teamId?: string | null; teamName?: string | null; role?: MemberRole | null; expiresAt?: string | null; message?: string | null } } }).data.validateTeamInvite;
+  // Convert to TeamInviteInfo format
+  return {
+    valid: validation.valid,
+    teamId: validation.teamId || null,
+    teamName: validation.teamName || null,
+    role: validation.role || null,
+    expiresAt: validation.expiresAt || null,
+  };
+}
+
+/**
+ * List active invite codes for a team (Cognito auth - owner/admin only).
+ */
+export async function listTeamInviteCodes(teamId: string): Promise<TeamInviteCode[]> {
+  const result = await getClient().graphql({
+    query: ListTeamInviteCodes,
+    variables: { teamId },
+  });
+  extractGraphQLError(result, 'listTeamInviteCodes');
+  return (result as { data: { listTeamInviteCodes: TeamInviteCode[] } }).data.listTeamInviteCodes || [];
+}
+
+/**
+ * Join a team using an invite code (Cognito auth).
+ */
+export async function joinTeamWithCode(code: string): Promise<Membership> {
+  const result = await getClient().graphql({
+    query: JoinTeamWithCode,
+    variables: { code },
+  });
+  extractGraphQLError(result, 'joinTeamWithCode');
+  const membership = (result as { data: { joinTeamWithCode: Membership } }).data.joinTeamWithCode;
+  if (!membership) throw new Error('joinTeamWithCode returned null');
+  return membership;
+}
+
+/**
+ * Revoke a team invite code (Cognito auth - owner/admin only).
+ */
+export async function revokeTeamInvite(code: string): Promise<boolean> {
+  const result = await getClient().graphql({
+    query: RevokeTeamInvite,
+    variables: { code },
+  });
+  extractGraphQLError(result, 'revokeTeamInvite');
+  return (result as { data: { revokeTeamInvite: boolean } }).data.revokeTeamInvite;
+}
+
+const GuestJoinTeam = /* GraphQL */ `
+  mutation GuestJoinTeam($input: GuestJoinTeamInput!) {
+    guestJoinTeam(input: $input) {
+      guestId
+      displayName
+      teamId
+      teamName
+      role
+    }
+  }
+`;
+
+const AcceptTeamInvite = /* GraphQL */ `
+  mutation AcceptTeamInvite($input: AcceptTeamInviteInput!) {
+    acceptTeamInvite(input: $input) {
+      id
+      userId
+      teamId
+      role
+      joinedAt
+      title
+    }
+  }
+`;
+
+/**
+ * Join a team as a guest using an invitation code (IAM auth via Identity Pool).
+ * Creates a guest team session and returns guestId for subsequent operations.
+ */
+export async function guestJoinTeam(input: GuestJoinTeamInput): Promise<GuestTeamSession> {
+  const result = await getClient().graphql({
+    query: GuestJoinTeam,
+    variables: { input },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestJoinTeam');
+  const session = (result as { data: { guestJoinTeam: GuestTeamSession } }).data.guestJoinTeam;
+  if (!session) throw new Error('guestJoinTeam returned null');
+  return session;
+}
+
+/**
+ * Accept a team invitation as an authenticated user (Cognito auth required).
+ * Adds the user as a team member with the role from the invitation.
+ */
+export async function acceptTeamInvite(input: AcceptTeamInviteInput): Promise<Membership> {
+  const result = await getClient().graphql({
+    query: AcceptTeamInvite,
+    variables: { input },
+  });
+  extractGraphQLError(result, 'acceptTeamInvite');
+  const membership = (result as { data: { acceptTeamInvite: Membership } }).data.acceptTeamInvite;
+  if (!membership) throw new Error('acceptTeamInvite returned null');
+  return membership;
+}
+
+// ============================================
+// Guest Migration
+// ============================================
+
+export type MigrationResult = {
+  success: boolean;
+  migratedAssignments: number;
+  migratedComments: number;
+  message: string | null;
+};
+
+const MigrateGuestToUser = /* GraphQL */ `
+  mutation MigrateGuestToUser($guestId: ID!, $teamId: ID!) {
+    migrateGuestToUser(guestId: $guestId, teamId: $teamId) {
+      success
+      migratedAssignments
+      migratedComments
+      message
+    }
+  }
+`;
+
+export async function migrateGuestToUser(guestId: string, teamId: string): Promise<MigrationResult> {
+  const result = await getClient().graphql({
+    query: MigrateGuestToUser,
+    variables: { guestId, teamId },
+  });
+  extractGraphQLError(result, 'migrateGuestToUser');
+  return (result as { data: { migrateGuestToUser: MigrationResult } }).data.migrateGuestToUser;
+}
+

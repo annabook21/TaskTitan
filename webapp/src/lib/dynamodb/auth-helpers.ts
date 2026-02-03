@@ -71,18 +71,15 @@ export async function verifyTeamMembership(
   const { team, membership } = getEntities();
 
   try {
-    // Query membership by team and user
-    const membershipResult = await membership.query
-      .primary({ teamId })
-      .where(({ userId: memberId }, { eq }) => eq(memberId, userId))
-      .go();
+    // Get membership directly using composite primary key
+    const membershipResult = await membership.get({ teamId, userId }).go();
 
-    if (!membershipResult.data || membershipResult.data.length === 0) {
+    if (!membershipResult.data) {
       logger.debug('No membership found', { userId, teamId });
       return null;
     }
 
-    const userMembership = membershipResult.data[0];
+    const userMembership = membershipResult.data;
 
     // Check role if required
     if (requiredRoles && requiredRoles.length > 0) {

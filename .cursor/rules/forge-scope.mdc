@@ -1,0 +1,16 @@
+---
+description: FORGE branch scope – all edits here only; never touch UAS worktree
+alwaysApply: true
+---
+
+# FORGE branch scope
+
+- **This repo is FORGE.** All TaskTitan work requested for "FORGE" or "the plan" must be done only in this codebase: `/Users/anna/Desktop/TaskTitan`.
+
+- **Never edit the UAS worktree.** Do not create, modify, or delete files under:
+  - `/Users/anna/.cursor/worktrees/TaskTitan/uas`
+  - or any path that is not under `/Users/anna/Desktop/TaskTitan`
+
+- **Before editing any file:** Confirm the file path is under `/Users/anna/Desktop/TaskTitan`. If the current workspace root is not FORGE (e.g. it is UAS), do not make edits in the current workspace. Tell the user: "Edits must be in FORGE at /Users/anna/Desktop/TaskTitan. Please open that repo in Cursor or confirm the path."
+
+- When the user says "FORGE", "the plan", or "fix it" in the context of TaskTitan, apply changes only under `/Users/anna/Desktop/TaskTitan`.
