@@ -12,7 +12,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { Loader2 } from 'lucide-react';
-import { syncUserProfile, migrateGuestToUser, acceptTeamInvite } from '../api/appsync';
+import { syncUserProfile, migrateGuestToUser, acceptTeamInvite, validateTeamInvite } from '../api/appsync';
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -150,9 +150,21 @@ export function AuthCallbackPage() {
       // Check for pending team invite (user clicked "Sign In" on team invite page)
       const pendingTeamInvite = sessionStorage.getItem('pendingTeamInvite');
       if (pendingTeamInvite && isMounted) {
+        let teamIdToRedirect: string | null = null;
+
         try {
           setStatus('Accepting team invitation...');
           console.log('[AuthCallbackPage] Accepting pending team invite:', pendingTeamInvite);
+
+          // First validate the invite to get the teamId (in case acceptTeamInvite fails)
+          try {
+            const inviteInfo = await validateTeamInvite(pendingTeamInvite);
+            if (inviteInfo.valid && inviteInfo.teamId) {
+              teamIdToRedirect = inviteInfo.teamId;
+            }
+          } catch (validateErr) {
+            console.warn('[AuthCallbackPage] Could not validate invite:', validateErr);
+          }
 
           const result = await acceptTeamInvite({ code: pendingTeamInvite });
           console.log('[AuthCallbackPage] Team invite accepted:', result);
@@ -165,8 +177,17 @@ export function AuthCallbackPage() {
           }
         } catch (err) {
           console.error('[AuthCallbackPage] Team invite accept error:', err);
-          // Don't fail - user is still authenticated, they can try again
           sessionStorage.removeItem('pendingTeamInvite');
+
+          // Check if user is already a member - still redirect to team
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          if (errorMessage.includes('already') || errorMessage.includes('AlreadyMember')) {
+            console.log('[AuthCallbackPage] User already a member, redirecting to team');
+            if (isMounted && teamIdToRedirect) {
+              navigate(`/team/${teamIdToRedirect}`, { replace: true });
+              return;
+            }
+          }
         }
       }
 

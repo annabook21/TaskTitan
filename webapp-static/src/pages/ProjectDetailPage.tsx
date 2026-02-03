@@ -11,6 +11,7 @@ import {
   type Component,
   type ComponentType,
   type Membership,
+  type Team,
 } from '../api/appsync';
 import { useAuth } from '../hooks/useAuth';
 import { signInWithRedirect } from 'aws-amplify/auth';
@@ -41,6 +42,7 @@ export function ProjectDetailPage() {
   const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
 
   // Team and workflow state
+  const [team, setTeam] = useState<Team | null>(null);
   const [teamMembers, setTeamMembers] = useState<Membership[]>([]);
   const [workflowTemplate, setWorkflowTemplate] = useState<string>('SCRUM');
   const [activeView, setActiveView] = useState<'kanban' | 'timeline' | 'cfd' | 'hill'>('kanban');
@@ -77,6 +79,7 @@ export function ProjectDetailPage() {
             getTeamWithMembers(projectData.teamId),
             getTeamWorkflowConfig(projectData.teamId),
           ]);
+          setTeam(teamData?.team ?? null);
           setTeamMembers(teamData?.members ?? []);
           setWorkflowTemplate(workflowConfig?.workflowTemplate ?? 'SCRUM');
         }
@@ -555,6 +558,8 @@ export function ProjectDetailPage() {
           onClose={() => setShowShareModal(false)}
           projectId={project.id}
           projectName={project.name}
+          teamId={team?.id || project.teamId}
+          teamName={team?.name}
         />
       )}
     </div>

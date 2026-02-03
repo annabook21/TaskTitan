@@ -81,8 +81,8 @@ export function HomePage() {
 
         setRecentProjects(projectsWithCounts);
 
-        // Calculate stats - use team.memberCount (atomic counter) for accurate counts
-        const totalMembers = teamsData.reduce((acc, t) => acc + (t.team.memberCount || t.members.length), 0);
+        // Calculate stats - use Math.max to handle stale memberCount from old teams
+        const totalMembers = teamsData.reduce((acc, t) => acc + Math.max(t.team.memberCount || 0, t.members.length), 0);
         const totalComponents = projectsWithCounts.reduce((acc, p) => acc + p.componentCount, 0);
 
         setStats({
@@ -378,7 +378,7 @@ export function HomePage() {
                               {teamData.team.name}
                             </h3>
                             <p className="text-xs text-slate-500 mt-1">
-                              {teamData.team.memberCount || teamData.members.length} members
+                              {Math.max(teamData.team.memberCount || 0, teamData.members.length)} members
                             </p>
                           </div>
                         </div>

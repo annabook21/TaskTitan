@@ -90,6 +90,7 @@ export class GuestIdentityPool extends Construct {
         `${appSyncApi.arn}/types/Query/fields/guestListNotifications`,
         `${appSyncApi.arn}/types/Query/fields/guestCountUnreadNotifications`,
         `${appSyncApi.arn}/types/Query/fields/guestListActivityFeed`,
+        `${appSyncApi.arn}/types/Query/fields/guestListTeamProjects`,
         // Mutation operations for guests
         `${appSyncApi.arn}/types/Mutation/fields/guestJoinTeam`,
         `${appSyncApi.arn}/types/Mutation/fields/guestJoinProject`,

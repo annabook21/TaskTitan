@@ -581,6 +581,12 @@ const SyncUserProfile = /* GraphQL */ `
   }
 `;
 
+const DeleteCurrentUser = /* GraphQL */ `
+  mutation DeleteCurrentUser {
+    deleteCurrentUser
+  }
+`;
+
 const CreateTeam = /* GraphQL */ `
   mutation CreateTeam($input: CreateTeamInput!) {
     createTeam(input: $input) {
@@ -2080,6 +2086,18 @@ export async function syncUserProfile(input: SyncUserProfileInput): Promise<User
   return (result as { data: { syncUserProfile: User } }).data.syncUserProfile;
 }
 
+/**
+ * Delete the current user's account data (DynamoDB records, team memberships).
+ * Note: This does not delete the Cognito user account.
+ */
+export async function deleteCurrentUser(): Promise<boolean> {
+  const result = await getClient().graphql({
+    query: DeleteCurrentUser,
+  });
+  extractGraphQLError(result, 'deleteCurrentUser');
+  return (result as { data: { deleteCurrentUser: boolean } }).data.deleteCurrentUser;
+}
+
 // =============================================================================
 // Phase 10: AI Features - Full Parity Types
 // =============================================================================
@@ -2979,6 +2997,20 @@ const GuestListComponents = /* GraphQL */ `
   }
 `;
 
+const GuestListTeamProjects = /* GraphQL */ `
+  query GuestListTeamProjects($guestId: ID!, $teamId: ID!) {
+    guestListTeamProjects(guestId: $guestId, teamId: $teamId) {
+      id
+      name
+      description
+      teamId
+      ownerId
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
 const GuestListAssignments = /* GraphQL */ `
   query GuestListAssignments($guestId: ID!, $projectId: ID!) {
     guestListAssignments(guestId: $guestId, projectId: $projectId) {
@@ -3280,6 +3312,21 @@ export async function guestListComponents(guestId: string, projectId: string): P
   });
   extractGraphQLError(result, 'guestListComponents');
   return (result as { data: { guestListComponents: Component[] } }).data.guestListComponents || [];
+}
+
+/**
+ * List all projects in a team for a team guest (IAM auth).
+ * guestId must match the caller's Cognito Identity ID.
+ * Used by team-only guests to see available projects.
+ */
+export async function guestListTeamProjects(guestId: string, teamId: string): Promise<Project[]> {
+  const result = await getClient().graphql({
+    query: GuestListTeamProjects,
+    variables: { guestId, teamId },
+    authMode: 'iam',
+  });
+  extractGraphQLError(result, 'guestListTeamProjects');
+  return (result as { data: { guestListTeamProjects: Project[] } }).data.guestListTeamProjects || [];
 }
 
 /**

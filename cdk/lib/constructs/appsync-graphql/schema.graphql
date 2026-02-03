@@ -543,6 +543,9 @@ type Query {
   guestGetProject(guestId: ID!, projectId: ID!): Project @aws_iam
   guestListComponents(guestId: ID!, projectId: ID!): [Component!]! @aws_iam
   guestListAssignments(guestId: ID!, projectId: ID!): [AssignmentWithComponent!]! @aws_iam
+  # List all projects in a team for team-only guests (IAM auth)
+  # Verifies guest is a member of the team
+  guestListTeamProjects(guestId: ID!, teamId: ID!): [Project!]! @aws_iam
 
   # List assignments for a specific team member (requires team membership - Cognito auth)
   # For owner/admin member workload view
@@ -1101,6 +1104,10 @@ type Mutation {
   # MUST be called with fresh OAuth tokens immediately after authentication
   syncUserProfile(input: SyncUserProfileInput!): User! @aws_cognito_user_pools
 
+  # Delete current user's account data (DynamoDB records, team memberships)
+  # Note: Does not delete Cognito user - user should use account settings for full deletion
+  deleteCurrentUser: Boolean! @aws_cognito_user_pools
+
   # =============================================================================
   # Async AI Generation (bypasses 30s timeout)
   # =============================================================================
@@ -1144,6 +1151,7 @@ type Mutation {
   # Team mutations
   createTeam(input: CreateTeamInput!): TeamWithMembers!
   updateTeam(teamId: ID!, input: UpdateTeamInput!): Team!
+  deleteTeam(teamId: ID!): Boolean!
   addTeamMember(input: AddTeamMemberInput!): Membership!
   removeTeamMember(teamId: ID!, userId: ID!): Boolean!
   updateMemberRole(input: UpdateMemberRoleInput!): Membership!

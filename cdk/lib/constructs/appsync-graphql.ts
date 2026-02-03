@@ -272,6 +272,111 @@ export function response(ctx) {
 `.trim()),
     });
 
+    // ============================================
+    // PIPELINE RESOLVER: deleteCurrentUser
+    // Step 1: Query user's team memberships
+    // Step 2: Delete memberships and user record
+    // ============================================
+
+    // Function 1: Query user's memberships from GSI1
+    const queryUserMembershipsFn = new appsync.AppsyncFunction(this, 'QueryUserMembershipsFn', {
+      api: this.api,
+      name: 'queryUserMemberships',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  ctx.stash.userId = userId;
+
+  // Query GSI1 for user's team memberships (gsi1pk=USER#userId, gsi1sk begins_with TEAM#)
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'TEAM#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const memberships = ctx.result.items || [];
+  ctx.stash.memberships = memberships;
+  return memberships;
+}
+`.trim()),
+    });
+
+    // Function 2: Delete user record and all memberships
+    const deleteUserAndMembershipsFn = new appsync.AppsyncFunction(this, 'DeleteUserAndMembershipsFn', {
+      api: this.api,
+      name: 'deleteUserAndMemberships',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.stash.userId;
+  const memberships = ctx.stash.memberships || [];
+
+  // Build delete requests for user record and all memberships
+  const deleteRequests = [];
+
+  // Delete user record
+  deleteRequests.push({
+    table: '${dynamoTable.tableName}',
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({ pk: 'USER#' + userId, sk: 'METADATA' })
+  });
+
+  // Delete each membership (up to 99 more to stay under 100 item limit)
+  for (const membership of memberships.slice(0, 99)) {
+    deleteRequests.push({
+      table: '${dynamoTable.tableName}',
+      operation: 'DeleteItem',
+      key: util.dynamodb.toMapValues({ pk: membership.pk, sk: membership.sk })
+    });
+  }
+
+  return {
+    operation: 'TransactWriteItems',
+    transactItems: deleteRequests
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: deleteCurrentUser
+    new appsync.Resolver(this, 'DeleteCurrentUserResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'deleteCurrentUser',
+      pipelineConfig: [queryUserMembershipsFn, deleteUserAndMembershipsFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
     // Resolver: Query.getUserByEmail (JS) - Query GSI1 gsi1pk=EMAIL#email
     new appsync.Resolver(this, 'GetUserByEmailResolver', {
       api: this.api,
@@ -803,6 +908,160 @@ export function request(ctx) {
 export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
   return ctx.result;
+}
+`.trim()),
+    });
+
+    // ============================================
+    // PIPELINE RESOLVER: deleteTeam
+    // Step 1: Verify user is team OWNER
+    // Step 2: Query all team items (metadata, members, invites, etc.)
+    // Step 3: Batch delete all items
+    // ============================================
+
+    // Function 1: Verify user is team OWNER and query team items
+    const verifyOwnerAndQueryTeamFn = new appsync.AppsyncFunction(this, 'VerifyOwnerAndQueryTeamFn', {
+      api: this.api,
+      name: 'verifyOwnerAndQueryTeam',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.args.teamId;
+  const userId = ctx.identity.sub;
+
+  ctx.stash.teamId = teamId;
+  ctx.stash.userId = userId;
+
+  // Query all items with pk=TEAM#teamId to get members and verify ownership
+  return {
+    operation: 'Query',
+    query: {
+      expression: 'pk = :pk',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const items = ctx.result.items || [];
+  if (items.length === 0) {
+    util.error('Team not found', 'TeamNotFound');
+  }
+
+  // Find the user's membership and verify they are OWNER
+  const userId = ctx.stash.userId;
+  const userMembership = items.find(item => item.sk === 'MEMBER#' + userId);
+
+  if (!userMembership) {
+    util.error('You are not a member of this team', 'Unauthorized');
+  }
+
+  if (userMembership.role !== 'OWNER') {
+    util.error('Only the team owner can delete the team', 'Unauthorized');
+  }
+
+  // Store items for deletion in next step
+  ctx.stash.itemsToDelete = items;
+  return items;
+}
+`.trim()),
+    });
+
+    // Function 2: Query team invites for deletion
+    const queryTeamInvitesForDeleteFn = new appsync.AppsyncFunction(this, 'QueryTeamInvitesForDeleteFn', {
+      api: this.api,
+      name: 'queryTeamInvitesForDelete',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+
+  // Query GSI1 for team invites (gsi1pk=TEAM#teamId, gsi1sk begins_with INVITE#)
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId,
+        ':sk': 'INVITE#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const invites = ctx.result.items || [];
+  // Add invites to items to delete
+  ctx.stash.itemsToDelete = [...(ctx.stash.itemsToDelete || []), ...invites];
+  return invites;
+}
+`.trim()),
+    });
+
+    // Function 3: Batch delete all team items
+    const batchDeleteTeamItemsFn = new appsync.AppsyncFunction(this, 'BatchDeleteTeamItemsFn', {
+      api: this.api,
+      name: 'batchDeleteTeamItems',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const items = ctx.stash.itemsToDelete || [];
+
+  if (items.length === 0) {
+    // Nothing to delete
+    return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
+  }
+
+  // DynamoDB TransactWriteItems can handle up to 100 items per request
+  // For larger teams (100+ items), you'd need pagination or a Lambda function
+  const deleteRequests = items.slice(0, 100).map(item => ({
+    table: '${dynamoTable.tableName}',
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({ pk: item.pk, sk: item.sk })
+  }));
+
+  return {
+    operation: 'TransactWriteItems',
+    transactItems: deleteRequests
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  return true;
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: deleteTeam
+    new appsync.Resolver(this, 'DeleteTeamResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'deleteTeam',
+      pipelineConfig: [verifyOwnerAndQueryTeamFn, queryTeamInvitesForDeleteFn, batchDeleteTeamItemsFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
 }
 `.trim()),
     });
@@ -4657,6 +4916,128 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'guestListComponents',
       pipelineConfig: [verifyGuestAccessFn, listComponentsForGuestFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // ============================================
+    // PIPELINE RESOLVER: guestListTeamProjects
+    // Step 1: Verify guest is a member of the team
+    // Step 2: Query projects for the team
+    // ============================================
+
+    // Function 1: Verify guest is a team member
+    const verifyGuestTeamMembershipFn = new appsync.AppsyncFunction(this, 'VerifyGuestTeamMembershipFn', {
+      api: this.api,
+      name: 'verifyGuestTeamMembership',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.args.guestId;
+  const teamId = ctx.args.teamId;
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+
+  // Security: Verify the caller's identity matches the requested guestId
+  if (guestId !== cognitoIdentityId) {
+    util.error('Access denied: You can only access your own guest session', 'Unauthorized');
+  }
+
+  if (!teamId) {
+    util.error('teamId is required', 'BadRequest');
+  }
+
+  // Store for next function
+  ctx.stash.teamId = teamId;
+  ctx.stash.guestId = guestId;
+
+  // Verify the guest exists and has access to this team
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const guest = ctx.result;
+  if (!guest) {
+    util.error('Guest session not found. Please rejoin the team.', 'GuestNotFound');
+  }
+
+  // Verify guest has access to the requested team
+  if (guest.teamId !== ctx.stash.teamId) {
+    util.error('Access denied: You do not have access to this team', 'Unauthorized');
+  }
+
+  ctx.stash.guestVerified = true;
+  return guest;
+}
+`.trim()),
+    });
+
+    // Function 2: Query projects for the team
+    const listProjectsForGuestTeamFn = new appsync.AppsyncFunction(this, 'ListProjectsForGuestTeamFn', {
+      api: this.api,
+      name: 'listProjectsForGuestTeam',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+
+  // Query projects for this team using GSI2
+  return {
+    operation: 'Query',
+    index: 'gsi2',
+    query: {
+      expression: 'gsi2pk = :pk AND begins_with(gsi2sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'TEAM#' + teamId,
+        ':sk': 'PROJECT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  // Return projects list
+  return (ctx.result.items || []).map(item => ({
+    id: item.id,
+    name: item.name,
+    description: item.description,
+    teamId: item.teamId,
+    ownerId: item.ownerId,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  }));
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: guestListTeamProjects
+    new appsync.Resolver(this, 'GuestListTeamProjectsResolver', {
+      api: this.api,
+      typeName: 'Query',
+      fieldName: 'guestListTeamProjects',
+      pipelineConfig: [verifyGuestTeamMembershipFn, listProjectsForGuestTeamFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) {

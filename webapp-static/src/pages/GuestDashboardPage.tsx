@@ -17,11 +17,13 @@ import { useGuestAuth } from '../hooks/useGuestAuth';
 import {
   guestListComponents,
   guestListAssignments,
+  guestListTeamProjects,
   guestAssignSelf,
   guestUnassignSelf,
   guestUpdateStatus,
   type Component as ApiComponent,
   type ComponentStatus,
+  type Project,
 } from '../api/appsync';
 import {
   FolderKanban,
@@ -79,9 +81,165 @@ const typeColors: Record<ComponentType, string> = {
 // Status order for grouped view
 const STATUS_ORDER: ComponentStatus[] = ['IN_PROGRESS', 'BLOCKED', 'REVIEW', 'PLANNING', 'COMPLETED'];
 
+// Component for team-only guests to select a project
+interface TeamProjectSelectorProps {
+  guestSession: {
+    guestId: string;
+    displayName: string;
+    teamId: string;
+    teamName?: string | null;
+    createdAt: string;
+  };
+  saveGuestSession: (session: {
+    guestId: string;
+    displayName: string;
+    projectId: string;
+    projectName?: string | null;
+    teamId: string;
+    teamName?: string | null;
+    createdAt: string;
+  }) => void;
+  onSignIn: () => void;
+  onLeave: () => void;
+}
+
+function TeamProjectSelector({ guestSession, saveGuestSession, onSignIn, onLeave }: TeamProjectSelectorProps) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadProjects() {
+      try {
+        setLoading(true);
+        setError(null);
+        const teamProjects = await guestListTeamProjects(guestSession.guestId, guestSession.teamId);
+        setProjects(teamProjects);
+      } catch (err) {
+        console.error('[TeamProjectSelector] Error loading projects:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load projects');
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadProjects();
+  }, [guestSession.guestId, guestSession.teamId]);
+
+  const handleSelectProject = (project: Project) => {
+    // Update the guest session with the selected project
+    saveGuestSession({
+      ...guestSession,
+      projectId: project.id,
+      projectName: project.name,
+    });
+    // The page will re-render with the project selected
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      {/* Header */}
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center">
+              <FolderKanban className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-white">{guestSession.teamName || 'Team'}</h1>
+              <p className="text-sm text-slate-400">Guest: {guestSession.displayName}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onSignIn}
+              className="flex items-center gap-2 px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              <LogIn className="w-4 h-4" />
+              Sign In
+            </button>
+            <button
+              onClick={onLeave}
+              className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              Leave
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-4xl mx-auto px-4 py-8">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl font-bold text-white mb-2">Select a Project</h2>
+          <p className="text-slate-400">
+            Choose a project to view tasks and start contributing
+          </p>
+        </div>
+
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 p-4 bg-red-900/30 border border-red-600/30 rounded-lg text-red-400 mb-6">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!loading && !error && projects.length === 0 && (
+          <div className="text-center py-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-800 mb-4">
+              <FolderKanban className="w-8 h-8 text-slate-500" />
+            </div>
+            <h3 className="text-lg font-semibold text-white mb-2">No Projects Yet</h3>
+            <p className="text-slate-400 mb-4">
+              This team doesn't have any projects yet. Ask your team owner to create one.
+            </p>
+          </div>
+        )}
+
+        {!loading && !error && projects.length > 0 && (
+          <div className="grid gap-4">
+            {projects.map((project) => (
+              <button
+                key={project.id}
+                onClick={() => handleSelectProject(project)}
+                className="w-full text-left p-6 bg-slate-800/50 border border-slate-700 rounded-xl hover:border-cyan-500/50 hover:bg-slate-800 transition-all group"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-white group-hover:text-cyan-400 transition-colors">
+                      {project.name}
+                    </h3>
+                    {project.description && (
+                      <p className="text-slate-400 mt-1 line-clamp-2">{project.description}</p>
+                    )}
+                    {project.createdAt && (
+                      <p className="text-sm text-slate-500 mt-2">
+                        Created {new Date(project.createdAt).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                  <div className="ml-4 p-2 rounded-lg bg-cyan-500/10 text-cyan-400 group-hover:bg-cyan-500/20 transition-colors">
+                    <FolderKanban className="w-5 h-5" />
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 export function GuestDashboardPage() {
   const navigate = useNavigate();
-  const { guestSession, clearGuestSession, isLoading: authLoading, ensureValidCredentials } = useGuestAuth();
+  const { guestSession, saveGuestSession, clearGuestSession, isLoading: authLoading, ensureValidCredentials } = useGuestAuth();
 
   const [components, setComponents] = useState<DisplayComponent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -295,41 +453,15 @@ export function GuestDashboardPage() {
     return null; // Will redirect
   }
 
-  // Team-only guest (no project selected) - show helpful message
+  // Team-only guest (no project selected) - show team projects
   if (!guestSession.projectId) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
-        <div className="max-w-md w-full text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 mb-6">
-            <FolderKanban className="w-8 h-8 text-amber-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-3">Welcome to {guestSession.teamName || 'the team'}!</h1>
-          <p className="text-slate-400 mb-6">
-            You've joined the team as a guest. To view and work on tasks, you'll need a project share link from your team owner.
-          </p>
-          <div className="space-y-4">
-            <p className="text-sm text-slate-500">
-              Ask your team owner to share a project invite link with you.
-            </p>
-            <div className="flex justify-center gap-3">
-              <button
-                onClick={handleSignIn}
-                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors"
-              >
-                <LogIn className="w-4 h-4" />
-                Sign In
-              </button>
-              <button
-                onClick={handleLeave}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg font-medium transition-colors"
-              >
-                <LogOut className="w-4 h-4" />
-                Leave
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <TeamProjectSelector
+        guestSession={guestSession}
+        saveGuestSession={saveGuestSession}
+        onSignIn={handleSignIn}
+        onLeave={handleLeave}
+      />
     );
   }
 

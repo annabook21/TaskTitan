@@ -225,7 +225,7 @@ export function TeamDetailPage() {
             <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
               <span className="flex items-center gap-1.5">
                 <Users className="w-4 h-4" />
-                {team.memberCount || members.length} member{(team.memberCount || members.length) !== 1 ? 's' : ''}
+                {Math.max(team.memberCount || 0, members.length)} member{Math.max(team.memberCount || 0, members.length) !== 1 ? 's' : ''}
               </span>
               <span className="flex items-center gap-1.5">
                 <FolderKanban className="w-4 h-4" />
