@@ -5,7 +5,7 @@
  * Uses Amplify Hub to listen for auth events and update state reactively.
  */
 import { useState, useEffect, useCallback } from 'react';
-import { getCurrentUser as getAmplifyUser, signOut as amplifySignOut, fetchAuthSession } from 'aws-amplify/auth';
+import { signOut as amplifySignOut, fetchAuthSession } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { fetchCurrentUser, syncUserProfile, type User } from '../api/appsync';
 
