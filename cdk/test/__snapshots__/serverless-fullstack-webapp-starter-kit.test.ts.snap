@@ -2517,6 +2517,18 @@ export function response(ctx) { return ctx.prev.result; }",
             },
             {
               "Fn::GetAtt": [
+                "AppSyncGraphqlAuthorizeAssignmentFnC429B62B",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCheckTeamRoleForAssignmentFnD630C438",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
                 "AppSyncGraphqlCheckNoExistingAssignmentsFn3C73C7BD",
                 "FunctionId",
               ],
@@ -2542,6 +2554,71 @@ export function response(ctx) { return ctx.prev.result; }",
         "TypeName": "Mutation",
       },
       "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlAuthorizeAssignmentFnC429B62B": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const component = ctx.stash.component;
+  const projectId = component.projectId;
+  
+  if (!projectId) {
+    util.error('Component has no projectId', 'InvalidComponent');
+  }
+  
+  // Store current user ID for authorization check
+  ctx.stash.currentUserId = ctx.identity.sub;
+  
+  // Fetch project to check ownership
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'PROJECT#' + projectId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Project not found', 'ProjectNotFound');
+  
+  const project = ctx.result;
+  const currentUserId = ctx.stash.currentUserId;
+  const component = ctx.stash.component;
+  
+  // Check 1: Is user the project owner?
+  if (project.ownerId === currentUserId) {
+    ctx.stash.project = project;
+    return ctx.prev.result;
+  }
+  
+  // Check 2: Is user a team OWNER or ADMIN?
+  // Store teamId for team membership check in next pipeline step
+  ctx.stash.teamId = project.teamId;
+  ctx.stash.needsTeamRoleCheck = true;
+  ctx.stash.project = project;
+  
+  return ctx.prev.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "authorizeAssignment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
     },
     "AppSyncGraphqlBatchDeleteComponentFnD65733D7": {
       "DependsOn": [
@@ -3015,6 +3092,76 @@ export function response(ctx) {
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "checkNoExistingGuestAssignments",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCheckTeamRoleForAssignmentFnD630C438": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  // If user is already authorized as project owner, skip this check
+  if (!ctx.stash.needsTeamRoleCheck) {
+    return {
+      operation: 'GetItem',
+      key: util.dynamodb.toMapValues({
+        pk: 'SKIP',
+        sk: 'SKIP'
+      })
+    };
+  }
+  
+  const teamId = ctx.stash.teamId;
+  const userId = ctx.stash.currentUserId;
+  
+  // Fetch team membership to check role
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  
+  // If we skipped the check (user is project owner), continue
+  if (!ctx.stash.needsTeamRoleCheck) {
+    return ctx.prev.result;
+  }
+  
+  // User must be a team member with OWNER or ADMIN role
+  if (!ctx.result) {
+    util.error('Unauthorized: You must be a team member to manage assignments', 'Unauthorized');
+  }
+  
+  const membership = ctx.result;
+  const role = membership.role;
+  
+  if (role !== 'OWNER' && role !== 'ADMIN') {
+    util.error('Unauthorized: Only project owners or team admins can manage assignments', 'Unauthorized');
+  }
+  
+  // User is authorized
+  return ctx.prev.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "checkTeamRoleForAssignment",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -5880,6 +6027,48 @@ export function response(ctx) {
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "getComponentForGuestComment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlGetComponentForUnassignmentFn78215337": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.args.componentId;
+  ctx.stash.componentId = componentId;
+  ctx.stash.userId = ctx.args.userId;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Component not found', 'ComponentNotFound');
+  // Store component data for authorization check
+  ctx.stash.component = ctx.result;
+  return ctx.result;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "getComponentForUnassignment",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -10205,6 +10394,24 @@ export function response(ctx) { return ctx.prev.result; }",
           "Functions": [
             {
               "Fn::GetAtt": [
+                "AppSyncGraphqlGetComponentForUnassignmentFn78215337",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlAuthorizeAssignmentFnC429B62B",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCheckTeamRoleForAssignmentFnD630C438",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
                 "AppSyncGraphqlDeleteAssignmentFnFD046B51",
                 "FunctionId",
               ],
@@ -12787,298 +12994,6 @@ Welcome to intelligent project planning!
         ],
       },
       "Type": "AWS::IAM::Role",
-    },
-    "DataMigrationsFixTeamMemberCountsMigrationBC9EA897": {
-      "DeletionPolicy": "Delete",
-      "Properties": {
-        "ServiceToken": {
-          "Fn::GetAtt": [
-            "DataMigrationsMigrationProviderframeworkonEvent884B5ABE",
-            "Arn",
-          ],
-        },
-        "version": "1.0.0",
-      },
-      "Type": "AWS::CloudFormation::CustomResource",
-      "UpdateReplacePolicy": "Delete",
-    },
-    "DataMigrationsMigrationHandler13F1E71B": {
-      "DependsOn": [
-        "DataMigrationsMigrationHandlerServiceRoleDefaultPolicyCB4CCCAD",
-        "DataMigrationsMigrationHandlerServiceRole37F607E0",
-      ],
-      "Properties": {
-        "Architectures": [
-          "arm64",
-        ],
-        "Code": {
-          "ImageUri": {
-            "Fn::Sub": "REDACTED",
-          },
-        },
-        "Description": "Data migration: Fix stale team memberCount values",
-        "Environment": {
-          "Variables": {
-            "DYNAMODB_TABLE_NAME": "TaskTitanForgeStack-TaskTitan",
-          },
-        },
-        "ImageConfig": {
-          "Command": [
-            "migrations/fix-team-member-counts.handler",
-          ],
-        },
-        "MemorySize": 512,
-        "PackageType": "Image",
-        "Role": {
-          "Fn::GetAtt": [
-            "DataMigrationsMigrationHandlerServiceRole37F607E0",
-            "Arn",
-          ],
-        },
-        "Timeout": 300,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "DataMigrationsMigrationHandlerServiceRole37F607E0": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "DataMigrationsMigrationHandlerServiceRoleDefaultPolicyCB4CCCAD": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": [
-                "dynamodb:BatchGetItem",
-                "dynamodb:Query",
-                "dynamodb:GetItem",
-                "dynamodb:Scan",
-                "dynamodb:ConditionCheckItem",
-                "dynamodb:BatchWriteItem",
-                "dynamodb:PutItem",
-                "dynamodb:UpdateItem",
-                "dynamodb:DeleteItem",
-                "dynamodb:DescribeTable",
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":dynamodb:us-east-2:123456789012:table/TaskTitanForgeStack-TaskTitan",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":dynamodb:us-east-2:123456789012:table/TaskTitanForgeStack-TaskTitan/index/*",
-                    ],
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": [
-                "dynamodb:GetRecords",
-                "dynamodb:GetShardIterator",
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":dynamodb:us-east-2:123456789012:table/TaskTitanForgeStack-TaskTitan",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":dynamodb:us-east-2:123456789012:table/TaskTitanForgeStack-TaskTitan/index/*",
-                    ],
-                  ],
-                },
-              ],
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "DataMigrationsMigrationHandlerServiceRoleDefaultPolicyCB4CCCAD",
-        "Roles": [
-          {
-            "Ref": "DataMigrationsMigrationHandlerServiceRole37F607E0",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
-    },
-    "DataMigrationsMigrationProviderframeworkonEvent884B5ABE": {
-      "DependsOn": [
-        "DataMigrationsMigrationProviderframeworkonEventServiceRoleDefaultPolicyCC4ACD1A",
-        "DataMigrationsMigrationProviderframeworkonEventServiceRole1F320C73",
-      ],
-      "Properties": {
-        "Code": {
-          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-2",
-          "S3Key": "REDACTED",
-        },
-        "Description": "AWS CDK resource provider framework - onEvent (TaskTitanForgeStack/DataMigrations/MigrationProvider)",
-        "Environment": {
-          "Variables": {
-            "USER_ON_EVENT_FUNCTION_ARN": {
-              "Fn::GetAtt": [
-                "DataMigrationsMigrationHandler13F1E71B",
-                "Arn",
-              ],
-            },
-          },
-        },
-        "Handler": "framework.onEvent",
-        "LoggingConfig": {
-          "ApplicationLogLevel": "FATAL",
-          "LogFormat": "JSON",
-        },
-        "Role": {
-          "Fn::GetAtt": [
-            "DataMigrationsMigrationProviderframeworkonEventServiceRole1F320C73",
-            "Arn",
-          ],
-        },
-        "Runtime": "nodejs22.x",
-        "Timeout": 900,
-      },
-      "Type": "AWS::Lambda::Function",
-    },
-    "DataMigrationsMigrationProviderframeworkonEventServiceRole1F320C73": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "lambda.amazonaws.com",
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "ManagedPolicyArns": [
-          {
-            "Fn::Join": [
-              "",
-              [
-                "arn:",
-                {
-                  "Ref": "AWS::Partition",
-                },
-                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-              ],
-            ],
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "DataMigrationsMigrationProviderframeworkonEventServiceRoleDefaultPolicyCC4ACD1A": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "lambda:InvokeFunction",
-              "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "DataMigrationsMigrationHandler13F1E71B",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "DataMigrationsMigrationHandler13F1E71B",
-                          "Arn",
-                        ],
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
-              ],
-            },
-            {
-              "Action": "lambda:GetFunction",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "DataMigrationsMigrationHandler13F1E71B",
-                  "Arn",
-                ],
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "DataMigrationsMigrationProviderframeworkonEventServiceRoleDefaultPolicyCC4ACD1A",
-        "Roles": [
-          {
-            "Ref": "DataMigrationsMigrationProviderframeworkonEventServiceRole1F320C73",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
     "EventBusApi6E8C7C94": {
       "Properties": {

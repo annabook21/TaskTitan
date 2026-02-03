@@ -17,6 +17,9 @@ test('Snapshot test', () => {
       account: props.account,
       region: 'us-east-2',
     },
+    customDomain: 'test.example.com',
+    certificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/test-cert-id',
+    fromEmail: 'noreply@test.example.com',
   });
 
   const mainTemplate = Template.fromStack(mainStack);
