@@ -6,6 +6,7 @@ import {
   type Assignment,
   type Membership,
 } from '../api/appsync';
+import { getMemberDisplayName } from '../utils/userDisplay';
 
 interface AssigneeSelectorProps {
   componentId: string;
@@ -112,7 +113,7 @@ export function AssigneeSelector({
                   className="flex items-center gap-2 px-2 py-1 bg-slate-700 rounded text-sm"
                 >
                   <span className="text-slate-200">
-                    {member?.user?.name || member?.title || assignment.userId}
+                    {member ? getMemberDisplayName(member) : assignment.userId}
                   </span>
                   <button
                     onClick={() => handleUnassign(assignment.userId)}
@@ -147,7 +148,7 @@ export function AssigneeSelector({
             <option value="">Select a team member...</option>
             {availableMembers.map((member) => (
               <option key={member.userId} value={member.userId}>
-                {member.user?.name || member.title || member.userId} ({member.role})
+                {getMemberDisplayName(member)} ({member.role})
               </option>
             ))}
           </select>

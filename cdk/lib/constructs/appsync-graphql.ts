@@ -2374,11 +2374,13 @@ export function request(ctx) {
 }
 export function response(ctx) {
   if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  // Handle both regular user assignments (userId) and guest assignments (guestId)
   return (ctx.result.items || []).map(item => ({
     id: item.id,
     componentId: item.componentId,
-    userId: item.userId,
-    assignedAt: item.assignedAt
+    userId: item.userId || item.guestId,
+    assignedAt: item.assignedAt,
+    isGuest: item.isGuest || false
   }));
 }
 `.trim()),
@@ -6585,6 +6587,8 @@ export function request(ctx) {
       userId: 'GUEST#' + guestId,
       teamId: teamId,
       role: role,
+      isGuest: true,
+      guestName: ctx.stash.displayName,
       joinedAt: now,
       createdAt: now,
       updatedAt: now,

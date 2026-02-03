@@ -24,6 +24,7 @@ import { TimelineView } from '../components/TimelineView';
 import { CumulativeFlowDiagram } from '../components/CumulativeFlowDiagram';
 import { HillChart } from '../components/HillChart';
 import { ShareCodeModal } from '../components/ShareCodeModal';
+import { getMemberDisplayName } from '../utils/userDisplay';
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -494,7 +495,7 @@ export function ProjectDetailPage() {
             <option value="unassigned">Unassigned</option>
             {teamMembers.map((member) => (
               <option key={member.userId} value={member.userId}>
-                {member.user?.name || member.title || member.userId}
+                {getMemberDisplayName(member)}
               </option>
             ))}
           </select>

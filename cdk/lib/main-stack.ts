@@ -19,20 +19,27 @@ interface MainStackProps extends StackProps {
   readonly webAclArn?: string;
 
   /**
-   * Optional custom domain for CloudFront (e.g., 'tasktitan.live').
-   * If not provided, uses CloudFront's default domain.
+   * Custom domain for CloudFront (e.g., 'tasktitan.live').
+   * Required - loaded from cdk.json taskTitanConfig.
    */
-  readonly customDomain?: string;
+  readonly customDomain: string;
 
   /**
-   * Optional ACM certificate ARN for custom domain.
-   * Must be in us-east-1 region. Required if customDomain is set.
+   * ACM certificate ARN for custom domain.
+   * Must be in us-east-1 region (required for CloudFront).
+   * Required - loaded from cdk.json taskTitanConfig.
    */
-  readonly certificateArn?: string;
+  readonly certificateArn: string;
+
+  /**
+   * Email address for sending invitations (e.g., 'noreply@tasktitan.live').
+   * Required - loaded from cdk.json taskTitanConfig.
+   */
+  readonly fromEmail: string;
 }
 
 export class MainStack extends Stack {
-  constructor(scope: Construct, id: string, props: MainStackProps = {}) {
+  constructor(scope: Construct, id: string, props: MainStackProps) {
     super(scope, id, {
       description: 'TaskTitan FORGE v3 - CloudFront + AppSync + DynamoDB (fully serverless)',
       ...props,

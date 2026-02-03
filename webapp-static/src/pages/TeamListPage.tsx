@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { listTeamsForUser, listProjectsByTeam, type TeamWithMembers } from '../api/appsync';
+import { getMemberDisplayName, getMemberInitials } from '../utils/userDisplay';
 import { useAuth } from '../hooks/useAuth';
 import { signInWithRedirect } from 'aws-amplify/auth';
 import {
@@ -178,9 +179,9 @@ export function TeamListPage() {
                     <div
                       key={member.userId}
                       className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-sm font-medium border-2 border-slate-900"
-                      title={member.userId}
+                      title={getMemberDisplayName(member)}
                     >
-                      {member.userId?.[0]?.toUpperCase() || 'U'}
+                      {getMemberInitials(member)}
                     </div>
                   ))}
                   {memberCount > 5 && (

@@ -1,4 +1,5 @@
 import { type Component, type ComponentStatus, type Membership } from '../api/appsync';
+import { resolveOwnerDisplayName } from '../utils/userDisplay';
 
 const statusColors: Record<ComponentStatus, string> = {
   PLANNING: 'bg-slate-600',
@@ -26,13 +27,6 @@ interface ComponentCardProps {
 }
 
 export function ComponentCard({ component, onClick, isDragging, teamMembers }: ComponentCardProps) {
-  // Resolve owner ID to display name if teamMembers provided
-  const getOwnerName = (ownerId: string | null | undefined): string | null => {
-    if (!ownerId) return null;
-    if (!teamMembers) return ownerId;
-    const member = teamMembers.find((m) => m.userId === ownerId);
-    return member?.user?.name || member?.title || ownerId;
-  };
   return (
     <div
       onClick={onClick}
@@ -68,7 +62,7 @@ export function ComponentCard({ component, onClick, isDragging, teamMembers }: C
             P{component.priority}
           </span>
         )}
-        {component.owner && <span title="Owner">{getOwnerName(component.owner)}</span>}
+        {component.owner && <span title="Owner">{resolveOwnerDisplayName(component.owner, teamMembers)}</span>}
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import {
 } from '../api/appsync';
 import { Loader2 } from 'lucide-react';
 import { AssigneeSelector } from './AssigneeSelector';
+import { getMemberDisplayName } from '../utils/userDisplay';
 // CommentSection removed (guest functionality deleted)
 
 const COMPONENT_TYPES: ComponentType[] = ['EPIC', 'FEATURE', 'STORY', 'TASK', 'BUG'];
@@ -88,7 +89,7 @@ export function ComponentDetailModal({
   const memberMap = useMemo(() => {
     if (!teamMembers) return new Map<string, string>();
     return new Map(
-      teamMembers.map((m) => [m.userId, m.user?.name || m.title || m.userId])
+      teamMembers.map((m) => [m.userId, getMemberDisplayName(m)])
     );
   }, [teamMembers]);
 

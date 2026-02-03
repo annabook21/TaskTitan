@@ -546,6 +546,8 @@ const GetTeamWithMembers = /* GraphQL */ `
         availability
         displayName
         projectId
+        isGuest
+        guestName
         user {
           id
           email

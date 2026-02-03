@@ -42,17 +42,17 @@ export interface StaticFrontendProps {
   readonly webAclArn?: string;
 
   /**
-   * Custom domain name override.
-   * Defaults to 'tasktitan.live' if not provided.
+   * Custom domain name for CloudFront (e.g., 'tasktitan.live').
+   * Required - loaded from cdk.json taskTitanConfig.
    */
-  readonly customDomain?: string;
+  readonly customDomain: string;
 
   /**
-   * ACM certificate ARN override.
-   * Must be in us-east-1 region.
-   * Defaults to production certificate if not provided.
+   * ACM certificate ARN for the custom domain.
+   * Must be in us-east-1 region (required for CloudFront).
+   * Required - loaded from cdk.json taskTitanConfig.
    */
-  readonly certificateArn?: string;
+  readonly certificateArn: string;
 
   /**
    * Path to the frontend build output directory.
@@ -70,7 +70,7 @@ export class StaticFrontend extends Construct {
   public readonly errorRateAlarm: cloudwatch.Alarm;
   public readonly highLatencyAlarm: cloudwatch.Alarm;
 
-  constructor(scope: Construct, id: string, props: StaticFrontendProps = {}) {
+  constructor(scope: Construct, id: string, props: StaticFrontendProps) {
     super(scope, id);
 
     const { accessLogBucket, webAclArn, customDomain, certificateArn, frontendDistPath } = props;
@@ -88,9 +88,8 @@ export class StaticFrontend extends Construct {
 
     const s3Origin = S3BucketOrigin.withOriginAccessControl(this.bucket);
 
-    // Import ACM certificate - use provided ARN or fall back to hardcoded production cert
-    const certArn = certificateArn || 'arn:aws:acm:us-east-1:232894901916:certificate/b23ebe27-d839-4b87-b117-0148907aa109';
-    const certificate = acm.Certificate.fromCertificateArn(this, 'Certificate', certArn);
+    // Import ACM certificate from validated config (must be us-east-1 for CloudFront)
+    const certificate = acm.Certificate.fromCertificateArn(this, 'Certificate', certificateArn);
 
     // AWS Best Practice: Security headers policy
     // https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-response-headers-policies.html
@@ -131,12 +130,9 @@ export class StaticFrontend extends Construct {
     // AWS Best Practice: Use managed CACHING_DISABLED policy for index.html
     // This ensures users always get the latest version while assets use long TTL
 
-    // Use provided custom domain or fall back to hardcoded production domain
-    const domain = customDomain || 'tasktitan.live';
-
     this.distribution = new Distribution(this, 'Distribution', {
       comment: `${Stack.of(this).stackName} static frontend`,
-      domainNames: [domain],
+      domainNames: [customDomain],
       certificate: certificate,
       defaultBehavior: {
         origin: s3Origin,
