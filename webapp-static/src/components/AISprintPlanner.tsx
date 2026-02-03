@@ -149,7 +149,7 @@ export function AISprintPlanner({
               />
               <button
                 onClick={handlePlanSprint}
-                disabled={loading || applying}
+                disabled={loading || applying || components.length === 0}
                 className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
               >
                 {loading ? (
@@ -273,10 +273,19 @@ export function AISprintPlanner({
           )}
 
           {/* Tips when no plan */}
-          {!plan && !loading && (
+          {!plan && !loading && components.length > 0 && (
             <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
               <p className="text-xs text-slate-500">
                 <strong className="text-slate-400">AI Sprint Planning:</strong> Enter your sprint capacity and the AI will suggest which backlog components to include based on priority, dependencies, and estimated effort.
+              </p>
+            </div>
+          )}
+
+          {/* No backlog components message */}
+          {!plan && !loading && components.length === 0 && (
+            <div className="p-3 bg-amber-900/20 rounded-lg border border-amber-500/30">
+              <p className="text-xs text-amber-400">
+                <strong>No backlog components available.</strong> All components in this team's projects are either already assigned to sprints or don't exist yet. Add components to your projects first, or remove components from other sprints.
               </p>
             </div>
           )}

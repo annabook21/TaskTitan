@@ -5,6 +5,7 @@ import {
   getTeam,
   startSprint,
   completeSprint,
+  reopenSprint,
   deleteSprint,
   removeComponentFromSprint,
   listProjectsByTeam,
@@ -111,6 +112,19 @@ export function SprintDetailPage() {
       setSprint(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete sprint');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReopenSprint = async () => {
+    if (!sprintId) return;
+    setActionLoading(true);
+    try {
+      const updated = await reopenSprint(sprintId);
+      setSprint(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reopen sprint');
     } finally {
       setActionLoading(false);
     }
@@ -255,6 +269,15 @@ export function SprintDetailPage() {
               {actionLoading ? 'Completing...' : 'Complete Sprint'}
             </button>
           )}
+          {sprint.status === 'COMPLETED' && (
+            <button
+              onClick={handleReopenSprint}
+              disabled={actionLoading}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 text-white rounded-lg font-medium"
+            >
+              {actionLoading ? 'Reopening...' : 'Reopen Sprint'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -278,8 +301,8 @@ export function SprintDetailPage() {
         </div>
       </div>
 
-      {/* AI Sprint Planner - only show for PLANNING sprints with backlog items */}
-      {sprint.status === 'PLANNING' && backlogComponents.length > 0 && (
+      {/* AI Sprint Planner - show for PLANNING sprints */}
+      {sprint.status === 'PLANNING' && (
         <div className="mb-6">
           <AISprintPlanner
             teamId={teamId!}

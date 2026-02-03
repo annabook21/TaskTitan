@@ -215,6 +215,7 @@ enum ActivityType {
   SPRINT_CREATED
   SPRINT_STARTED
   SPRINT_COMPLETED
+  SPRINT_REOPENED
   COMPONENT_ADDED_TO_SPRINT
   COMPONENT_REMOVED_FROM_SPRINT
   GITHUB_PR_OPENED
@@ -1226,6 +1227,7 @@ type Mutation {
   deleteSprint(id: ID!): Boolean!
   startSprint(id: ID!): Sprint!
   completeSprint(id: ID!): Sprint!
+  reopenSprint(id: ID!): Sprint!
   # Assign/remove components from sprints (updates component.sprintId + GSI2)
   assignComponentToSprint(componentId: ID!, sprintId: ID!): Component!
   removeComponentFromSprint(componentId: ID!): Component!

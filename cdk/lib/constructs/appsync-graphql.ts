@@ -71,6 +71,23 @@ export class AppSyncGraphql extends Construct {
     // Lambda data source (Bedrock via AsyncJob)
     const lambdaDs = this.api.addLambdaDataSource('BedrockLambda', asyncJob.handler);
 
+    // ============================================
+    // AWS Best Practice: Lambda Request Templates with Operation Name
+    // Include $ctx.info.fieldName for explicit routing instead of fragile shape-based type guards
+    // ============================================
+
+    // VTL template for mutations with input wrapper (e.g., $ctx.arguments.input)
+    const lambdaRequestWithOperation = (useInput: boolean = true) =>
+      appsync.MappingTemplate.fromString(`
+#set($inputMap = ${useInput ? '$ctx.arguments.input' : '$ctx.arguments'})
+$util.qr($inputMap.put("__operation", "$ctx.info.fieldName"))
+{
+  "version": "2017-02-28",
+  "operation": "Invoke",
+  "payload": $util.toJson($inputMap)
+}
+`.trim());
+
     // Grant Lambda permission to call AppSync mutations (for async progress updates)
     // AWS Best Practice: Scope IAM permissions to specific GraphQL operations
     this.api.grant(asyncJob.handler, appsync.IamResource.custom('types/Mutation/fields/publishAIProgress'), 'appsync:GraphQL');
@@ -617,6 +634,11 @@ export function response(ctx) {
 `.trim()),
     });
 
+    // Function 2: Batch get team metadata
+    // AWS Best Practice: Use denormalized memberCount on team metadata for aggregates
+    // DynamoDB Query only supports single partition key, so we can't query all members
+    // across multiple teams efficiently. Instead, we rely on the memberCount field.
+    // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html
     const batchGetTeamsFn = new appsync.AppsyncFunction(this, 'BatchGetTeamsFn', {
       name: 'batchGetTeams',
       api: this.api,
@@ -656,7 +678,8 @@ export function response(ctx) {
   for (const team of teams) {
     if (team && team.id) teamMap[team.id] = team;
   }
-  // Group memberships by team and return unique teams with all their members
+  // Group user's memberships by team (for showing user's role)
+  // Members array contains only current user's membership - use team.memberCount for total
   const teamMemberMap = {};
   for (const m of memberships) {
     if (!teamMemberMap[m.teamId]) {
@@ -2107,11 +2130,75 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Resolver: Mutation.startSprint (JS) - UpdateItem status to ACTIVE
-    new appsync.Resolver(this, 'StartSprintResolver', {
+    // ============================================
+    // SPRINT STATUS PIPELINE FUNCTIONS
+    // AWS Best Practice: Authorization + Activity Logging
+    // ============================================
+
+    // Function: Get sprint and store teamId for authorization
+    const getSprintForAuthFn = new appsync.AppsyncFunction(this, 'GetSprintForAuthFn', {
       api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'startSprint',
+      name: 'getSprintForAuth',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  ctx.stash.userId = ctx.identity.sub;
+  ctx.stash.sprintId = ctx.args.id;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'SPRINT#' + ctx.args.id,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Sprint not found', 'SprintNotFound');
+  ctx.stash.sprint = ctx.result;
+  ctx.stash.teamId = ctx.result.teamId;
+  return ctx.result;
+}
+`.trim()),
+    });
+
+    // Function: Verify user is team member with adequate role for sprint operations
+    const verifyTeamMemberForSprintFn = new appsync.AppsyncFunction(this, 'VerifyTeamMemberForSprintFn', {
+      api: this.api,
+      name: 'verifyTeamMemberForSprint',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + ctx.stash.teamId,
+      sk: 'MEMBER#' + ctx.stash.userId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  if (!ctx.result) util.error('Access denied: not a team member', 'Unauthorized');
+  const role = ctx.result.role;
+  // Allow OWNER, ADMIN, MEMBER - deny VIEWER and GUEST
+  if (role === 'VIEWER' || role === 'GUEST') {
+    util.error('Access denied: insufficient permissions to modify sprint status', 'Unauthorized');
+  }
+  ctx.stash.membership = ctx.result;
+  return ctx.result;
+}
+`.trim()),
+    });
+
+    // Function: Update sprint status to ACTIVE (start)
+    const startSprintStatusFn = new appsync.AppsyncFunction(this, 'StartSprintStatusFn', {
+      api: this.api,
+      name: 'startSprintStatus',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -2120,7 +2207,7 @@ export function request(ctx) {
   const now = util.time.nowISO8601();
   return {
     operation: 'UpdateItem',
-    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + ctx.args.id, sk: 'METADATA' }),
+    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + ctx.stash.sprintId, sk: 'METADATA' }),
     update: {
       expression: 'SET #status = :status, #updatedAt = :updatedAt',
       expressionNames: { '#status': 'status', '#updatedAt': 'updatedAt' },
@@ -2136,16 +2223,20 @@ export function response(ctx) {
     }
     util.error(ctx.error.message, ctx.error.type);
   }
+  // Set activity data for createSprintActivityFn
+  ctx.stash.activityType = 'SPRINT_STARTED';
+  ctx.stash.authorId = ctx.stash.userId;
+  ctx.stash.activityMetadata = { sprintId: ctx.stash.sprintId, sprintName: ctx.stash.sprint.name };
+  ctx.stash.mainResult = ctx.result;
   return ctx.result;
 }
 `.trim()),
     });
 
-    // Resolver: Mutation.completeSprint (JS) - UpdateItem status to COMPLETED
-    new appsync.Resolver(this, 'CompleteSprintResolver', {
+    // Function: Update sprint status to COMPLETED
+    const completeSprintStatusFn = new appsync.AppsyncFunction(this, 'CompleteSprintStatusFn', {
       api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'completeSprint',
+      name: 'completeSprintStatus',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -2154,7 +2245,7 @@ export function request(ctx) {
   const now = util.time.nowISO8601();
   return {
     operation: 'UpdateItem',
-    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + ctx.args.id, sk: 'METADATA' }),
+    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + ctx.stash.sprintId, sk: 'METADATA' }),
     update: {
       expression: 'SET #status = :status, #updatedAt = :updatedAt',
       expressionNames: { '#status': 'status', '#updatedAt': 'updatedAt' },
@@ -2170,8 +2261,140 @@ export function response(ctx) {
     }
     util.error(ctx.error.message, ctx.error.type);
   }
+  // Set activity data for createSprintActivityFn
+  ctx.stash.activityType = 'SPRINT_COMPLETED';
+  ctx.stash.authorId = ctx.stash.userId;
+  ctx.stash.activityMetadata = { sprintId: ctx.stash.sprintId, sprintName: ctx.stash.sprint.name };
+  ctx.stash.mainResult = ctx.result;
   return ctx.result;
 }
+`.trim()),
+    });
+
+    // Function: Update sprint status from COMPLETED back to ACTIVE (reopen)
+    const reopenSprintStatusFn = new appsync.AppsyncFunction(this, 'ReopenSprintStatusFn', {
+      api: this.api,
+      name: 'reopenSprintStatus',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'SPRINT#' + ctx.stash.sprintId, sk: 'METADATA' }),
+    update: {
+      expression: 'SET #status = :status, #updatedAt = :updatedAt',
+      expressionNames: { '#status': 'status', '#updatedAt': 'updatedAt' },
+      expressionValues: util.dynamodb.toMapValues({ ':status': 'ACTIVE', ':updatedAt': now, ':completed': 'COMPLETED' })
+    },
+    condition: { expression: 'attribute_exists(pk) AND #status = :completed' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Sprint not found or not in COMPLETED status', 'InvalidSprintStatus');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  // Set activity data for createSprintActivityFn
+  ctx.stash.activityType = 'SPRINT_REOPENED';
+  ctx.stash.authorId = ctx.stash.userId;
+  ctx.stash.activityMetadata = { sprintId: ctx.stash.sprintId, sprintName: ctx.stash.sprint.name };
+  ctx.stash.mainResult = ctx.result;
+  return ctx.result;
+}
+`.trim()),
+    });
+
+    // Function: Create activity record for sprint status changes
+    // Uses team-scoped activity for sprint operations (not project-scoped)
+    const createSprintActivityFn = new appsync.AppsyncFunction(this, 'CreateSprintActivityFn', {
+      api: this.api,
+      name: 'createSprintActivity',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  // Skip if no activity data provided
+  if (!ctx.stash.activityType) {
+    return { payload: null };
+  }
+
+  const activityId = util.autoId();
+  const now = util.time.nowISO8601();
+  const teamId = ctx.stash.teamId;
+  const activityType = ctx.stash.activityType;
+  const authorId = ctx.stash.authorId;
+  const metadata = ctx.stash.activityMetadata || {};
+
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'ACTIVITY#' + now + '#' + activityId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'ACTIVITY#' + now + '#' + activityId,
+      id: activityId,
+      type: activityType,
+      teamId: teamId,
+      userId: authorId,
+      metadata: JSON.stringify(metadata),
+      createdAt: now,
+      gsi1pk: 'USER#' + authorId,
+      gsi1sk: 'ACTIVITY#' + now + '#' + activityId
+    })
+  };
+}
+export function response(ctx) {
+  // Return the main result (updated sprint) regardless of activity creation outcome
+  return ctx.stash.mainResult || ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: Mutation.startSprint - Auth + Status Update + Activity Log
+    new appsync.Resolver(this, 'StartSprintResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'startSprint',
+      pipelineConfig: [getSprintForAuthFn, verifyTeamMemberForSprintFn, startSprintStatusFn, createSprintActivityFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
+`.trim()),
+    });
+
+    // Pipeline Resolver: Mutation.completeSprint - Auth + Status Update + Activity Log
+    new appsync.Resolver(this, 'CompleteSprintResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'completeSprint',
+      pipelineConfig: [getSprintForAuthFn, verifyTeamMemberForSprintFn, completeSprintStatusFn, createSprintActivityFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
+`.trim()),
+    });
+
+    // Pipeline Resolver: Mutation.reopenSprint - Auth + Status Update + Activity Log
+    // Allows users to reopen accidentally completed sprints or add more work
+    new appsync.Resolver(this, 'ReopenSprintResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'reopenSprint',
+      pipelineConfig: [getSprintForAuthFn, verifyTeamMemberForSprintFn, reopenSprintStatusFn, createSprintActivityFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
 `.trim()),
     });
 
@@ -4018,7 +4241,7 @@ export function response(ctx) {
       typeName: 'Query',
       fieldName: 'getTeamMetrics',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments)'),
+      requestMappingTemplate: lambdaRequestWithOperation(false), // Uses $ctx.arguments
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4028,7 +4251,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'generateComponentViaAI',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments)'),
+      requestMappingTemplate: lambdaRequestWithOperation(false), // Uses $ctx.arguments
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4038,7 +4261,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'generateFullPlan',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4048,7 +4271,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'applyFullPlan',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4058,7 +4281,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'refineComponent',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4068,7 +4291,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'guestRefineComponent',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4261,7 +4484,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'refineBulkPlan',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4271,7 +4494,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'createSmartComponent',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4281,7 +4504,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'planSprint',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4295,7 +4518,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'applyTemplate',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4305,7 +4528,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'suggestBreakdown',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4315,7 +4538,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'generateWireframe',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4325,7 +4548,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'analyzeImportData',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4335,7 +4558,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'cleanupImportData',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
@@ -4345,7 +4568,7 @@ export function response(ctx) {
       typeName: 'Mutation',
       fieldName: 'generateRetrospective',
       dataSource: lambdaDs,
-      requestMappingTemplate: appsync.MappingTemplate.lambdaRequest('$util.toJson($ctx.arguments.input)'),
+      requestMappingTemplate: lambdaRequestWithOperation(),
       responseMappingTemplate: appsync.MappingTemplate.lambdaResult(),
     });
 
