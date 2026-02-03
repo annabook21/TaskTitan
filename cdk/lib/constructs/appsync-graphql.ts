@@ -2502,11 +2502,44 @@ export function response(ctx) {
 `.trim()),
     });
 
+    // Step 4: Update component's owner field to sync with assignment
+    const updateComponentOwnerFn = new appsync.AppsyncFunction(this, 'UpdateComponentOwnerFn', {
+      api: this.api,
+      name: 'updateComponentOwner',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  const userId = ctx.stash.userId;
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET #owner = :userId, updatedAt = :now',
+      expressionNames: { '#owner': 'owner' },
+      expressionValues: util.dynamodb.toMapValues({ ':userId': userId, ':now': now })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  // Return the assignment from the previous step
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
     new appsync.Resolver(this, 'AssignUserToComponentResolver', {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'assignUserToComponent',
-      pipelineConfig: [getComponentForAssignmentFn, checkNoExistingAssignmentsFn, createAssignmentFn],
+      pipelineConfig: [getComponentForAssignmentFn, checkNoExistingAssignmentsFn, createAssignmentFn, updateComponentOwnerFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) { return {}; }
@@ -2514,11 +2547,11 @@ export function response(ctx) { return ctx.prev.result; }
 `.trim()),
     });
 
-    // Resolver: Mutation.unassignUserFromComponent (JS) - DeleteItem with existence check
-    new appsync.Resolver(this, 'UnassignUserFromComponentResolver', {
+    // Resolver: Mutation.unassignUserFromComponent (Pipeline)
+    // Step 1: Delete the assignment record
+    const deleteAssignmentFn = new appsync.AppsyncFunction(this, 'DeleteAssignmentFn', {
       api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'unassignUserFromComponent',
+      name: 'deleteAssignment',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
@@ -2526,6 +2559,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const componentId = ctx.args.componentId;
   const userId = ctx.args.userId;
+  ctx.stash.componentId = componentId;
   return {
     operation: 'DeleteItem',
     key: util.dynamodb.toMapValues({
@@ -2544,6 +2578,49 @@ export function response(ctx) {
   }
   return true;
 }
+`.trim()),
+    });
+
+    // Step 2: Clear component's owner field
+    const clearComponentOwnerFn = new appsync.AppsyncFunction(this, 'ClearComponentOwnerFn', {
+      api: this.api,
+      name: 'clearComponentOwner',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const componentId = ctx.stash.componentId;
+  const now = util.time.nowISO8601();
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'COMPONENT#' + componentId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'REMOVE #owner SET updatedAt = :now',
+      expressionNames: { '#owner': 'owner' },
+      expressionValues: util.dynamodb.toMapValues({ ':now': now })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return true;
+}
+`.trim()),
+    });
+
+    new appsync.Resolver(this, 'UnassignUserFromComponentResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'unassignUserFromComponent',
+      pipelineConfig: [deleteAssignmentFn, clearComponentOwnerFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+export function request(ctx) { return {}; }
+export function response(ctx) { return ctx.prev.result; }
 `.trim()),
     });
 

@@ -13,6 +13,23 @@ interface AssigneeSelectorProps {
   onAssignmentChange?: () => void;
 }
 
+// Extract error message from various error formats (GraphQL, Error, etc.)
+function extractErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === 'object' && err !== null) {
+    const errObj = err as { errors?: Array<{ message: string }>; message?: string };
+    if (errObj.errors && errObj.errors.length > 0) {
+      return errObj.errors.map((e) => e.message).join('; ');
+    }
+    if (errObj.message) {
+      return errObj.message;
+    }
+  }
+  return fallback;
+}
+
 export function AssigneeSelector({
   componentId,
   teamMembers,
@@ -32,7 +49,7 @@ export function AssigneeSelector({
       const data = await listAssignmentsForComponent(componentId);
       setAssignments(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load assignments');
+      setError(extractErrorMessage(err, 'Failed to load assignments'));
     } finally {
       setLoading(false);
     }
@@ -46,7 +63,7 @@ export function AssigneeSelector({
       setAssignments((prev) => [...prev, assignment]);
       onAssignmentChange?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to assign user');
+      setError(extractErrorMessage(err, 'Failed to assign user'));
     } finally {
       setAssigning(false);
     }
@@ -59,7 +76,7 @@ export function AssigneeSelector({
       setAssignments((prev) => prev.filter((a) => a.userId !== userId));
       onAssignmentChange?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to unassign user');
+      setError(extractErrorMessage(err, 'Failed to unassign user'));
     }
   };
 

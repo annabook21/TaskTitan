@@ -417,6 +417,18 @@ export function ComponentDetailModal({
                   <AssigneeSelector
                     componentId={displayComponent.id}
                     teamMembers={teamMembers}
+                    onAssignmentChange={async () => {
+                      // Re-fetch component to get updated owner field
+                      try {
+                        const refreshed = await getComponent(displayComponent.id);
+                        if (refreshed) {
+                          setComponent(refreshed);
+                          onUpdate(refreshed);
+                        }
+                      } catch (err) {
+                        console.error('[ComponentDetailModal] Failed to refresh component after assignment change:', err);
+                      }
+                    }}
                   />
                 </div>
               )}

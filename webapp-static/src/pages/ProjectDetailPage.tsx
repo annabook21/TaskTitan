@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getProject,
@@ -47,7 +47,10 @@ export function ProjectDetailPage() {
   const [teamMembers, setTeamMembers] = useState<Membership[]>([]);
   const [workflowTemplate, setWorkflowTemplate] = useState<string>('SCRUM');
   const [activeView, setActiveView] = useState<'kanban' | 'timeline' | 'cfd' | 'hill'>('kanban');
-  
+
+  // Filter state: 'all' | 'unassigned' | userId
+  const [ownerFilter, setOwnerFilter] = useState<string>('all');
+
   // Share code modal
   const [showShareModal, setShowShareModal] = useState(false);
 
@@ -75,6 +78,13 @@ export function ProjectDetailPage() {
       setComponents((prev) => prev.filter((c) => c.id !== componentId));
     }, []),
   });
+
+  // Filter components by owner
+  const filteredComponents = useMemo(() => {
+    if (ownerFilter === 'all') return components;
+    if (ownerFilter === 'unassigned') return components.filter((c) => !c.owner);
+    return components.filter((c) => c.owner === ownerFilter);
+  }, [components, ownerFilter]);
 
   useEffect(() => {
     if (!statusUpdateError) return;
@@ -467,6 +477,38 @@ export function ProjectDetailPage() {
         </div>
       )}
 
+      {/* Filter and View Controls */}
+      <div className="flex items-center justify-between mb-4">
+        {/* Owner Filter */}
+        <div className="flex items-center gap-2">
+          <label htmlFor="ownerFilter" className="text-sm text-slate-400">
+            Filter by owner:
+          </label>
+          <select
+            id="ownerFilter"
+            value={ownerFilter}
+            onChange={(e) => setOwnerFilter(e.target.value)}
+            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          >
+            <option value="all">All</option>
+            <option value="unassigned">Unassigned</option>
+            {teamMembers.map((member) => (
+              <option key={member.userId} value={member.userId}>
+                {member.user?.name || member.title || member.userId}
+              </option>
+            ))}
+          </select>
+          {ownerFilter !== 'all' && (
+            <button
+              onClick={() => setOwnerFilter('all')}
+              className="text-xs text-slate-400 hover:text-white"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* View Switcher - Methodology-aware tabs */}
       <div className="flex gap-1 mb-4 border-b border-slate-700">
         <button
@@ -520,7 +562,7 @@ export function ProjectDetailPage() {
       {/* Conditional View Rendering */}
       {activeView === 'kanban' && (
         <KanbanBoard
-          components={components}
+          components={filteredComponents}
           onComponentClick={(component) => setSelectedComponent(component)}
           onComponentUpdate={handleComponentUpdate}
           onStatusUpdateError={(err) => setStatusUpdateError(err.message)}
@@ -530,25 +572,29 @@ export function ProjectDetailPage() {
 
       {activeView === 'timeline' && (
         <TimelineView
-          components={components}
+          components={filteredComponents}
           onComponentClick={(component: Component) => setSelectedComponent(component)}
         />
       )}
 
       {activeView === 'cfd' && (
-        <CumulativeFlowDiagram components={components} />
+        <CumulativeFlowDiagram components={filteredComponents} />
       )}
 
       {activeView === 'hill' && (
         <HillChart
-          components={components}
+          components={filteredComponents}
           onComponentClick={(component: Component) => setSelectedComponent(component)}
         />
       )}
 
-      {components.length === 0 && !showCreateForm && !showAIPanel && !showSmartCreator && (
+      {filteredComponents.length === 0 && !showCreateForm && !showAIPanel && !showSmartCreator && (
         <div className="text-center py-12 bg-slate-800 rounded-lg border border-slate-700">
-          <p className="text-slate-400 mb-4">No components yet.</p>
+          <p className="text-slate-400 mb-4">
+            {components.length === 0
+              ? 'No components yet.'
+              : `No components match the current filter.`}
+          </p>
           <div className="flex justify-center gap-3">
             <button
               onClick={() => setShowAIPanel(true)}
