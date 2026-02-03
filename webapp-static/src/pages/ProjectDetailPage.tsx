@@ -74,6 +74,11 @@ export function ProjectDetailPage() {
       setComponents((prev) =>
         prev.map((c) => (c.id === component.id ? component : c))
       );
+      // Also update selectedComponent if it's the same one being updated
+      // This ensures the modal shows live updates from subscriptions
+      setSelectedComponent((prev) =>
+        prev?.id === component.id ? component : prev
+      );
     }, []),
     onDeleted: useCallback((componentId: string) => {
       setComponents((prev) => prev.filter((c) => c.id !== componentId));
