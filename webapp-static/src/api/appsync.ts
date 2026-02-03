@@ -1764,6 +1764,17 @@ export async function completeSprint(id: string): Promise<Sprint> {
   return sprint;
 }
 
+export async function reopenSprint(id: string): Promise<Sprint> {
+  const result = await getClient().graphql({
+    query: `mutation ReopenSprint($id: ID!) { reopenSprint(id: $id) { id name status startDate endDate goal capacity teamId createdAt updatedAt } }`,
+    variables: { id },
+  });
+  extractGraphQLError(result, 'reopenSprint');
+  const sprint = (result as { data: { reopenSprint: Sprint } }).data.reopenSprint;
+  if (!sprint) throw new Error('reopenSprint returned null');
+  return sprint;
+}
+
 export async function assignComponentToSprint(componentId: string, sprintId: string): Promise<Component> {
   const result = await getClient().graphql({
     query: AssignComponentToSprint,
