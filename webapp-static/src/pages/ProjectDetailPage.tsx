@@ -260,21 +260,29 @@ export function ProjectDetailPage() {
 
   return (
     <div className="max-w-full mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-slate-400 mb-1">
-            <Link to="/project" className="hover:text-white">
-              Projects
-            </Link>
-            <span>/</span>
-            <span className="text-white">{project.name}</span>
-          </div>
-          <h1 className="text-2xl font-bold">{project.name}</h1>
+      {/* Project Header - Improved layout for text readability (UX best practice: 50-75 char line length) */}
+      <div className="mb-6">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 text-sm text-slate-400 mb-3">
+          <Link to="/project" className="hover:text-white">
+            Projects
+          </Link>
+          <span>/</span>
+          <span className="text-white">{project.name}</span>
+        </div>
+        
+        {/* Title and Description - Full width, not squeezed by buttons */}
+        <div className="mb-4">
+          <h1 className="text-2xl font-bold mb-2">{project.name}</h1>
           {project.description && (
-            <p className="text-slate-400 mt-1">{project.description}</p>
+            <p className="text-slate-400 text-base leading-relaxed max-w-4xl">
+              {project.description}
+            </p>
           )}
         </div>
-        <div className="flex gap-3">
+        
+        {/* Action Buttons - Below description, not squeezing it */}
+        <div className="flex flex-wrap gap-3">
           <button
             onClick={() => {
               setShowAIPanel(true);
