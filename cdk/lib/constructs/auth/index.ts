@@ -164,26 +164,34 @@ Welcome to intelligent project planning!
     // Lambda depends on userPoolClientId but userPoolClient depends on the CloudFront domain name (callback URL) which depends on Lambda (fURL).
     // To avoid the circular dependency, we update the callback URL after a userPoolClientId is created.
     // We only use this when custom domain is not used.
+    const updateParams = {
+      ClientId: this.client.userPoolClientId,
+      UserPoolId: this.userPool.userPoolId,
+      AllowedOAuthFlows: ['code'],
+      AllowedOAuthFlowsUserPoolClient: true,
+      AllowedOAuthScopes: ['profile', 'phone', 'email', 'openid', 'aws.cognito.signin.user.admin'],
+      ExplicitAuthFlows: ['ALLOW_USER_PASSWORD_AUTH', 'ALLOW_USER_SRP_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH'],
+      CallbackURLs: callbackUrls,
+      LogoutURLs: logoutUrls,
+      SupportedIdentityProviders: ['COGNITO'],
+      TokenValidityUnits: {
+        IdToken: 'minutes',
+      },
+      IdTokenValidity: 1440,
+    } satisfies UpdateUserPoolClientCommandInput;
+
     new AwsCustomResource(this, 'UpdateCallbackUrls', {
+      onCreate: {
+        service: '@aws-sdk/client-cognito-identity-provider',
+        action: 'updateUserPoolClient',
+        parameters: updateParams,
+        physicalResourceId: PhysicalResourceId.of(`${this.userPool.userPoolId}-oauth-config`),
+      },
       onUpdate: {
         service: '@aws-sdk/client-cognito-identity-provider',
         action: 'updateUserPoolClient',
-        parameters: {
-          ClientId: this.client.userPoolClientId,
-          UserPoolId: this.userPool.userPoolId,
-          AllowedOAuthFlows: ['code'],
-          AllowedOAuthFlowsUserPoolClient: true,
-          AllowedOAuthScopes: ['profile', 'phone', 'email', 'openid', 'aws.cognito.signin.user.admin'],
-          ExplicitAuthFlows: ['ALLOW_USER_PASSWORD_AUTH', 'ALLOW_USER_SRP_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH'],
-          CallbackURLs: callbackUrls,
-          LogoutURLs: logoutUrls,
-          SupportedIdentityProviders: ['COGNITO'],
-          TokenValidityUnits: {
-            IdToken: 'minutes',
-          },
-          IdTokenValidity: 1440,
-        } satisfies UpdateUserPoolClientCommandInput,
-        physicalResourceId: PhysicalResourceId.of(this.userPool.userPoolId),
+        parameters: updateParams,
+        physicalResourceId: PhysicalResourceId.of(`${this.userPool.userPoolId}-oauth-config`),
       },
       policy: AwsCustomResourcePolicy.fromSdkCalls({
         resources: [this.userPool.userPoolArn],

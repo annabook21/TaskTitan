@@ -5,9 +5,9 @@
  * Uses Amplify Hub to listen for auth events and update state reactively.
  */
 import { useState, useEffect, useCallback } from 'react';
-import { getCurrentUser as getAmplifyUser, signOut as amplifySignOut } from 'aws-amplify/auth';
+import { getCurrentUser as getAmplifyUser, signOut as amplifySignOut, fetchAuthSession } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
-import { fetchCurrentUser, type User } from '../api/appsync';
+import { fetchCurrentUser, syncUserProfile, type User } from '../api/appsync';
 
 export type AuthState = {
   isLoading: boolean;
@@ -45,20 +45,12 @@ export function useAuth() {
       }
 
       // Cognito auth is valid - user IS authenticated
-      // Try to fetch user profile from AppSync (optional - may not exist yet)
-      let user: User | null = null;
-      try {
-        user = await fetchCurrentUser();
-      } catch {
-        // User profile may not exist yet (e.g., post-registration delay)
-        // This is OK - they're still authenticated via Cognito
-      }
-
+      // Don't fetch AppSync user profile here - causes race condition after OAuth
       setState({
         isLoading: false,
         isAuthenticated: true, // Cognito is the source of truth
         cognitoUserId,
-        user,
+        user: null, // Will be loaded separately when needed
         error: null,
       });
     } catch (err) {
@@ -139,6 +131,26 @@ export function useAuth() {
   const refreshUser = useCallback(async () => {
     if (!state.isAuthenticated) return;
     try {
+      // Get ID token to extract email/name claims (access token doesn't have them)
+      const session = await fetchAuthSession();
+      const idToken = session.tokens?.idToken;
+
+      if (idToken) {
+        // Extract claims from ID token payload
+        const payload = idToken.payload;
+        const email = payload.email as string | undefined;
+        const name = payload.name as string | undefined;
+
+        // Sync profile to DynamoDB if we have both email and name
+        if (email && name) {
+          await syncUserProfile({ email, name });
+        } else if (email) {
+          // At minimum sync email if available
+          await syncUserProfile({ email, name: '' });
+        }
+      }
+
+      // Fetch the updated user profile
       const user = await fetchCurrentUser();
       setState((prev) => ({ ...prev, user }));
     } catch (err) {

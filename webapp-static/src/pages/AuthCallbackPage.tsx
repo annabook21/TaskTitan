@@ -1,119 +1,70 @@
 /**
  * OAuth callback page - handles redirect from Cognito Hosted UI.
- * AWS Best Practice: Use fetchAuthSession() to ensure OAuth code exchange completes
- * before checking user status.
- *
- * IMPORTANT: AppSync uses the access token for auth, which doesn't contain email/name.
- * We extract these from the ID token and sync to DynamoDB here.
- * @see https://docs.amplify.aws/react/build-a-backend/auth/connect-your-frontend/sign-in/#redirect-handling
- * @see https://github.com/aws-amplify/amplify-data/issues/485
+ * AWS Docs: https://docs.amplify.aws/gen1/react/build-a-backend/auth/add-social-provider/#required-for-multi-page-applications-complete-social-sign-in-after-redirect
  */
+import 'aws-amplify/auth/enable-oauth-listener';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth';
+import { getCurrentUser } from 'aws-amplify/auth';
+import { Hub } from 'aws-amplify/utils';
 import { Loader2 } from 'lucide-react';
-import { syncUserProfile } from '../api/appsync';
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // AWS Best Practice: Use AbortController to prevent state updates on unmounted component
-    const controller = new AbortController();
+    let mounted = true;
 
-    async function handleCallback() {
+    // Check if user is already authenticated (e.g., page refresh)
+    async function checkExistingAuth() {
       try {
-        // AWS Best Practice: fetchAuthSession ensures OAuth code exchange completes
-        // and tokens are stored before we check user status
-        const session = await fetchAuthSession();
-
-        // Check if component was unmounted during async operation
-        if (controller.signal.aborted) return;
-
-        // Verify user is authenticated
         await getCurrentUser();
-
-        if (controller.signal.aborted) return;
-
-        // Extract email and name from ID token (not available in access token)
-        // This fixes the issue where User records are created with null email/name
-        // because AppSync uses the access token which doesn't contain these claims
-        const idToken = session.tokens?.idToken;
-        if (idToken) {
-          const email = idToken.payload.email as string | undefined;
-          const name = idToken.payload.name as string | undefined;
-
-          if (email && name && !controller.signal.aborted) {
-            // Sync user profile to DynamoDB with data from ID token
-            await syncUserProfile({ email, name });
-          }
-        }
-
-        // Redirect to dashboard on success (only if not aborted)
-        if (!controller.signal.aborted) {
+        if (mounted) {
           navigate('/home', { replace: true });
         }
-      } catch (err) {
-        // Only set error if component is still mounted
-        if (controller.signal.aborted) return;
-
-        console.error('[AuthCallbackPage] Error:', err);
-
-        // Categorize OAuth errors for better user feedback
-        const errorMessage = extractAuthError(err);
-        setError(errorMessage);
+      } catch {
+        // Not authenticated yet - wait for OAuth flow via Hub
       }
     }
 
-    handleCallback();
+    // Listen for OAuth completion via Hub events
+    const unsubscribe = Hub.listen('auth', (data) => {
+      if (!mounted) return;
 
-    // Cleanup: abort pending operations if component unmounts
-    return () => controller.abort();
+      const { event } = data.payload;
+
+      if (event === 'signedIn' || event === 'signInWithRedirect') {
+        // OAuth code exchange completed successfully
+        navigate('/home', { replace: true });
+      } else if (event === 'signInWithRedirect_failure') {
+        // OAuth flow failed
+        const err = data.payload.data as Error | undefined;
+        console.error('[AuthCallbackPage] OAuth error:', err);
+        setError(err?.message || 'Sign in failed. Please try again.');
+      }
+    });
+
+    // Check existing auth (handles page refresh during callback)
+    checkExistingAuth();
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, [navigate]);
-
-  // Helper to categorize OAuth errors for user-friendly messages
-  function extractAuthError(err: unknown): string {
-    if (err instanceof Error) {
-      const message = err.message.toLowerCase();
-
-      // OAuth code exchange errors from Cognito
-      if (message.includes('invalid_grant') || message.includes('code has been consumed')) {
-        return 'Your session has expired. Please try signing in again.';
-      }
-      if (message.includes('invalid_request')) {
-        return 'Invalid sign-in request. Please check your network and try again.';
-      }
-      // Token parsing errors
-      if (message.includes('payload') || message.includes('token')) {
-        return 'Could not verify your identity. Please try signing in again.';
-      }
-      // Network errors
-      if (message.includes('network') || message.includes('fetch')) {
-        return 'Network error. Please check your connection and try again.';
-      }
-
-      return err.message;
-    }
-    return 'Sign-in failed. Please try again.';
-  }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-slate-900/70 backdrop-blur-2xl border border-red-500/30 rounded-3xl p-8 text-center">
-          <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-semibold text-white mb-2">Sign-in Failed</h2>
-          <p className="text-slate-400 mb-6">{error}</p>
-          <a
-            href="/"
-            className="inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl text-base font-semibold text-white bg-gradient-to-r from-cyan-500 to-violet-500 hover:from-cyan-400 hover:to-violet-400 transition-all"
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+        <div className="bg-slate-800 border border-red-500/30 rounded-2xl p-8 max-w-md text-center">
+          <h2 className="text-xl font-semibold text-white mb-4">Sign In Failed</h2>
+          <p className="text-slate-300 mb-6">{error}</p>
+          <a 
+            href="/signin" 
+            className="inline-flex items-center justify-center px-6 py-3 bg-cyan-500 hover:bg-cyan-600 text-white font-medium rounded-lg transition-colors"
           >
-            Return to Sign In
+            Try Again
           </a>
         </div>
       </div>
@@ -121,10 +72,10 @@ export function AuthCallbackPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
       <div className="text-center">
         <Loader2 className="w-12 h-12 text-cyan-400 animate-spin mx-auto mb-4" />
-        <p className="text-slate-400 text-lg">Completing sign-in...</p>
+        <p className="text-slate-300 text-lg">Completing sign in...</p>
       </div>
     </div>
   );

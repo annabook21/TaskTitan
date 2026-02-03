@@ -117,6 +117,8 @@ type Membership {
   hoursPerDay: Int
   availability: Int
   user: User
+  displayName: String # For guest members (when userId starts with "GUEST#")
+  projectId: String # For guest members from project share codes
 }
 
 # Dependency represents a "depends on" relationship between components

@@ -2,13 +2,21 @@
  * ProfilePage - displays the current authenticated user's profile.
  * Uses useAuth hook to get user data from AppSync.
  */
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { signInWithRedirect } from 'aws-amplify/auth';
 
 export function ProfilePage() {
   const navigate = useNavigate();
-  const { isLoading, isAuthenticated, user, cognitoUserId, error, signOut } = useAuth();
+  const { isLoading, isAuthenticated, user, cognitoUserId, error, signOut, refreshUser } = useAuth();
+
+  // Fetch user profile when authenticated (also auto-creates if not exists)
+  useEffect(() => {
+    if (isAuthenticated && !user && !isLoading) {
+      refreshUser();
+    }
+  }, [isAuthenticated, user, isLoading, refreshUser]);
 
   if (isLoading) {
     return (

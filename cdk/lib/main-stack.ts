@@ -1,5 +1,6 @@
 import { CfnOutput, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from 'aws-cdk-lib/aws-s3';
+import { Table } from 'aws-cdk-lib/aws-dynamodb';
 import { Construct } from 'constructs';
 import { AsyncJob } from './constructs/async-job';
 import { AppSyncGraphql } from './constructs/appsync-graphql';
@@ -38,11 +39,24 @@ export class MainStack extends Stack {
     // FORGE v2: DynamoDB Single-Table Design
     // AWS Best Practice: Single-table design with on-demand billing
     // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-general-nosql-design.html
-    const dynamoTable = new TaskTitanTable(this, 'DynamoTable', {
-      pointInTimeRecovery: true, // 35-day backup retention
-      removalPolicy: RemovalPolicy.RETAIN, // Prevent accidental data loss
-      enableStreams: true, // For real-time updates
-    });
+    // TEMPORARY: Import existing table (preserved from previous stack with RemovalPolicy.RETAIN)
+    // TODO: After first successful deploy, revert to: new TaskTitanTable(this, 'DynamoTable', {...})
+    // NOTE: Must use fromTableAttributes to include GSI names for proper IAM permissions
+    const existingTable = Table.fromTableAttributes(
+      this,
+      'ExistingTable',
+      {
+        tableName: 'TaskTitanForgeStack-TaskTitan',
+        globalIndexes: ['gsi1', 'gsi2', 'gsi3'],
+      }
+    );
+
+    // Wrap in TaskTitanTable interface for compatibility
+    const dynamoTable = {
+      table: existingTable,
+      tableName: existingTable.tableName,
+      tableArn: existingTable.tableArn,
+    } as any as TaskTitanTable;
 
     // Authentication with Cognito (using default Cognito domain - no custom domain)
     // SECURITY NOTE: Without custom domain, Cognito uses *.amazoncognito.com which is secure
@@ -86,15 +100,17 @@ export class MainStack extends Stack {
       webAclArn: props.webAclArn,
     });
 
-    // Configure Cognito OAuth callback URLs for CloudFront + local dev
+    // Configure Cognito OAuth callback URLs for CloudFront + local dev + custom domain
     auth.updateAllowedCallbackUrls(
       [
         `${staticFrontend.distributionUrl}/auth-callback`,
         'http://localhost:5173/auth-callback', // Vite dev server
+        'https://tasktitan.live/auth-callback', // Custom domain
       ],
       [
         staticFrontend.distributionUrl,
         'http://localhost:5173',
+        'https://tasktitan.live',
       ],
     );
 
