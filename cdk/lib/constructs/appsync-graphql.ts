@@ -2708,7 +2708,13 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   // If user is already authorized as project owner, skip this check
   if (!ctx.stash.needsTeamRoleCheck) {
-    return { operation: 'GetItem', key: { pk: 'SKIP', sk: 'SKIP' } };
+    return {
+      operation: 'GetItem',
+      key: util.dynamodb.toMapValues({
+        pk: 'SKIP',
+        sk: 'SKIP'
+      })
+    };
   }
   
   const teamId = ctx.stash.teamId;
