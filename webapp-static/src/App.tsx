@@ -44,7 +44,7 @@ export default function App() {
           <Route path="privacy" element={<PrivacyPage />} />
 
           {/* Guest routes (share code access via Cognito Identity Pool) */}
-          <Route path="join/:shareCode" element={<JoinPage />} />
+          <Route path="join" element={<JoinPage />} />
           <Route path="guest" element={<GuestDashboardPage />} />
 
           {/* Team invite routes (guest access supported) */}
