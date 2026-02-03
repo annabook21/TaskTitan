@@ -42,15 +42,15 @@ export interface StaticFrontendProps {
   readonly webAclArn?: string;
 
   /**
-   * Optional custom domain name (e.g., 'tasktitan.live').
-   * If not provided, uses CloudFront's default domain.
+   * Custom domain name override.
+   * Defaults to 'tasktitan.live' if not provided.
    */
   readonly customDomain?: string;
 
   /**
-   * Optional ACM certificate ARN for custom domain.
+   * ACM certificate ARN override.
    * Must be in us-east-1 region.
-   * Required if customDomain is provided.
+   * Defaults to production certificate if not provided.
    */
   readonly certificateArn?: string;
 
@@ -88,10 +88,9 @@ export class StaticFrontend extends Construct {
 
     const s3Origin = S3BucketOrigin.withOriginAccessControl(this.bucket);
 
-    // Import ACM certificate only if custom domain is configured
-    const certificate = certificateArn
-      ? acm.Certificate.fromCertificateArn(this, 'Certificate', certificateArn)
-      : undefined;
+    // Import ACM certificate - use provided ARN or fall back to hardcoded production cert
+    const certArn = certificateArn || 'arn:aws:acm:us-east-1:232894901916:certificate/b23ebe27-d839-4b87-b117-0148907aa109';
+    const certificate = acm.Certificate.fromCertificateArn(this, 'Certificate', certArn);
 
     // AWS Best Practice: Security headers policy
     // https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-response-headers-policies.html
@@ -132,13 +131,13 @@ export class StaticFrontend extends Construct {
     // AWS Best Practice: Use managed CACHING_DISABLED policy for index.html
     // This ensures users always get the latest version while assets use long TTL
 
+    // Use provided custom domain or fall back to hardcoded production domain
+    const domain = customDomain || 'tasktitan.live';
+
     this.distribution = new Distribution(this, 'Distribution', {
       comment: `${Stack.of(this).stackName} static frontend`,
-      // Only set domain/cert if custom domain is configured
-      ...(customDomain && certificate && {
-        domainNames: [customDomain],
-        certificate: certificate,
-      }),
+      domainNames: [domain],
+      certificate: certificate,
       defaultBehavior: {
         origin: s3Origin,
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
