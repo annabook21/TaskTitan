@@ -472,8 +472,17 @@ export function request(ctx) {
   if (memberships.length === 0) {
     return { operation: 'Query', query: { expression: 'pk = :pk', expressionValues: util.dynamodb.toMapValues({ ':pk': 'NONE' }) } };
   }
+  // Deduplicate team IDs to avoid BatchGetItem "duplicate keys" error
+  const seenTeamIds = {};
+  const uniqueTeamIds = [];
+  for (const m of memberships) {
+    if (!seenTeamIds[m.teamId]) {
+      seenTeamIds[m.teamId] = true;
+      uniqueTeamIds.push(m.teamId);
+    }
+  }
   // BatchGetItem format per AWS docs: tables: { tableName: { keys: [...] } }
-  const keys = memberships.map(m => util.dynamodb.toMapValues({ pk: 'TEAM#' + m.teamId, sk: 'METADATA' }));
+  const keys = uniqueTeamIds.map(teamId => util.dynamodb.toMapValues({ pk: 'TEAM#' + teamId, sk: 'METADATA' }));
   return {
     operation: 'BatchGetItem',
     tables: {
@@ -490,9 +499,17 @@ export function response(ctx) {
   for (const team of teams) {
     if (team && team.id) teamMap[team.id] = team;
   }
-  return memberships.map(m => ({
-    team: teamMap[m.teamId] || { id: m.teamId, name: 'Unknown' },
-    members: [m]
+  // Group memberships by team and return unique teams with all their members
+  const teamMemberMap = {};
+  for (const m of memberships) {
+    if (!teamMemberMap[m.teamId]) {
+      teamMemberMap[m.teamId] = [];
+    }
+    teamMemberMap[m.teamId].push(m);
+  }
+  return Object.keys(teamMemberMap).map(teamId => ({
+    team: teamMap[teamId] || { id: teamId, name: 'Unknown' },
+    members: teamMemberMap[teamId]
   })).filter(t => t.team && t.team.name !== 'Unknown');
 }
 `.trim().replace(/#{tableName}/g, dynamoTable.tableName)),
@@ -713,6 +730,7 @@ export function request(ctx) {
     id: teamId,
     name: input.name,
     description: input.description || null,
+    memberCount: 1,
     createdAt: now,
     updatedAt: now
   };
@@ -743,7 +761,7 @@ export function response(ctx) {
   const input = ctx.args.input;
   const userId = ctx.identity.sub;
   const now = util.time.nowISO8601();
-  const team = { id: input.id, name: input.name, description: input.description || null, createdAt: now, updatedAt: now };
+  const team = { id: input.id, name: input.name, description: input.description || null, memberCount: 1, createdAt: now, updatedAt: now };
   const membership = { id: util.autoId(), userId, teamId: input.id, role: 'OWNER', joinedAt: now, title: null, hoursPerDay: 6, availability: 100 };
   return { team, members: [membership] };
 }
@@ -789,7 +807,8 @@ export function response(ctx) {
 `.trim()),
     });
 
-    // Resolver: Mutation.addTeamMember (JS) - PutItem Membership
+    // Resolver: Mutation.addTeamMember (JS) - TransactWrite: PutItem Membership + Increment memberCount
+    // AWS Best Practice: Use TransactWriteItems for atomic multi-item operations
     new appsync.Resolver(this, 'AddTeamMemberResolver', {
       api: this.api,
       typeName: 'Mutation',
@@ -816,26 +835,44 @@ export function request(ctx) {
     gsi1pk: 'USER#' + input.userId,
     gsi1sk: 'TEAM#' + input.teamId
   };
+  ctx.stash.membership = membership;
   return {
-    operation: 'PutItem',
-    key: util.dynamodb.toMapValues({ pk: membership.pk, sk: membership.sk }),
-    attributeValues: util.dynamodb.toMapValues(membership),
-    condition: { expression: 'attribute_not_exists(pk)' }
+    operation: 'TransactWriteItems',
+    transactItems: [
+      {
+        table: '${dynamoTable.tableName}',
+        operation: 'PutItem',
+        key: util.dynamodb.toMapValues({ pk: membership.pk, sk: membership.sk }),
+        attributeValues: util.dynamodb.toMapValues(membership),
+        condition: { expression: 'attribute_not_exists(pk)' }
+      },
+      {
+        table: '${dynamoTable.tableName}',
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ pk: 'TEAM#' + input.teamId, sk: 'METADATA' }),
+        update: {
+          expression: 'SET memberCount = if_not_exists(memberCount, :zero) + :one',
+          expressionValues: util.dynamodb.toMapValues({ ':zero': 0, ':one': 1 })
+        }
+      }
+    ]
   };
 }
 export function response(ctx) {
   if (ctx.error) {
-    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException' ||
+        ctx.error.message.includes('ConditionalCheckFailed')) {
       util.error('Member already exists in team', 'MemberAlreadyExists');
     }
     util.error(ctx.error.message, ctx.error.type);
   }
-  return ctx.result;
+  return ctx.stash.membership;
 }
 `.trim()),
     });
 
-    // Resolver: Mutation.removeTeamMember (JS) - DeleteItem Membership with existence check
+    // Resolver: Mutation.removeTeamMember (JS) - TransactWrite: DeleteItem Membership + Decrement memberCount
+    // AWS Best Practice: Use TransactWriteItems for atomic multi-item operations
     new appsync.Resolver(this, 'RemoveTeamMemberResolver', {
       api: this.api,
       typeName: 'Mutation',
@@ -848,17 +885,33 @@ export function request(ctx) {
   const teamId = ctx.args.teamId;
   const userId = ctx.args.userId;
   return {
-    operation: 'DeleteItem',
-    key: util.dynamodb.toMapValues({
-      pk: 'TEAM#' + teamId,
-      sk: 'MEMBER#' + userId
-    }),
-    condition: { expression: 'attribute_exists(pk)' }
+    operation: 'TransactWriteItems',
+    transactItems: [
+      {
+        table: '${dynamoTable.tableName}',
+        operation: 'DeleteItem',
+        key: util.dynamodb.toMapValues({
+          pk: 'TEAM#' + teamId,
+          sk: 'MEMBER#' + userId
+        }),
+        condition: { expression: 'attribute_exists(pk)' }
+      },
+      {
+        table: '${dynamoTable.tableName}',
+        operation: 'UpdateItem',
+        key: util.dynamodb.toMapValues({ pk: 'TEAM#' + teamId, sk: 'METADATA' }),
+        update: {
+          expression: 'SET memberCount = if_not_exists(memberCount, :one) - :one',
+          expressionValues: util.dynamodb.toMapValues({ ':one': 1 })
+        }
+      }
+    ]
   };
 }
 export function response(ctx) {
   if (ctx.error) {
-    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException' ||
+        ctx.error.message.includes('ConditionalCheckFailed')) {
       util.error('Member not found in team', 'MemberNotFound');
     }
     util.error(ctx.error.message, ctx.error.type);
@@ -5160,8 +5213,8 @@ export function request(ctx) {
   const expiresInHours = input.expiresInHours || 168; // 7 days default
   const maxUses = input.maxUses || null;
 
-  // Generate 8-character alphanumeric code
-  const code = util.autoId().substring(0, 8).toUpperCase();
+  // Generate 6-character alphanumeric code (UUID first 6 chars = 36^6 = 2B+ combinations)
+  const code = util.autoId().substring(0, 6).toUpperCase();
   const now = util.time.nowISO8601();
   const ttlSeconds = util.time.nowEpochSeconds() + (expiresInHours * 3600);
   const expiresAt = util.time.epochMilliSecondsToISO8601(ttlSeconds * 1000);
@@ -5195,8 +5248,37 @@ export function response(ctx) {
     util.error('Only team owners and admins can generate invite codes', 'Unauthorized');
   }
 
-  // Store team name from membership for denormalization
-  ctx.stash.teamName = membership.teamName || 'Team';
+  return ctx.result;
+}
+`.trim()),
+    });
+
+    // Function: Fetch team metadata to get team name for invite denormalization
+    const fetchTeamForInviteFn = new appsync.AppsyncFunction(this, 'FetchTeamForInviteFn', {
+      api: this.api,
+      name: 'fetchTeamForInvite',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const team = ctx.result;
+  // Store actual team name from team metadata
+  ctx.stash.teamName = team ? team.name : 'Team';
 
   return ctx.result;
 }
@@ -5269,7 +5351,7 @@ export function response(ctx) {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'generateTeamInvite',
-      pipelineConfig: [verifyTeamOwnerAdminFn, createTeamInviteCodeFn],
+      pipelineConfig: [verifyTeamOwnerAdminFn, fetchTeamForInviteFn, createTeamInviteCodeFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) {
@@ -5586,12 +5668,48 @@ export function response(ctx) {
 `.trim()),
     });
 
+    // Function: Increment team member count (AWS Best Practice: atomic counter)
+    // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/WorkingWithItems.html#WorkingWithItems.AtomicCounters
+    const incrementTeamMemberCountFn = new appsync.AppsyncFunction(this, 'IncrementTeamMemberCountFn', {
+      api: this.api,
+      name: 'incrementTeamMemberCount',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+
+  // AWS Best Practice: Use atomic counter with if_not_exists for initialization
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET memberCount = if_not_exists(memberCount, :zero) + :one',
+      expressionValues: util.dynamodb.toMapValues({
+        ':zero': 0,
+        ':one': 1
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  // Return the membership from previous function
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
     // Pipeline Resolver: Mutation.joinTeamWithCode
     new appsync.Resolver(this, 'JoinTeamWithCodeResolver', {
       api: this.api,
       typeName: 'Mutation',
       fieldName: 'joinTeamWithCode',
-      pipelineConfig: [validateInviteCodeFn, createTeamMembershipFromInviteFn, incrementInviteUsageCountFn],
+      pipelineConfig: [validateInviteCodeFn, createTeamMembershipFromInviteFn, incrementInviteUsageCountFn, incrementTeamMemberCountFn],
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(`
 export function request(ctx) {
@@ -5714,6 +5832,269 @@ export function request(ctx) {
   return {};
 }
 export function response(ctx) {
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // ============================================
+    // RESOLVER: guestJoinTeam (Pipeline - IAM auth)
+    // ============================================
+
+    // Function: Validate team invite code for guest joining
+    const validateTeamInviteForGuestJoinFn = new appsync.AppsyncFunction(this, 'ValidateTeamInviteForGuestJoinFn', {
+      name: 'validateTeamInviteForGuestJoin',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const input = ctx.args.input;
+  const code = input.code.toUpperCase();
+  const displayName = (input.displayName || '').trim();
+
+  // Input validation (AWS Best Practice: validate all user input)
+  if (!displayName || displayName.length === 0) {
+    util.error('Display name is required', 'ValidationError');
+  }
+  if (displayName.length > 100) {
+    util.error('Display name must be 100 characters or less', 'ValidationError');
+  }
+  if (code.length !== 6) {
+    util.error('Invalid invite code format', 'ValidationError');
+  }
+
+  // Get cognitoIdentityId from IAM auth (AWS Best Practice: verify identity)
+  const cognitoIdentityId = ctx.identity.cognitoIdentityId;
+  if (!cognitoIdentityId) {
+    util.error('Invalid authentication', 'Unauthorized');
+  }
+
+  ctx.stash.cognitoIdentityId = cognitoIdentityId;
+  ctx.stash.displayName = displayName;
+  ctx.stash.code = code;
+
+  // Get the invitation code to validate it
+  return {
+    operation: 'GetItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  const invite = ctx.result;
+  if (!invite) {
+    util.error('Invalid invitation code', 'InvalidTeamInvite');
+  }
+
+  // Check expiration (AWS Best Practice: validate TTL server-side)
+  const nowEpoch = util.time.nowEpochSeconds();
+  if (invite.ttl && invite.ttl < nowEpoch) {
+    util.error('Invitation code has expired', 'ExpiredTeamInvite');
+  }
+
+  // Check max uses (AWS Best Practice: enforce usage limits)
+  if (invite.maxUses && invite.usageCount >= invite.maxUses) {
+    util.error('Invitation code has reached maximum uses', 'MaxUsesReached');
+  }
+
+  // Store invite info for next function
+  ctx.stash.teamId = invite.teamId;
+  ctx.stash.teamName = invite.teamName || null;
+  // Guests always get GUEST role, regardless of invite role
+  ctx.stash.role = 'GUEST';
+
+  return invite;
+}
+`.trim()),
+    });
+
+    // Function: Create guest record in DynamoDB for team join
+    const createGuestRecordForTeamJoinFn = new appsync.AppsyncFunction(this, 'CreateGuestRecordForTeamJoinFn', {
+      name: 'createGuestRecordForTeamJoin',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.stash.cognitoIdentityId;
+  const now = util.time.nowISO8601();
+
+  // Create GUEST# record
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'GUEST#' + guestId,
+      sk: 'METADATA'
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: guestId,
+      cognitoIdentityId: guestId,
+      displayName: ctx.stash.displayName,
+      teamId: ctx.stash.teamId,
+      teamName: ctx.stash.teamName,
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      gsi1pk: 'TEAM#' + ctx.stash.teamId,
+      gsi1sk: 'GUEST#' + guestId
+    })
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  // Pass through stash for next function (don't return PutItem result)
+  return ctx.stash;
+}
+`.trim()),
+    });
+
+    // Function: Create guest team membership record for team join
+    const createGuestMembershipForTeamJoinFn = new appsync.AppsyncFunction(this, 'CreateGuestMembershipForTeamJoinFn', {
+      name: 'createGuestMembershipForTeamJoin',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const guestId = ctx.stash.cognitoIdentityId;
+  const teamId = ctx.stash.teamId;
+  const role = ctx.stash.role;
+  const now = util.time.nowISO8601();
+  const membershipId = guestId + '#' + teamId;
+
+  // Create guest team membership with condition to prevent duplicates
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#GUEST#' + guestId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: membershipId,
+      userId: 'GUEST#' + guestId,
+      teamId: teamId,
+      role: role,
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      gsi1pk: 'GUEST#' + guestId,
+      gsi1sk: 'TEAM#' + teamId
+    }),
+    condition: { expression: 'attribute_not_exists(pk)' }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    // Handle duplicate membership gracefully (idempotent operation)
+    const errorType = ctx.error.type || ctx.error.errorType || '';
+    const errorMessage = ctx.error.message || '';
+
+    if (errorType === 'DynamoDB:ConditionalCheckFailedException' ||
+        errorMessage.includes('ConditionalCheckFailedException') ||
+        errorMessage.includes('conditional request failed')) {
+      // Guest already joined - return success (idempotent)
+      return {
+        guestId: ctx.stash.cognitoIdentityId,
+        displayName: ctx.stash.displayName,
+        teamId: ctx.stash.teamId,
+        teamName: ctx.stash.teamName,
+        role: ctx.stash.role || 'GUEST'
+      };
+    }
+    // For other errors, propagate them
+    util.error(ctx.error.message || errorMessage, errorType || ctx.error.type);
+  }
+
+  // Return the guest team session on success
+  return {
+    guestId: ctx.stash.cognitoIdentityId,
+    displayName: ctx.stash.displayName,
+    teamId: ctx.stash.teamId,
+    teamName: ctx.stash.teamName,
+    role: ctx.stash.role || 'GUEST'
+  };
+}
+`.trim()),
+    });
+
+    // Function: Increment invite usage count for guest join
+    // AWS Best Practice: Track usage for auditing and enforce limits
+    // Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/WorkingWithItems.html#WorkingWithItems.AtomicCounters
+    const incrementGuestInviteUsageFn = new appsync.AppsyncFunction(this, 'IncrementGuestInviteUsageFn', {
+      name: 'incrementGuestInviteUsage',
+      api: this.api,
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const code = ctx.stash.code;
+
+  return {
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM_INVITE#' + code,
+      sk: 'METADATA'
+    }),
+    update: {
+      expression: 'SET usageCount = if_not_exists(usageCount, :zero) + :one',
+      expressionValues: util.dynamodb.toMapValues({
+        ':zero': 0,
+        ':one': 1
+      })
+    }
+  };
+}
+export function response(ctx) {
+  // Return the membership result from previous function (ignore update result)
+  return ctx.prev.result;
+}
+`.trim()),
+    });
+
+    // Pipeline Resolver: Mutation.guestJoinTeam
+    new appsync.Resolver(this, 'GuestJoinTeamResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'guestJoinTeam',
+      pipelineConfig: [validateTeamInviteForGuestJoinFn, createGuestRecordForTeamJoinFn, createGuestMembershipForTeamJoinFn, incrementGuestInviteUsageFn, incrementTeamMemberCountFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(`
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  if (ctx.error) {
+    const errorType = ctx.error.type || '';
+    const errorMessage = ctx.error.message || '';
+    if (errorType === 'DynamoDB:ConditionalCheckFailedException' ||
+        errorMessage.includes('ConditionalCheckFailedException') ||
+        errorMessage.includes('conditional request failed')) {
+      if (ctx.stash && ctx.stash.cognitoIdentityId) {
+        return {
+          guestId: ctx.stash.cognitoIdentityId,
+          displayName: ctx.stash.displayName || 'Guest',
+          teamId: ctx.stash.teamId,
+          teamName: ctx.stash.teamName || null,
+          role: ctx.stash.role || 'GUEST'
+        };
+      }
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
   return ctx.prev.result;
 }
 `.trim()),

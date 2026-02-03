@@ -112,6 +112,13 @@ export function GuestDashboardPage() {
 
       const { guestId, projectId } = guestSession;
 
+      // Check if we have a valid projectId (team-only guests won't have one)
+      if (!projectId) {
+        setError('No project selected. Please ask your team owner to share a project invite link.');
+        setLoading(false);
+        return;
+      }
+
       // Load components and assignments in parallel
       const [componentsList, assignmentsList] = await Promise.all([
         guestListComponents(guestId, projectId),
@@ -286,6 +293,44 @@ export function GuestDashboardPage() {
 
   if (!guestSession) {
     return null; // Will redirect
+  }
+
+  // Team-only guest (no project selected) - show helpful message
+  if (!guestSession.projectId) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
+        <div className="max-w-md w-full text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 mb-6">
+            <FolderKanban className="w-8 h-8 text-amber-400" />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-3">Welcome to {guestSession.teamName || 'the team'}!</h1>
+          <p className="text-slate-400 mb-6">
+            You've joined the team as a guest. To view and work on tasks, you'll need a project share link from your team owner.
+          </p>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Ask your team owner to share a project invite link with you.
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={handleSignIn}
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors"
+              >
+                <LogIn className="w-4 h-4" />
+                Sign In
+              </button>
+              <button
+                onClick={handleLeave}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg font-medium transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

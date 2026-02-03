@@ -10,20 +10,25 @@
  *    - Sign in and join permanently (if already have account)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { signInWithRedirect } from 'aws-amplify/auth';
 import { Users, ArrowRight, Loader2, AlertCircle, CheckCircle2, UserPlus, LogIn } from 'lucide-react';
 import { useGuestAuth } from '../hooks/useGuestAuth';
 import { useAuth } from '../hooks/useAuth';
-import { 
+import {
   validateTeamInvite,
   guestJoinTeam,
   acceptTeamInvite,
   type TeamInviteInfo,
 } from '../api/appsync';
+import { appSyncApiKey } from '../config';
 
 type JoinStep = 'code' | 'options' | 'guest-name' | 'joining';
+
+/** Normalize invite code: uppercase, alphanumeric only, max 6 chars */
+const normalizeInviteCode = (raw: string): string =>
+  raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 
 export function AcceptTeamInvitePage() {
   const navigate = useNavigate();
@@ -39,29 +44,35 @@ export function AcceptTeamInvitePage() {
   const [isValidating, setIsValidating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
+  // Race condition prevention: ignore stale validation responses
+  const validateRequestId = useRef(0);
+
   // Format code as user types (uppercase, max 6 chars)
   const handleCodeChange = (value: string) => {
-    const formatted = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
-    setCode(formatted);
+    setCode(normalizeInviteCode(value));
     setError(null);
   };
 
   // Validate invitation code with a specific value
   const handleValidateCodeWithValue = useCallback(async (codeValue: string) => {
-    // Handle both 6 and 8 character codes (take first 6 if longer)
-    // Some codes might be 8 chars, extract first 6
-    const normalizedCode = codeValue.length >= 6 ? codeValue.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) : codeValue.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const normalizedCode = normalizeInviteCode(codeValue);
     if (normalizedCode.length !== 6) {
       setError('Please enter a 6-character code');
       return;
     }
+
+    // Race condition prevention: track this request
+    const requestId = ++validateRequestId.current;
 
     setIsValidating(true);
     setError(null);
 
     try {
       const result = await validateTeamInvite(normalizedCode);
-      
+
+      // Ignore stale responses from previous requests
+      if (requestId !== validateRequestId.current) return;
+
       if (result.valid) {
         setInviteInfo(result);
         // If authenticated, accept directly
@@ -71,8 +82,8 @@ export function AcceptTeamInvitePage() {
           try {
             await acceptTeamInvite({ code: normalizedCode });
             navigate(`/team/${result.teamId}`);
-        } catch (err: unknown) {
-          console.error('[AcceptTeamInvitePage] acceptTeamInvite error:', err);
+          } catch (err: unknown) {
+            console.error('[AcceptTeamInvitePage] acceptTeamInvite error:', err);
             const message = err instanceof Error ? err.message : 'Failed to accept invitation';
             setError(message);
             setIsJoining(false);
@@ -85,12 +96,15 @@ export function AcceptTeamInvitePage() {
         setError('Invalid or expired invitation code');
       }
     } catch (err) {
+      // Ignore errors from stale requests
+      if (requestId !== validateRequestId.current) return;
+
       console.error('[AcceptTeamInvitePage] validateTeamInvite error:', err);
-      
+
       // Extract error message from various error formats
       let message = 'Failed to validate code';
       let errorType = '';
-      
+
       if (err instanceof Error) {
         message = err.message;
       } else if (err && typeof err === 'object') {
@@ -105,7 +119,7 @@ export function AcceptTeamInvitePage() {
           message = (err as { message: string }).message;
         }
       }
-      
+
       if (message.includes('Network') || message.includes('fetch')) {
         setError('Unable to connect. Please check your internet connection.');
       } else if (message.includes('InvalidTeamInvite') || errorType === 'InvalidTeamInvite') {
@@ -113,13 +127,21 @@ export function AcceptTeamInvitePage() {
       } else if (message.includes('ExpiredTeamInvite') || errorType === 'ExpiredTeamInvite') {
         setError('This code has expired. Please ask your team owner for a new one.');
       } else if (message.includes('Unauthorized') || errorType === 'Unauthorized') {
-        setError('Unable to validate code. Please check that the API key is configured.');
-        console.error('[AcceptTeamInvitePage] Unauthorized error - API key may not be configured');
+        if (!appSyncApiKey) {
+          setError('Configuration error: API key is not set. Please contact support.');
+          console.error('[AcceptTeamInvitePage] Unauthorized error - VITE_APPSYNC_API_KEY environment variable is not configured');
+        } else {
+          setError('Unable to validate code. Please try again or contact support.');
+          console.error('[AcceptTeamInvitePage] Unauthorized error - API key may be invalid or expired');
+        }
       } else {
         setError(message);
       }
     } finally {
-      setIsValidating(false);
+      // Only clear loading state if this is still the current request
+      if (requestId === validateRequestId.current) {
+        setIsValidating(false);
+      }
     }
   }, [isAuthenticated, navigate]);
 
@@ -132,6 +154,7 @@ export function AcceptTeamInvitePage() {
       authLoading,
       isAuthenticated,
       guestSession: !!guestSession,
+      hasApiKey: !!appSyncApiKey,
     });
   }, [authLoading, isAuthenticated, guestSession, searchParams]);
 
@@ -179,8 +202,7 @@ export function AcceptTeamInvitePage() {
   useEffect(() => {
     const codeFromUrl = searchParams.get('code');
     if (codeFromUrl && !code) {
-      // Handle codes that might be longer (8 chars) or have formatting - extract first 6 chars
-      const formattedCode = codeFromUrl.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+      const formattedCode = normalizeInviteCode(codeFromUrl);
       if (formattedCode.length === 6) {
         setCode(formattedCode);
         // Auto-validate immediately
@@ -210,6 +232,7 @@ export function AcceptTeamInvitePage() {
       return;
     }
 
+    setIsJoining(true);
     setStep('joining');
     setError(null);
 
@@ -330,6 +353,7 @@ export function AcceptTeamInvitePage() {
                 value={code}
                 onChange={(e) => handleCodeChange(e.target.value)}
                 placeholder="ABC123"
+                maxLength={6}
                 className="w-full px-4 py-3 text-center text-2xl font-mono tracking-widest rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 autoFocus
                 autoComplete="off"
@@ -418,7 +442,7 @@ export function AcceptTeamInvitePage() {
 
               {/* Option 2: Create Account */}
               <Link
-                to={`/sign-up?redirect=/join-team?code=${code}`}
+                to={`/sign-up?redirect=${encodeURIComponent(`/join-team?code=${code}`)}`}
                 className="w-full flex items-center gap-3 p-4 bg-slate-800 border border-slate-700 rounded-xl hover:border-violet-500/50 transition-all text-left group"
               >
                 <div className="w-10 h-10 rounded-lg bg-violet-500/10 flex items-center justify-center group-hover:bg-violet-500/20">

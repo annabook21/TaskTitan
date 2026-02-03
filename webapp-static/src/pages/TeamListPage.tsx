@@ -143,7 +143,8 @@ export function TeamListPage() {
           {teams.map(({ team, members }, index) => {
             const userRole = (members[0]?.role || 'MEMBER') as TeamRole;
             const RoleIcon = roleIcons[userRole];
-            const memberCount = members.length;
+            // Use team.memberCount (atomic counter) for accurate count, fallback to members.length
+            const memberCount = team.memberCount || members.length;
             const projectCount = projectCountByTeamId[team.id] ?? 0;
 
             return (

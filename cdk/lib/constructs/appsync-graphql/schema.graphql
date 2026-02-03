@@ -29,6 +29,8 @@ type Team {
   id: ID!
   name: String!
   description: String
+  # Atomic counter for team member count (AWS best practice for frequently accessed counts)
+  memberCount: Int
   createdAt: String
   updatedAt: String
 }
@@ -415,6 +417,22 @@ input GenerateShareCodeInput {
 input GuestJoinInput {
   code: String!
   displayName: String!
+}
+
+# Input for guest joining a team with invite code (IAM auth)
+input GuestJoinTeamInput {
+  code: String!
+  displayName: String!
+}
+
+# Guest team session after joining with team invite code
+# guestId is the Cognito Identity Pool identity ID for security validation
+type GuestTeamSession @aws_iam {
+  guestId: ID!
+  displayName: String!
+  teamId: ID!
+  teamName: String
+  role: MemberRole!
 }
 
 # ============================================
@@ -1231,6 +1249,10 @@ type Mutation {
 
   # Revoke team invite code (owner/admin only)
   revokeTeamInvite(code: String!): Boolean!
+
+  # Guest joins team with invite code (IAM auth from Identity Pool)
+  # Creates GUEST#<guestId> and TEAM#<teamId>/MEMBER#GUEST#<guestId> items
+  guestJoinTeam(input: GuestJoinTeamInput!): GuestTeamSession! @aws_iam
 
   # ============================================
   # Guest to User Migration

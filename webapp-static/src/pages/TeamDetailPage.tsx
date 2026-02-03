@@ -53,6 +53,7 @@ interface TeamData {
   id: string;
   name: string;
   description?: string | null;
+  memberCount?: number | null;
   createdAt?: string | null;
 }
 
@@ -224,7 +225,7 @@ export function TeamDetailPage() {
             <div className="flex items-center gap-4 mt-3 text-sm text-slate-500">
               <span className="flex items-center gap-1.5">
                 <Users className="w-4 h-4" />
-                {members.length} member{members.length !== 1 ? 's' : ''}
+                {team.memberCount || members.length} member{(team.memberCount || members.length) !== 1 ? 's' : ''}
               </span>
               <span className="flex items-center gap-1.5">
                 <FolderKanban className="w-4 h-4" />
@@ -426,17 +427,20 @@ export function TeamDetailPage() {
                 </button>
               ) : (
                 <div className="p-4 bg-red-900/20 border border-red-600/30 rounded-lg space-y-3">
-                  <p className="text-sm text-red-300">
+                  <label htmlFor="delete-team-confirm" className="block text-sm text-red-300">
                     This will permanently delete the team and all its data. Type{' '}
                     <strong>{team.name}</strong> to confirm.
-                  </p>
+                  </label>
                   <input
+                    id="delete-team-confirm"
+                    name="delete-team-confirm"
                     type="text"
                     value={deleteConfirmText}
                     onChange={(e) => setDeleteConfirmText(e.target.value)}
                     placeholder="Type team name to confirm"
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500"
                     disabled={deleting}
+                    autoComplete="off"
                   />
                   <div className="flex gap-2">
                     <button

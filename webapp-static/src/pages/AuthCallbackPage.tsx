@@ -12,7 +12,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { Loader2 } from 'lucide-react';
-import { syncUserProfile, migrateGuestToUser } from '../api/appsync';
+import { syncUserProfile, migrateGuestToUser, acceptTeamInvite } from '../api/appsync';
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -144,6 +144,29 @@ export function AuthCallbackPage() {
         } finally {
           // Always clear the pending migration flag
           localStorage.removeItem('pendingGuestMigration');
+        }
+      }
+
+      // Check for pending team invite (user clicked "Sign In" on team invite page)
+      const pendingTeamInvite = sessionStorage.getItem('pendingTeamInvite');
+      if (pendingTeamInvite && isMounted) {
+        try {
+          setStatus('Accepting team invitation...');
+          console.log('[AuthCallbackPage] Accepting pending team invite:', pendingTeamInvite);
+
+          const result = await acceptTeamInvite({ code: pendingTeamInvite });
+          console.log('[AuthCallbackPage] Team invite accepted:', result);
+
+          // Clear the pending invite and redirect to the team
+          sessionStorage.removeItem('pendingTeamInvite');
+          if (isMounted && result?.teamId) {
+            navigate(`/team/${result.teamId}`, { replace: true });
+            return;
+          }
+        } catch (err) {
+          console.error('[AuthCallbackPage] Team invite accept error:', err);
+          // Don't fail - user is still authenticated, they can try again
+          sessionStorage.removeItem('pendingTeamInvite');
         }
       }
 

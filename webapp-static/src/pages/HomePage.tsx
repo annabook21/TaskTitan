@@ -81,8 +81,8 @@ export function HomePage() {
 
         setRecentProjects(projectsWithCounts);
 
-        // Calculate stats
-        const totalMembers = teamsData.reduce((acc, t) => acc + t.members.length, 0);
+        // Calculate stats - use team.memberCount (atomic counter) for accurate counts
+        const totalMembers = teamsData.reduce((acc, t) => acc + (t.team.memberCount || t.members.length), 0);
         const totalComponents = projectsWithCounts.reduce((acc, p) => acc + p.componentCount, 0);
 
         setStats({
@@ -198,15 +198,13 @@ export function HomePage() {
             </div>
           </section>
         </main>
-
-        <Footer />
       </div>
     );
   }
 
   // Signed in - show dashboard
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="flex flex-col">
       <main className="flex-grow">
         {/* Hero Section */}
         <section className="relative overflow-hidden border-b border-slate-800">
@@ -380,7 +378,7 @@ export function HomePage() {
                               {teamData.team.name}
                             </h3>
                             <p className="text-xs text-slate-500 mt-1">
-                              {teamData.members.length} members
+                              {teamData.team.memberCount || teamData.members.length} members
                             </p>
                           </div>
                         </div>
@@ -442,28 +440,6 @@ export function HomePage() {
           </div>
         </section>
       </main>
-
-      <Footer />
     </div>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="border-t border-slate-800 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between text-sm text-slate-500">
-          <div>© 2026 TaskTitan. Built with AWS Serverless.</div>
-          <div className="flex items-center gap-4">
-            <Link to="/docs" className="hover:text-slate-300">
-              Docs
-            </Link>
-            <Link to="/privacy" className="hover:text-slate-300">
-              Privacy
-            </Link>
-          </div>
-        </div>
-      </div>
-    </footer>
   );
 }

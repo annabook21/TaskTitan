@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getCurrentUser } from 'aws-amplify/auth';
 import { ArrowLeft, Loader2, UserPlus, CheckCircle } from 'lucide-react';
 import { registerUser } from '../api/appsync';
 
 export function SignUpPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -134,6 +135,16 @@ export function SignUpPage() {
             </p>
             <Link
               to="/"
+              onClick={() => {
+                // If coming from team invite, store the code for auto-accept after sign-in
+                const redirectUrl = searchParams.get('redirect');
+                if (redirectUrl) {
+                  const codeMatch = redirectUrl.match(/[?&]code=([A-Za-z0-9]+)/);
+                  if (codeMatch) {
+                    sessionStorage.setItem('pendingTeamInvite', codeMatch[1].toUpperCase());
+                  }
+                }
+              }}
               className="inline-flex items-center justify-center gap-2 py-3 px-6 rounded-xl text-base font-semibold text-white bg-gradient-to-r from-cyan-500 to-violet-500 hover:from-cyan-400 hover:to-violet-400 transition-all"
             >
               Go to Sign In

@@ -55,6 +55,8 @@ export type Team = {
   id: string;
   name: string;
   description?: string | null;
+  // Atomic counter for team member count (AWS best practice)
+  memberCount?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -504,6 +506,7 @@ const ListTeamsForUser = /* GraphQL */ `
         id
         name
         description
+        memberCount
         createdAt
         updatedAt
       }
@@ -526,6 +529,7 @@ const GetTeamWithMembers = /* GraphQL */ `
         id
         name
         description
+        memberCount
         createdAt
         updatedAt
       }
@@ -584,6 +588,7 @@ const CreateTeam = /* GraphQL */ `
         id
         name
         description
+        memberCount
         createdAt
         updatedAt
       }
@@ -604,6 +609,7 @@ const UpdateTeam = /* GraphQL */ `
       id
       name
       description
+      memberCount
       createdAt
       updatedAt
     }
@@ -3614,19 +3620,6 @@ const GuestJoinTeam = /* GraphQL */ `
   }
 `;
 
-const AcceptTeamInvite = /* GraphQL */ `
-  mutation AcceptTeamInvite($input: AcceptTeamInviteInput!) {
-    acceptTeamInvite(input: $input) {
-      id
-      userId
-      teamId
-      role
-      joinedAt
-      title
-    }
-  }
-`;
-
 /**
  * Join a team as a guest using an invitation code (IAM auth via Identity Pool).
  * Creates a guest team session and returns guestId for subsequent operations.
@@ -3645,16 +3638,16 @@ export async function guestJoinTeam(input: GuestJoinTeamInput): Promise<GuestTea
 
 /**
  * Accept a team invitation as an authenticated user (Cognito auth required).
- * Adds the user as a team member with the role from the invitation.
+ * Uses the joinTeamWithCode mutation to add the user as a team member.
  */
 export async function acceptTeamInvite(input: AcceptTeamInviteInput): Promise<Membership> {
   const result = await getClient().graphql({
-    query: AcceptTeamInvite,
-    variables: { input },
+    query: JoinTeamWithCode,
+    variables: { code: input.code },
   });
-  extractGraphQLError(result, 'acceptTeamInvite');
-  const membership = (result as { data: { acceptTeamInvite: Membership } }).data.acceptTeamInvite;
-  if (!membership) throw new Error('acceptTeamInvite returned null');
+  extractGraphQLError(result, 'joinTeamWithCode');
+  const membership = (result as { data: { joinTeamWithCode: Membership } }).data.joinTeamWithCode;
+  if (!membership) throw new Error('joinTeamWithCode returned null');
   return membership;
 }
 
