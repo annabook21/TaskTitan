@@ -10,9 +10,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Users, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { fetchAuthSession } from 'aws-amplify/auth';
+import { fetchAuthSession, signInWithRedirect } from 'aws-amplify/auth';
 import { useGuestAuth } from '../hooks/useGuestAuth';
 import {
   validateShareCode as apiValidateShareCode,
@@ -318,9 +318,23 @@ export function JoinPage() {
         {/* Footer */}
         <p className="mt-8 text-center text-sm text-slate-500">
           Have an account?{' '}
-          <Link to="/" className="text-cyan-400 hover:text-cyan-300">
+          <button
+            onClick={() => {
+              // Store share code to auto-join after sign-in
+              if (codeInfo) {
+                sessionStorage.setItem('pendingProjectShareCode', JSON.stringify({
+                  code,
+                  projectId: codeInfo.projectId,
+                  projectName: codeInfo.projectName,
+                  timestamp: Date.now()
+                }));
+              }
+              signInWithRedirect();
+            }}
+            className="text-cyan-400 hover:text-cyan-300 hover:underline"
+          >
             Sign in instead
-          </Link>
+          </button>
         </p>
       </div>
     </div>

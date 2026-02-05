@@ -18,6 +18,8 @@ import {
   acceptTeamInvite,
   validateTeamInvite,
   acceptPendingInvitations,
+  guestJoinProject,
+  fetchCurrentUser,
 } from '../api/appsync';
 
 export function AuthCallbackPage() {
@@ -140,9 +142,12 @@ export function AuthCallbackPage() {
       // Check for pending guest migration
       const pendingMigration = localStorage.getItem('pendingGuestMigration');
       if (pendingMigration && isMounted) {
+        let teamIdToRedirect: string | null = null;
+        
         try {
           setStatus('Migrating guest data...');
           const { guestId, teamId } = JSON.parse(pendingMigration);
+          teamIdToRedirect = teamId;
           console.log('[AuthCallbackPage] Migrating guest data:', { guestId, teamId });
 
           const result = await migrateGuestToUser(guestId, teamId);
@@ -153,12 +158,21 @@ export function AuthCallbackPage() {
 
           if (result.success) {
             console.log('[AuthCallbackPage] Guest migration successful');
+            // Redirect to the team after successful migration
+            if (isMounted && teamId) {
+              navigate(`/team/${teamId}`, { replace: true });
+              return;
+            }
           } else {
             console.warn('[AuthCallbackPage] Guest migration partial:', result.message);
           }
         } catch (err) {
           console.error('[AuthCallbackPage] Guest migration error:', err);
-          // Don't fail - user is still authenticated
+          // Still redirect to team even if migration had issues
+          if (isMounted && teamIdToRedirect) {
+            navigate(`/team/${teamIdToRedirect}`, { replace: true });
+            return;
+          }
         } finally {
           // Always clear the pending migration flag
           localStorage.removeItem('pendingGuestMigration');
@@ -182,7 +196,13 @@ export function AuthCallbackPage() {
             localStorage.removeItem('tasktitan_guest_session');
             localStorage.removeItem('guestSession');
             
-            if (!result.success) {
+            if (result.success || result.message?.includes('already')) {
+              // Redirect to team after migration (success or already migrated)
+              if (isMounted && guestSession.teamId) {
+                navigate(`/team/${guestSession.teamId}`, { replace: true });
+                return;
+              }
+            } else {
               console.warn('[AuthCallbackPage] Auto-migration partial:', result.message);
             }
           }
@@ -254,6 +274,47 @@ export function AuthCallbackPage() {
               }
             }
           }
+        }
+      }
+
+      // Check for pending project share code (authenticated user wants to join project)
+      // Since project codes are guest-only, we auto-join as guest then immediately migrate
+      const pendingProjectCode = sessionStorage.getItem('pendingProjectShareCode');
+      if (pendingProjectCode && isMounted) {
+        try {
+          const { code, projectId } = JSON.parse(pendingProjectCode);
+          setStatus('Joining project...');
+          console.log('[AuthCallbackPage] Processing pending project share code:', { code, projectId });
+
+          // Get user profile for display name
+          const userProfile = await fetchCurrentUser();
+          const displayName = userProfile?.name || userProfile?.email?.split('@')[0] || 'User';
+
+          // Join as guest first (required by API)
+          const guestSession = await guestJoinProject({
+            code,
+            displayName,
+          });
+
+          // Immediately migrate to authenticated user
+          setStatus('Upgrading to authenticated member...');
+          const migrationResult = await migrateGuestToUser(guestSession.guestId, guestSession.teamId);
+          console.log('[AuthCallbackPage] Auto-migration after project join:', migrationResult);
+
+          // Clear storage
+          sessionStorage.removeItem('pendingProjectShareCode');
+          localStorage.removeItem('guestSession');
+          localStorage.removeItem('tasktitan_guest_session');
+
+          // Redirect to team page
+          if (isMounted && guestSession.teamId) {
+            navigate(`/team/${guestSession.teamId}`, { replace: true });
+            return;
+          }
+        } catch (err) {
+          console.error('[AuthCallbackPage] Failed to join project with share code:', err);
+          sessionStorage.removeItem('pendingProjectShareCode');
+          // Continue to home - show error would be better UX
         }
       }
 
