@@ -29,13 +29,19 @@ export function useAuth() {
   const checkAuth = useCallback(async () => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
-      // AWS Best Practice: Use fetchAuthSession to get user ID from token 'sub' claim
-      // This is more reliable than getCurrentUser().userId when using signInWithRedirect
-      // Reference: https://docs.amplify.aws/react/build-a-backend/auth/connect-your-frontend/manage-user-sessions/
+      // AWS Best Practice: Check for JWT tokens to distinguish authenticated vs guest users
+      // - Authenticated users have session.tokens (JWT from User Pool)
+      // - Guest users have only session.credentials (IAM from Identity Pool), NO tokens
+      // Reference: https://docs.amplify.aws/react/build-a-backend/auth/concepts/tokens-and-credentials/
       const session = await fetchAuthSession();
-      const cognitoUserId = session.tokens?.idToken?.payload.sub as string | undefined;
+      
+      // Check if JWT tokens exist (authenticated users from User Pool have these)
+      const hasTokens = !!(session.tokens?.idToken);
+      const cognitoUserId = hasTokens
+        ? (session.tokens?.idToken?.payload.sub as string)
+        : null;
 
-      if (!cognitoUserId) {
+      if (!hasTokens || !cognitoUserId) {
         setState({
           isLoading: false,
           isAuthenticated: false,
@@ -46,11 +52,11 @@ export function useAuth() {
         return;
       }
 
-      // Cognito auth is valid - user IS authenticated
+      // User has JWT tokens - they are authenticated via User Pool
       // Don't fetch AppSync user profile here - causes race condition after OAuth
       setState({
         isLoading: false,
-        isAuthenticated: true, // Cognito is the source of truth
+        isAuthenticated: true,
         cognitoUserId,
         user: null, // Will be loaded separately when needed
         error: null,
