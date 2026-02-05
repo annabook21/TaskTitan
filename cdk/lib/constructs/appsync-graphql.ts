@@ -5110,7 +5110,9 @@ export function response(ctx) {
   return {
     valid: true,
     projectId: codeItem.projectId,
-    projectName: codeItem.projectName || null
+    projectName: codeItem.projectName || null,
+    teamId: codeItem.teamId || null,
+    teamName: codeItem.teamName || null
   };
 }
 `.trim(),

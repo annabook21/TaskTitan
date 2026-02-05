@@ -326,6 +326,8 @@ export function JoinPage() {
                   code,
                   projectId: codeInfo.projectId,
                   projectName: codeInfo.projectName,
+                  teamId: codeInfo.teamId,
+                  teamName: codeInfo.teamName,
                   timestamp: Date.now()
                 }));
               }
