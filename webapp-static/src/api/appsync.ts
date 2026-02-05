@@ -2787,14 +2787,14 @@ export async function generateWireframe(input: GenerateWireframeInput): Promise<
  * Analyze import data to detect column mappings and format.
  * Provides suggestions for mapping CSV/spreadsheet columns to component fields.
  */
-export async function analyzeImport(input: AnalyzeImportInput): Promise<AnalyzeImportResult> {
+export async function analyzeImportData(input: AnalyzeImportInput): Promise<AnalyzeImportResult> {
   const result = await getClient().graphql({
-    query: AnalyzeImport,
+    query: AnalyzeImportData,
     variables: { input },
   });
-  extractGraphQLError(result, 'analyzeImport');
-  const analysis = (result as { data: { analyzeImport: AnalyzeImportResult } }).data.analyzeImport;
-  if (!analysis) throw new Error('analyzeImport returned null');
+  extractGraphQLError(result, 'analyzeImportData');
+  const analysis = (result as { data: { analyzeImportData: AnalyzeImportResult } }).data.analyzeImportData;
+  if (!analysis) throw new Error('analyzeImportData returned null');
   return analysis;
 }
 
@@ -2802,14 +2802,14 @@ export async function analyzeImport(input: AnalyzeImportInput): Promise<AnalyzeI
  * Clean up import data based on provided mappings.
  * Normalizes and transforms rows for import.
  */
-export async function cleanupImport(input: CleanupImportInput): Promise<CleanupImportResult> {
+export async function cleanupImportData(input: CleanupImportInput): Promise<CleanupImportResult> {
   const result = await getClient().graphql({
-    query: CleanupImport,
+    query: CleanupImportData,
     variables: { input },
   });
-  extractGraphQLError(result, 'cleanupImport');
-  const cleanup = (result as { data: { cleanupImport: CleanupImportResult } }).data.cleanupImport;
-  if (!cleanup) throw new Error('cleanupImport returned null');
+  extractGraphQLError(result, 'cleanupImportData');
+  const cleanup = (result as { data: { cleanupImportData: CleanupImportResult } }).data.cleanupImportData;
+  if (!cleanup) throw new Error('cleanupImportData returned null');
   return cleanup;
 }
 
