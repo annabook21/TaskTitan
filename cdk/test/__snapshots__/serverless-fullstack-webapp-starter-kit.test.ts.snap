@@ -5063,6 +5063,103 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::FunctionConfiguration",
     },
+    "AppSyncGraphqlDeleteMemberWithAssignmentsFn0394D210": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+  const userId = ctx.stash.userId;
+  const assignments = ctx.stash.assignments || [];
+  const transactItems = [];
+  
+  // Delete all assignments and clear component owners
+  // AWS Best Practice: Up to 100 items in transaction
+  assignments.forEach(assignment => {
+    // Delete assignment record
+    transactItems.push({
+      table: 'TaskTitanForgeStack-TaskTitan',
+      operation: 'DeleteItem',
+      key: util.dynamodb.toMapValues({
+        pk: 'COMPONENT#' + assignment.componentId,
+        sk: 'ASSIGNEE#' + userId
+      })
+    });
+    
+    // Clear component owner field
+    transactItems.push({
+      table: 'TaskTitanForgeStack-TaskTitan',
+      operation: 'UpdateItem',
+      key: util.dynamodb.toMapValues({
+        pk: 'COMPONENT#' + assignment.componentId,
+        sk: 'METADATA'
+      }),
+      update: {
+        expression: 'REMOVE #owner SET updatedAt = :now',
+        expressionNames: { '#owner': 'owner' },
+        expressionValues: util.dynamodb.toMapValues({ ':now': util.time.nowISO8601() })
+      }
+    });
+  });
+  
+  // Delete membership
+  transactItems.push({
+    table: 'TaskTitanForgeStack-TaskTitan',
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    }),
+    condition: { expression: 'attribute_exists(pk)' }
+  });
+  
+  // Decrement team member count
+  transactItems.push({
+    table: 'TaskTitanForgeStack-TaskTitan',
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'TEAM#' + teamId, sk: 'METADATA' }),
+    update: {
+      expression: 'SET memberCount = if_not_exists(memberCount, :one) - :one',
+      expressionValues: util.dynamodb.toMapValues({ ':one': 1 })
+    }
+  });
+  
+  return {
+    operation: 'TransactWriteItems',
+    transactItems: transactItems
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      util.error('Member not found in team', 'MemberNotFound');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+  
+  const assignmentCount = ctx.stash.assignments?.length || 0;
+  console.log(\`Removed member with \${assignmentCount} assignments\`);
+  return true;
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "deleteMemberWithAssignments",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlDeleteProjectResolverDDDBE7F8": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -8254,6 +8351,54 @@ export function response(ctx) {
       },
       "Type": "AWS::AppSync::Resolver",
     },
+    "AppSyncGraphqlListAssignmentsForRemovalFnFBEB0BFD": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.args.userId;
+  ctx.stash.teamId = ctx.args.teamId;
+  ctx.stash.userId = userId;
+  
+  // Query GSI1 for all assignments: gsi1pk=USER#userId, gsi1sk begins_with ASSIGNMENT#
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'ASSIGNMENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  
+  // Store assignments for deletion
+  ctx.stash.assignments = ctx.result.items || [];
+  return ctx.result.items || [];
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "listAssignmentsForRemoval",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
     "AppSyncGraphqlListAssignmentsForTeamMemberResolver851A1A2B": {
       "DependsOn": [
         "AppSyncGraphqlApiDynamoDBA02B9D11",
@@ -9957,7 +10102,6 @@ export function response(ctx) {
     },
     "AppSyncGraphqlRemoveTeamMemberResolver3F5966A9": {
       "DependsOn": [
-        "AppSyncGraphqlApiDynamoDBA02B9D11",
         "AppSyncGraphqlApiSchemaC2E94F39",
       ],
       "Properties": {
@@ -9967,47 +10111,30 @@ export function response(ctx) {
             "ApiId",
           ],
         },
-        "Code": "import { util } from '@aws-appsync/utils';
-export function request(ctx) {
-  const teamId = ctx.args.teamId;
-  const userId = ctx.args.userId;
-  return {
-    operation: 'TransactWriteItems',
-    transactItems: [
-      {
-        table: 'TaskTitanForgeStack-TaskTitan',
-        operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({
-          pk: 'TEAM#' + teamId,
-          sk: 'MEMBER#' + userId
-        }),
-        condition: { expression: 'attribute_exists(pk)' }
-      },
-      {
-        table: 'TaskTitanForgeStack-TaskTitan',
-        operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ pk: 'TEAM#' + teamId, sk: 'METADATA' }),
-        update: {
-          expression: 'SET memberCount = if_not_exists(memberCount, :one) - :one',
-          expressionValues: util.dynamodb.toMapValues({ ':one': 1 })
-        }
-      }
-    ]
-  };
+        "Code": "export function request(ctx) {
+  return {};
 }
 export function response(ctx) {
-  if (ctx.error) {
-    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException' ||
-        ctx.error.message.includes('ConditionalCheckFailed')) {
-      util.error('Member not found in team', 'MemberNotFound');
-    }
-    util.error(ctx.error.message, ctx.error.type);
-  }
-  return true;
+  return ctx.prev.result;
 }",
-        "DataSourceName": "DynamoDB",
         "FieldName": "removeTeamMember",
-        "Kind": "UNIT",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlListAssignmentsForRemovalFnFBEB0BFD",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlDeleteMemberWithAssignmentsFn0394D210",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",

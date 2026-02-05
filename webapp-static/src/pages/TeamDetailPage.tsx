@@ -4,6 +4,7 @@ import {
   getTeamWithMembers,
   listProjectsByTeam,
   deleteTeam,
+  removeTeamMember,
   type Project,
   type Membership,
 } from '../api/appsync';
@@ -27,6 +28,7 @@ import {
   Loader2,
   ChevronRight,
   UserPlus,
+  X,
 } from 'lucide-react';
 import { MemberWorkloadModal } from '../components/MemberWorkloadModal';
 import { TeamInviteModal } from '../components/TeamInviteModal';
@@ -80,6 +82,10 @@ export function TeamDetailPage() {
 
   // Team invite modal
   const [showInviteModal, setShowInviteModal] = useState(false);
+
+  // Member removal state
+  const [memberToRemove, setMemberToRemove] = useState<{ userId: string; name: string } | null>(null);
+  const [removingMember, setRemovingMember] = useState(false);
 
   useEffect(() => {
     if (!id || authLoading) return;
@@ -136,6 +142,26 @@ export function TeamDetailPage() {
     } catch (err) {
       setError((err as Error)?.message ?? 'Delete failed');
       setDeleting(false);
+    }
+  };
+
+  const handleRemoveMember = async () => {
+    if (!memberToRemove || !id) return;
+
+    setRemovingMember(true);
+    try {
+      await removeTeamMember(id, memberToRemove.userId);
+      
+      // Refresh team data to show updated member list
+      const updated = await getTeamWithMembers(id);
+      setMembers(updated?.members ?? []);
+      setTeam(updated?.team ?? null);
+      
+      setMemberToRemove(null);
+    } catch (err) {
+      console.error('[TeamDetailPage] Remove member error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to remove member');
+      setRemovingMember(false);
     }
   };
 
@@ -363,46 +389,63 @@ export function TeamDetailPage() {
                 const initial = displayName[0]?.toUpperCase() || 'U';
                 const canViewWorkload = isOwnerOrAdmin && !isGuest;
                 
+                const canRemove = isOwnerOrAdmin && member.userId !== cognitoUserId;
+                
                 return (
-                  <button
+                  <div
                     key={member.id}
-                    onClick={() => canViewWorkload && setSelectedMember({ 
-                      userId: member.userId, 
-                      name: displayName 
-                    })}
-                    className={`flex items-center gap-3 w-full text-left ${
-                      canViewWorkload 
-                        ? 'hover:bg-slate-800/50 -mx-2 px-2 py-2 rounded-lg cursor-pointer transition-colors group' 
-                        : ''
-                    }`}
-                    disabled={!canViewWorkload}
+                    className="flex items-center gap-3 w-full -mx-2 px-2 py-2"
                   >
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-sm font-medium text-white">
-                      {initial}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm font-medium text-slate-200 truncate ${
-                          canViewWorkload ? 'group-hover:text-cyan-400 transition-colors' : ''
-                        }`}>
-                          {displayName}
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${roleColors[role]}`}
-                        >
-                          <RoleIcon className="w-3 h-3" />
-                          {role.toLowerCase()}
-                        </span>
+                    <div
+                      onClick={() => canViewWorkload && setSelectedMember({ 
+                        userId: member.userId, 
+                        name: displayName 
+                      })}
+                      className={`flex items-center gap-3 flex-1 min-w-0 ${
+                        canViewWorkload 
+                          ? 'hover:bg-slate-800/50 rounded-lg cursor-pointer transition-colors group px-2 py-1' 
+                          : 'px-2 py-1'
+                      }`}
+                    >
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center text-sm font-medium text-white">
+                        {initial}
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                        <Mail className="w-3 h-3" />
-                        <span className="truncate">{displayEmail}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-medium text-slate-200 truncate ${
+                            canViewWorkload ? 'group-hover:text-cyan-400 transition-colors' : ''
+                          }`}>
+                            {displayName}
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${roleColors[role]}`}
+                          >
+                            <RoleIcon className="w-3 h-3" />
+                            {role.toLowerCase()}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                          <Mail className="w-3 h-3" />
+                          <span className="truncate">{displayEmail}</span>
+                        </div>
                       </div>
+                      {canViewWorkload && (
+                        <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 flex-shrink-0" />
+                      )}
                     </div>
-                    {canViewWorkload && (
-                      <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 flex-shrink-0" />
+                    {canRemove && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMemberToRemove({ userId: member.userId, name: displayName });
+                        }}
+                        className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded transition-colors"
+                        title="Remove member"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -497,6 +540,52 @@ export function TeamDetailPage() {
           teamId={team.id}
           teamName={team.name}
         />
+      )}
+
+      {/* Remove Member Confirmation Modal */}
+      {memberToRemove && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setMemberToRemove(null)}>
+          <div className="bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white mb-2">Remove {memberToRemove.name}?</h3>
+            <p className="text-slate-400 mb-4">
+              This will remove them from the team and clear all their task assignments. This action cannot be undone.
+            </p>
+            {error && (
+              <div className="mb-4 p-3 bg-red-900/30 border border-red-600/30 rounded-lg text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setMemberToRemove(null);
+                  setError(null);
+                }}
+                disabled={removingMember}
+                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRemoveMember}
+                disabled={removingMember}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {removingMember ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Removing...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Remove Member
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1546,7 +1546,9 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
   const result = await getClient().graphql({
     query: RemoveTeamMember,
     variables: { teamId, userId },
+    authMode: 'userPool',
   });
+  extractGraphQLError(result, 'removeTeamMember');
   return (result as { data: { removeTeamMember: boolean } }).data.removeTeamMember;
 }
 

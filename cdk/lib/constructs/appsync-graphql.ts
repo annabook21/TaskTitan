@@ -1267,53 +1267,148 @@ export function response(ctx) {
       ),
     });
 
-    // Resolver: Mutation.removeTeamMember (JS) - TransactWrite: DeleteItem Membership + Decrement memberCount
-    // AWS Best Practice: Use TransactWriteItems for atomic multi-item operations
-    new appsync.Resolver(this, 'RemoveTeamMemberResolver', {
+    // Pipeline Resolver: Mutation.removeTeamMember with cascade assignment cleanup
+    // AWS Best Practice: Query assignments first, then delete everything atomically
+    
+    // Function 1: Query all assignments for the user being removed
+    const listAssignmentsForRemovalFn = new appsync.AppsyncFunction(this, 'ListAssignmentsForRemovalFn', {
       api: this.api,
-      typeName: 'Mutation',
-      fieldName: 'removeTeamMember',
+      name: 'listAssignmentsForRemoval',
       dataSource: dynamoDs,
       runtime: appsync.FunctionRuntime.JS_1_0_0,
       code: appsync.Code.fromInline(
         `
 import { util } from '@aws-appsync/utils';
 export function request(ctx) {
-  const teamId = ctx.args.teamId;
   const userId = ctx.args.userId;
+  ctx.stash.teamId = ctx.args.teamId;
+  ctx.stash.userId = userId;
+  
+  // Query GSI1 for all assignments: gsi1pk=USER#userId, gsi1sk begins_with ASSIGNMENT#
+  return {
+    operation: 'Query',
+    index: 'gsi1',
+    query: {
+      expression: 'gsi1pk = :pk AND begins_with(gsi1sk, :sk)',
+      expressionValues: util.dynamodb.toMapValues({
+        ':pk': 'USER#' + userId,
+        ':sk': 'ASSIGNMENT#'
+      })
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  
+  // Store assignments for deletion
+  ctx.stash.assignments = ctx.result.items || [];
+  return ctx.result.items || [];
+}
+`.trim(),
+      ),
+    });
+
+    // Function 2: Delete member + all assignments + update components atomically
+    const deleteMemberWithAssignmentsFn = new appsync.AppsyncFunction(this, 'DeleteMemberWithAssignmentsFn', {
+      api: this.api,
+      name: 'deleteMemberWithAssignments',
+      dataSource: dynamoDs,
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(
+        `
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const teamId = ctx.stash.teamId;
+  const userId = ctx.stash.userId;
+  const assignments = ctx.stash.assignments || [];
+  const transactItems = [];
+  
+  // Delete all assignments and clear component owners
+  // AWS Best Practice: Up to 100 items in transaction
+  assignments.forEach(assignment => {
+    // Delete assignment record
+    transactItems.push({
+      table: '${dynamoTable.tableName}',
+      operation: 'DeleteItem',
+      key: util.dynamodb.toMapValues({
+        pk: 'COMPONENT#' + assignment.componentId,
+        sk: 'ASSIGNEE#' + userId
+      })
+    });
+    
+    // Clear component owner field
+    transactItems.push({
+      table: '${dynamoTable.tableName}',
+      operation: 'UpdateItem',
+      key: util.dynamodb.toMapValues({
+        pk: 'COMPONENT#' + assignment.componentId,
+        sk: 'METADATA'
+      }),
+      update: {
+        expression: 'REMOVE #owner SET updatedAt = :now',
+        expressionNames: { '#owner': 'owner' },
+        expressionValues: util.dynamodb.toMapValues({ ':now': util.time.nowISO8601() })
+      }
+    });
+  });
+  
+  // Delete membership
+  transactItems.push({
+    table: '${dynamoTable.tableName}',
+    operation: 'DeleteItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    }),
+    condition: { expression: 'attribute_exists(pk)' }
+  });
+  
+  // Decrement team member count
+  transactItems.push({
+    table: '${dynamoTable.tableName}',
+    operation: 'UpdateItem',
+    key: util.dynamodb.toMapValues({ pk: 'TEAM#' + teamId, sk: 'METADATA' }),
+    update: {
+      expression: 'SET memberCount = if_not_exists(memberCount, :one) - :one',
+      expressionValues: util.dynamodb.toMapValues({ ':one': 1 })
+    }
+  });
+  
   return {
     operation: 'TransactWriteItems',
-    transactItems: [
-      {
-        table: '${dynamoTable.tableName}',
-        operation: 'DeleteItem',
-        key: util.dynamodb.toMapValues({
-          pk: 'TEAM#' + teamId,
-          sk: 'MEMBER#' + userId
-        }),
-        condition: { expression: 'attribute_exists(pk)' }
-      },
-      {
-        table: '${dynamoTable.tableName}',
-        operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ pk: 'TEAM#' + teamId, sk: 'METADATA' }),
-        update: {
-          expression: 'SET memberCount = if_not_exists(memberCount, :one) - :one',
-          expressionValues: util.dynamodb.toMapValues({ ':one': 1 })
-        }
-      }
-    ]
+    transactItems: transactItems
   };
 }
 export function response(ctx) {
   if (ctx.error) {
-    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException' ||
-        ctx.error.message.includes('ConditionalCheckFailed')) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
       util.error('Member not found in team', 'MemberNotFound');
     }
     util.error(ctx.error.message, ctx.error.type);
   }
+  
+  const assignmentCount = ctx.stash.assignments?.length || 0;
+  console.log(\`Removed member with \${assignmentCount} assignments\`);
   return true;
+}
+`.trim(),
+      ),
+    });
+
+    // Pipeline Resolver: removeTeamMember
+    new appsync.Resolver(this, 'RemoveTeamMemberResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'removeTeamMember',
+      pipelineConfig: [listAssignmentsForRemovalFn, deleteMemberWithAssignmentsFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(
+        `
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
 }
 `.trim(),
       ),
