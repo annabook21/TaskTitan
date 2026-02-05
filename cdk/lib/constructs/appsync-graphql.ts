@@ -1269,7 +1269,7 @@ export function response(ctx) {
 
     // Pipeline Resolver: Mutation.removeTeamMember with cascade assignment cleanup
     // AWS Best Practice: Query assignments first, then delete everything atomically
-    
+
     // Function 1: Query all assignments for the user being removed
     const listAssignmentsForRemovalFn = new appsync.AppsyncFunction(this, 'ListAssignmentsForRemovalFn', {
       api: this.api,
