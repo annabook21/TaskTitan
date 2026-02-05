@@ -149,6 +149,7 @@ export function TeamDetailPage() {
     if (!memberToRemove || !id) return;
 
     setRemovingMember(true);
+    setError(null);
     try {
       await removeTeamMember(id, memberToRemove.userId);
       
@@ -161,6 +162,7 @@ export function TeamDetailPage() {
     } catch (err) {
       console.error('[TeamDetailPage] Remove member error:', err);
       setError(err instanceof Error ? err.message : 'Failed to remove member');
+    } finally {
       setRemovingMember(false);
     }
   };
