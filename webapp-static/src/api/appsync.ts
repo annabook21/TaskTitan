@@ -2683,9 +2683,9 @@ const GenerateWireframe = /* GraphQL */ `
   }
 `;
 
-const AnalyzeImport = /* GraphQL */ `
-  mutation AnalyzeImport($input: AnalyzeImportInput!) {
-    analyzeImport(input: $input) {
+const AnalyzeImportData = /* GraphQL */ `
+  mutation AnalyzeImportData($input: AnalyzeImportInput!) {
+    analyzeImportData(input: $input) {
       mappings {
         sourceColumn
         targetField
@@ -2698,9 +2698,9 @@ const AnalyzeImport = /* GraphQL */ `
   }
 `;
 
-const CleanupImport = /* GraphQL */ `
-  mutation CleanupImport($input: CleanupImportInput!) {
-    cleanupImport(input: $input) {
+const CleanupImportData = /* GraphQL */ `
+  mutation CleanupImportData($input: CleanupImportInput!) {
+    cleanupImportData(input: $input) {
       rows {
         original
         cleaned
