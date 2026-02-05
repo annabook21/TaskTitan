@@ -1257,6 +1257,11 @@ type Mutation {
   # Creates GUEST#<guestId> and TEAM#<teamId>/MEMBER#GUEST#<guestId> items
   guestJoinProject(input: GuestJoinInput!): GuestSession! @aws_iam
 
+  # Authenticated user joins project with share code (Cognito User Pools auth)
+  # Creates TEAM#<teamId>/MEMBER#<userId> directly (no guest records, no migration)
+  # AWS Best Practice: Separate flows for authenticated vs guest users
+  authenticatedJoinProject(shareCode: String!): Membership! @aws_cognito_user_pools
+
   # Guest self-assigns to a component (IAM auth)
   # Only allowed if component is in guest's project
   guestAssignSelf(guestId: ID!, componentId: ID!): Assignment! @aws_iam

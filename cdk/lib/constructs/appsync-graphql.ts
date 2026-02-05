@@ -5631,6 +5631,91 @@ export function response(ctx) {
       ),
     });
 
+    // AWS Best Practice: Separate mutation for authenticated users
+    // Function: Create authenticated team membership from project share code
+    const createAuthenticatedProjectMembershipFn = new appsync.AppsyncFunction(
+      this,
+      'CreateAuthenticatedProjectMembershipFn',
+      {
+        api: this.api,
+        name: 'createAuthenticatedProjectMembership',
+        dataSource: dynamoDs,
+        runtime: appsync.FunctionRuntime.JS_1_0_0,
+        code: appsync.Code.fromInline(
+          `
+import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const teamId = ctx.stash.teamId;
+  const now = util.time.nowISO8601();
+  const id = teamId + '#' + userId;
+
+  // Create authenticated team membership directly (no guest record)
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: id,
+      teamId: teamId,
+      userId: userId,
+      role: 'MEMBER',
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      gsi1pk: 'USER#' + userId,
+      gsi1sk: 'TEAM#' + teamId
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      // User already a member - fetch and return existing membership
+      util.error('You are already a member of this team', 'AlreadyMember');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  // Return the created membership
+  return {
+    id: ctx.result.id,
+    userId: ctx.result.userId,
+    teamId: ctx.result.teamId,
+    role: ctx.result.role,
+    joinedAt: ctx.result.joinedAt
+  };
+}
+`.trim(),
+        ),
+      },
+    );
+
+    // Pipeline Resolver: authenticatedJoinProject (Cognito User Pools)
+    // AWS Best Practice: Separate flow for authenticated users, no temporary guest records
+    new appsync.Resolver(this, 'AuthenticatedJoinProjectResolver', {
+      api: this.api,
+      typeName: 'Mutation',
+      fieldName: 'authenticatedJoinProject',
+      pipelineConfig: [validateShareCodeFn, createAuthenticatedProjectMembershipFn],
+      runtime: appsync.FunctionRuntime.JS_1_0_0,
+      code: appsync.Code.fromInline(
+        `
+export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}
+`.trim(),
+      ),
+    });
+
     // Resolver: Query.guestGetProject (IAM auth) - Get project for guest
     // AWS Best Practice: Verify cognitoIdentityId matches the guestId
     new appsync.Resolver(this, 'GuestGetProjectResolver', {

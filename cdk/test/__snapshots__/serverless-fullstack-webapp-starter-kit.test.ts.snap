@@ -2285,6 +2285,11 @@ type Mutation {
   # Creates GUEST#<guestId> and TEAM#<teamId>/MEMBER#GUEST#<guestId> items
   guestJoinProject(input: GuestJoinInput!): GuestSession! @aws_iam
 
+  # Authenticated user joins project with share code (Cognito User Pools auth)
+  # Creates TEAM#<teamId>/MEMBER#<userId> directly (no guest records, no migration)
+  # AWS Best Practice: Separate flows for authenticated vs guest users
+  authenticatedJoinProject(shareCode: String!): Membership! @aws_cognito_user_pools
+
   # Guest self-assigns to a component (IAM auth)
   # Only allowed if component is in guest's project
   guestAssignSelf(guestId: ID!, componentId: ID!): Assignment! @aws_iam
@@ -2542,6 +2547,49 @@ export function response(ctx) { return ctx.prev.result; }",
             {
               "Fn::GetAtt": [
                 "AppSyncGraphqlUpdateComponentOwnerFn0496F208",
+                "FunctionId",
+              ],
+            },
+          ],
+        },
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+        "TypeName": "Mutation",
+      },
+      "Type": "AWS::AppSync::Resolver",
+    },
+    "AppSyncGraphqlAuthenticatedJoinProjectResolver79120C8D": {
+      "DependsOn": [
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "export function request(ctx) {
+  return {};
+}
+export function response(ctx) {
+  return ctx.prev.result;
+}",
+        "FieldName": "authenticatedJoinProject",
+        "Kind": "PIPELINE",
+        "PipelineConfig": {
+          "Functions": [
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlValidateShareCodeFn87C31CEE",
+                "FunctionId",
+              ],
+            },
+            {
+              "Fn::GetAtt": [
+                "AppSyncGraphqlCreateAuthenticatedProjectMembershipFn802F8B1D",
                 "FunctionId",
               ],
             },
@@ -3545,6 +3593,76 @@ export function response(ctx) {
         "DataSourceName": "DynamoDB",
         "FunctionVersion": "2018-05-29",
         "Name": "createAssignment",
+        "Runtime": {
+          "Name": "APPSYNC_JS",
+          "RuntimeVersion": "1.0.0",
+        },
+      },
+      "Type": "AWS::AppSync::FunctionConfiguration",
+    },
+    "AppSyncGraphqlCreateAuthenticatedProjectMembershipFn802F8B1D": {
+      "DependsOn": [
+        "AppSyncGraphqlApiDynamoDBA02B9D11",
+        "AppSyncGraphqlApiSchemaC2E94F39",
+      ],
+      "Properties": {
+        "ApiId": {
+          "Fn::GetAtt": [
+            "AppSyncGraphqlApi48248BEB",
+            "ApiId",
+          ],
+        },
+        "Code": "import { util } from '@aws-appsync/utils';
+export function request(ctx) {
+  const userId = ctx.identity.sub;
+  const teamId = ctx.stash.teamId;
+  const now = util.time.nowISO8601();
+  const id = teamId + '#' + userId;
+
+  // Create authenticated team membership directly (no guest record)
+  return {
+    operation: 'PutItem',
+    key: util.dynamodb.toMapValues({
+      pk: 'TEAM#' + teamId,
+      sk: 'MEMBER#' + userId
+    }),
+    attributeValues: util.dynamodb.toMapValues({
+      id: id,
+      teamId: teamId,
+      userId: userId,
+      role: 'MEMBER',
+      joinedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      gsi1pk: 'USER#' + userId,
+      gsi1sk: 'TEAM#' + teamId
+    }),
+    condition: {
+      expression: 'attribute_not_exists(pk)'
+    }
+  };
+}
+export function response(ctx) {
+  if (ctx.error) {
+    if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+      // User already a member - fetch and return existing membership
+      util.error('You are already a member of this team', 'AlreadyMember');
+    }
+    util.error(ctx.error.message, ctx.error.type);
+  }
+
+  // Return the created membership
+  return {
+    id: ctx.result.id,
+    userId: ctx.result.userId,
+    teamId: ctx.result.teamId,
+    role: ctx.result.role,
+    joinedAt: ctx.result.joinedAt
+  };
+}",
+        "DataSourceName": "DynamoDB",
+        "FunctionVersion": "2018-05-29",
+        "Name": "createAuthenticatedProjectMembership",
         "Runtime": {
           "Name": "APPSYNC_JS",
           "RuntimeVersion": "1.0.0",
@@ -12828,6 +12946,165 @@ Welcome to intelligent project planning!
       },
       "Type": "AWS::Cognito::UserPoolDomain",
     },
+    "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiB6723FB92": {
+      "DependsOn": [
+        "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiBServiceRoleDefaultPolicy96C3E726",
+        "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiBServiceRoleBA21DBC1",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-2",
+          "S3Key": "REDACTED",
+        },
+        "Environment": {
+          "Variables": {
+            "AWS_CA_BUNDLE": "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+          },
+        },
+        "Handler": "index.handler",
+        "Layers": [
+          {
+            "Ref": "StaticFrontendDeployFrontendAwsCliLayer2DD59CB6",
+          },
+        ],
+        "MemorySize": 512,
+        "Role": {
+          "Fn::GetAtt": [
+            "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiBServiceRoleBA21DBC1",
+            "Arn",
+          ],
+        },
+        "Runtime": "python3.13",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiBServiceRoleBA21DBC1": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiBServiceRoleDefaultPolicy96C3E726": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::cdk-hnb659fds-assets-123456789012-us-east-2",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::cdk-hnb659fds-assets-123456789012-us-east-2/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "StaticFrontendBucket37767DD7",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "StaticFrontendBucket37767DD7",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "cloudfront:GetInvalidation",
+                "cloudfront:CreateInvalidation",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiBServiceRoleDefaultPolicy96C3E726",
+        "Roles": [
+          {
+            "Ref": "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiBServiceRoleBA21DBC1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "CustomS3AutoDeleteObjectsCustomResourceProviderHandler9D90184F": {
       "DependsOn": [
         "CustomS3AutoDeleteObjectsCustomResourceProviderRole3B1BD092",
@@ -13832,6 +14109,10 @@ exports.handler = async function (event, context) {
             "Key": "aws-cdk:auto-delete-objects",
             "Value": "true",
           },
+          {
+            "Key": "aws-cdk:cr-owned:8bd24cea",
+            "Value": "true",
+          },
         ],
       },
       "Type": "AWS::S3::Bucket",
@@ -13985,6 +14266,47 @@ exports.handler = async function (event, context) {
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "StaticFrontendDeployFrontendAwsCliLayer2DD59CB6": {
+      "Properties": {
+        "Content": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-2",
+          "S3Key": "REDACTED",
+        },
+        "Description": "/opt/awscli/aws",
+      },
+      "Type": "AWS::Lambda::LayerVersion",
+    },
+    "StaticFrontendDeployFrontendCustomResource512MiB615906D7": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "DestinationBucketName": {
+          "Ref": "StaticFrontendBucket37767DD7",
+        },
+        "DistributionId": {
+          "Ref": "StaticFrontendDistribution1DBCD836",
+        },
+        "DistributionPaths": [
+          "/*",
+        ],
+        "OutputObjectKeys": true,
+        "Prune": true,
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C512MiB6723FB92",
+            "Arn",
+          ],
+        },
+        "SourceBucketNames": [
+          "cdk-hnb659fds-assets-123456789012-us-east-2",
+        ],
+        "SourceObjectKeys": [
+          "REDACTED",
+        ],
+        "WaitForDistributionInvalidation": true,
+      },
+      "Type": "Custom::CDKBucketDeployment",
+      "UpdateReplacePolicy": "Delete",
     },
     "StaticFrontendDistribution1DBCD836": {
       "Properties": {

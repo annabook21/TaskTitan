@@ -18,8 +18,7 @@ import {
   acceptTeamInvite,
   validateTeamInvite,
   acceptPendingInvitations,
-  guestJoinProject,
-  fetchCurrentUser,
+  authenticatedJoinProject,
 } from '../api/appsync';
 
 export function AuthCallbackPage() {
@@ -278,43 +277,30 @@ export function AuthCallbackPage() {
       }
 
       // Check for pending project share code (authenticated user wants to join project)
-      // Since project codes are guest-only, we auto-join as guest then immediately migrate
+      // AWS Best Practice: Use separate authenticated flow, no temporary guest records
       const pendingProjectCode = sessionStorage.getItem('pendingProjectShareCode');
       if (pendingProjectCode && isMounted) {
         try {
-          const { code, projectId } = JSON.parse(pendingProjectCode);
+          const { code } = JSON.parse(pendingProjectCode);
           setStatus('Joining project...');
-          console.log('[AuthCallbackPage] Processing pending project share code:', { code, projectId });
+          console.log('[AuthCallbackPage] Joining project with authenticated account:', { code });
 
-          // Get user profile for display name
-          const userProfile = await fetchCurrentUser();
-          const displayName = userProfile?.name || userProfile?.email?.split('@')[0] || 'User';
-
-          // Join as guest first (required by API)
-          const guestSession = await guestJoinProject({
-            code,
-            displayName,
-          });
-
-          // Immediately migrate to authenticated user
-          setStatus('Upgrading to authenticated member...');
-          const migrationResult = await migrateGuestToUser(guestSession.guestId, guestSession.teamId);
-          console.log('[AuthCallbackPage] Auto-migration after project join:', migrationResult);
+          // Call authenticated join mutation (creates team membership directly)
+          const membership = await authenticatedJoinProject(code);
+          console.log('[AuthCallbackPage] Authenticated project join successful:', membership);
 
           // Clear storage
           sessionStorage.removeItem('pendingProjectShareCode');
-          localStorage.removeItem('guestSession');
-          localStorage.removeItem('tasktitan_guest_session');
 
           // Redirect to team page
-          if (isMounted && guestSession.teamId) {
-            navigate(`/team/${guestSession.teamId}`, { replace: true });
+          if (isMounted && membership.teamId) {
+            navigate(`/team/${membership.teamId}`, { replace: true });
             return;
           }
         } catch (err) {
           console.error('[AuthCallbackPage] Failed to join project with share code:', err);
           sessionStorage.removeItem('pendingProjectShareCode');
-          // Continue to home - show error would be better UX
+          // Continue to home - user can retry from projects list
         }
       }
 

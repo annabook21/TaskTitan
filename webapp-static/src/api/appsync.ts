@@ -3307,6 +3307,33 @@ export async function guestJoinProject(input: GuestJoinInput): Promise<GuestSess
 }
 
 /**
+ * Authenticated user joins project with share code (Cognito auth).
+ * AWS Best Practice: Separate flow for authenticated users - no guest records created.
+ */
+export async function authenticatedJoinProject(shareCode: string): Promise<Membership> {
+  const result = await getClient().graphql({
+    query: /* GraphQL */ `
+      mutation AuthenticatedJoinProject($shareCode: String!) {
+        authenticatedJoinProject(shareCode: $shareCode) {
+          id
+          userId
+          teamId
+          role
+          joinedAt
+        }
+      }
+    `,
+    variables: { shareCode },
+    authMode: 'userPool',
+  });
+  extractGraphQLError(result, 'authenticatedJoinProject');
+  const membership = (result as { data: { authenticatedJoinProject: Membership } }).data
+    .authenticatedJoinProject;
+  if (!membership) throw new Error('authenticatedJoinProject returned null');
+  return membership;
+}
+
+/**
  * Get project details for a guest (IAM auth).
  * guestId must match the caller's Cognito Identity ID.
  */
