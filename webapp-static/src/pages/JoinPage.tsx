@@ -14,9 +14,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Users, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { fetchAuthSession, signInWithRedirect } from 'aws-amplify/auth';
 import { useGuestAuth } from '../hooks/useGuestAuth';
+import { useAuth } from '../hooks/useAuth';
 import {
   validateShareCode as apiValidateShareCode,
   guestJoinProject,
+  authenticatedJoinProject,
   type ShareCodeInfo,
 } from '../api/appsync';
 
@@ -26,6 +28,7 @@ export function JoinPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { saveGuestSession, guestSession } = useGuestAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   
   const [step, setStep] = useState<JoinStep>('code');
   const [code, setCode] = useState('');
@@ -33,6 +36,7 @@ export function JoinPage() {
   const [codeInfo, setCodeInfo] = useState<ShareCodeInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
+  const [showGuestForm, setShowGuestForm] = useState(false);
 
   // If already in a guest session, redirect to dashboard
   useEffect(() => {
@@ -40,6 +44,26 @@ export function JoinPage() {
       navigate('/guest');
     }
   }, [guestSession, navigate]);
+
+  // If authenticated and we have a valid code, auto-join directly
+  useEffect(() => {
+    if (isAuthenticated && code && codeInfo?.valid && codeInfo?.teamId && step === 'name') {
+      setStep('joining');
+      setError(null);
+      console.log('[JoinPage] Authenticated user detected, auto-joining project');
+      
+      authenticatedJoinProject(code)
+        .then((membership) => {
+          console.log('[JoinPage] Auto-join successful:', membership);
+          navigate(`/team/${membership.teamId}`);
+        })
+        .catch((err) => {
+          console.error('[JoinPage] Auto-join error:', err);
+          setError(err instanceof Error ? err.message : 'Failed to join project');
+          setStep('name');
+        });
+    }
+  }, [isAuthenticated, code, codeInfo, step, navigate]);
 
   // Check for code in URL query params (e.g., /join?code=ABC123)
   useEffect(() => {
@@ -179,6 +203,18 @@ export function JoinPage() {
     }
   };
 
+  // Show loading while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+          <p className="text-slate-400">Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
@@ -243,10 +279,9 @@ export function JoinPage() {
           </form>
         )}
 
-        {/* Name Entry Step */}
-        {step === 'name' && codeInfo && (
-          <form onSubmit={handleJoinProject} className="space-y-6">
-            {/* Code confirmed */}
+        {/* Join Options - Show clear choice for unauthenticated users */}
+        {step === 'name' && codeInfo && !isAuthenticated && !showGuestForm && (
+          <div className="space-y-6">
             <div className="component-card border-emerald-500/30">
               <div className="flex items-center gap-3 mb-3">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
@@ -254,13 +289,85 @@ export function JoinPage() {
               </div>
               <div className="text-sm text-slate-400">
                 <p>Project: <span className="text-white">{codeInfo.projectName || 'Project'}</span></p>
-                <p>Team: <span className="text-white">{codeInfo.teamName || 'Team'}</span></p>
+                {codeInfo.teamName && <p>Team: <span className="text-white">{codeInfo.teamName}</span></p>}
+              </div>
+            </div>
+
+            <div>
+              <h2 className="text-lg font-semibold text-white mb-4">Choose how to join:</h2>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  sessionStorage.setItem('pendingProjectShareCode', JSON.stringify({
+                    code,
+                    projectId: codeInfo.projectId,
+                    teamId: codeInfo.teamId,
+                    projectName: codeInfo.projectName,
+                    teamName: codeInfo.teamName,
+                    timestamp: Date.now()
+                  }));
+                  signInWithRedirect();
+                }}
+                className="w-full flex items-center gap-3 p-4 mb-3 bg-violet-600 hover:bg-violet-500 rounded-xl transition-all text-left group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold text-white">Sign In</div>
+                  <div className="text-sm text-violet-200">Join permanently with your account</div>
+                </div>
+                <ArrowRight className="w-5 h-5 text-white" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowGuestForm(true)}
+                className="w-full flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl transition-all text-left group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-slate-400" />
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold text-white">Continue as Guest</div>
+                  <div className="text-sm text-slate-400">Quick access (no account needed)</div>
+                </div>
+                <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-white" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStep('code');
+                setCodeInfo(null);
+                setError(null);
+              }}
+              className="w-full px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors"
+            >
+              ← Back
+            </button>
+          </div>
+        )}
+
+        {/* Guest Name Form - Only after explicit guest choice */}
+        {step === 'name' && codeInfo && showGuestForm && (
+          <form onSubmit={handleJoinProject} className="space-y-6">
+            <div className="component-card border-cyan-500/30">
+              <div className="flex items-center gap-3 mb-3">
+                <CheckCircle2 className="w-5 h-5 text-cyan-400" />
+                <span className="text-cyan-400 font-medium">Joining as guest</span>
+              </div>
+              <div className="text-sm text-slate-400">
+                <p>Project: <span className="text-white">{codeInfo.projectName || 'Project'}</span></p>
+                {codeInfo.teamName && <p>Team: <span className="text-white">{codeInfo.teamName}</span></p>}
               </div>
             </div>
 
             <div className="component-card">
               <label htmlFor="name" className="block text-sm font-medium text-slate-300 mb-2">
-                Your Name
+                Your Display Name
               </label>
               <input
                 id="name"
@@ -287,11 +394,7 @@ export function JoinPage() {
             <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  setStep('code');
-                  setCodeInfo(null);
-                  setError(null);
-                }}
+                onClick={() => setShowGuestForm(false)}
                 className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
               >
                 Back
@@ -299,9 +402,9 @@ export function JoinPage() {
               <button
                 type="submit"
                 disabled={!displayName.trim()}
-                className="flex-1 btn-primary py-3 disabled:opacity-50"
+                className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white py-3 rounded-lg font-medium disabled:opacity-50"
               >
-                Join Project
+                Join as Guest
               </button>
             </div>
           </form>
@@ -314,30 +417,6 @@ export function JoinPage() {
             <p className="text-lg text-slate-300">Joining project...</p>
           </div>
         )}
-
-        {/* Footer */}
-        <p className="mt-8 text-center text-sm text-slate-500">
-          Have an account?{' '}
-          <button
-            onClick={() => {
-              // Store share code to auto-join after sign-in
-              if (codeInfo) {
-                sessionStorage.setItem('pendingProjectShareCode', JSON.stringify({
-                  code,
-                  projectId: codeInfo.projectId,
-                  projectName: codeInfo.projectName,
-                  teamId: codeInfo.teamId,
-                  teamName: codeInfo.teamName,
-                  timestamp: Date.now()
-                }));
-              }
-              signInWithRedirect();
-            }}
-            className="text-cyan-400 hover:text-cyan-300 hover:underline"
-          >
-            Sign in instead
-          </button>
-        </p>
       </div>
     </div>
   );
