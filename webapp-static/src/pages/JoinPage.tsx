@@ -318,7 +318,7 @@ export function JoinPage() {
         {/* Footer */}
         <p className="mt-8 text-center text-sm text-slate-500">
           Have an account?{' '}
-          <Link to="/sign-in" className="text-cyan-400 hover:text-cyan-300">
+          <Link to="/" className="text-cyan-400 hover:text-cyan-300">
             Sign in instead
           </Link>
         </p>
