@@ -294,7 +294,7 @@ export function JoinPage() {
             </div>
 
             <div>
-              <h2 className="text-lg font-semibold text-white mb-4">Choose how to join:</h2>
+              <h2 className="text-lg font-semibold text-white mb-4">Sign in to join this project:</h2>
               
               <button
                 type="button"
@@ -309,32 +309,21 @@ export function JoinPage() {
                   }));
                   signInWithRedirect();
                 }}
-                className="w-full flex items-center gap-3 p-4 mb-3 bg-violet-600 hover:bg-violet-500 rounded-xl transition-all text-left group"
+                className="w-full flex items-center gap-3 p-4 bg-violet-600 hover:bg-violet-500 rounded-xl transition-all text-left group"
               >
                 <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
                   <Users className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1">
                   <div className="font-semibold text-white">Sign In</div>
-                  <div className="text-sm text-violet-200">Join permanently with your account</div>
+                  <div className="text-sm text-violet-200">You need an account to join</div>
                 </div>
                 <ArrowRight className="w-5 h-5 text-white" />
               </button>
 
-              <button
-                type="button"
-                onClick={() => setShowGuestForm(true)}
-                className="w-full flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl transition-all text-left group"
-              >
-                <div className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center">
-                  <Users className="w-5 h-5 text-slate-400" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-white">Continue as Guest</div>
-                  <div className="text-sm text-slate-400">Quick access (no account needed)</div>
-                </div>
-                <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-white" />
-              </button>
+              <p className="mt-4 text-sm text-slate-500 text-center">
+                Don't have an account? You'll be prompted to create one after clicking Sign In.
+              </p>
             </div>
 
             <button

@@ -183,10 +183,18 @@ export function AcceptTeamInvitePage() {
       })
       .catch((err) => {
         console.error('[AcceptTeamInvitePage] acceptTeamInvite error:', err);
-        const message = err instanceof Error ? err.message : 'Failed to accept invitation';
+        
+        // Extract error from GraphQL response
+        const graphqlErrors = (err as any)?.errors || [];
+        const errorType = graphqlErrors[0]?.errorType || '';
+        const errorMessage = graphqlErrors[0]?.message || '';
+        const message = err instanceof Error ? err.message : errorMessage || 'Failed to accept invitation';
 
-        // Treat AlreadyMember as success - redirect anyway
-        if (message.includes('AlreadyMember') || message.includes('ConditionalCheckFailed')) {
+        // Treat AlreadyMember or ConditionalCheckFailed as success - user is already in team
+        if (errorType === 'DynamoDB:ConditionalCheckFailedException' || 
+            message.includes('AlreadyMember') || 
+            message.includes('already a member')) {
+          console.log('[AcceptTeamInvitePage] User already a member, redirecting');
           navigate(inviteInfo?.teamId ? `/team/${inviteInfo.teamId}` : '/home');
           return;
         }
@@ -353,7 +361,7 @@ export function AcceptTeamInvitePage() {
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">Join Team</h1>
           <p className="text-slate-400">
-            Enter the invitation code to join. <strong className="text-emerald-400">No account required!</strong>
+            Enter the invitation code to join with your account.
           </p>
         </div>
 
@@ -430,34 +438,9 @@ export function AcceptTeamInvitePage() {
                 You can join immediately as a guest, or create an account for permanent access.
               </p>
               
-              {/* Option 1: Join as Guest (MOST PROMINENT - No account needed) */}
-              <button
-                onClick={() => setStep('guest-name')}
-                className="w-full flex items-center gap-3 p-4 bg-emerald-500/10 border-2 border-emerald-500/30 rounded-xl hover:border-emerald-500/50 transition-all text-left group"
-              >
-                <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/30">
-                  <Users className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-white flex items-center gap-2">
-                    Join as Guest
-                    <span className="text-xs font-normal text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full">No account needed</span>
-                  </div>
-                  <div className="text-sm text-slate-400">Start contributing immediately - just enter your name</div>
-                </div>
-                <ArrowRight className="w-5 h-5 text-emerald-400 group-hover:text-emerald-300" />
-              </button>
-
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-700"></div>
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-slate-900 px-2 text-slate-500">Or create an account</span>
-                </div>
-              </div>
-
-              {/* Option 2: Create Account */}
+              {/* Guest access disabled - authentication required */}
+              
+              {/* Option 1: Create Account */}
               <Link
                 to={`/sign-up?redirect=${encodeURIComponent(`/join-team?code=${code}`)}`}
                 className="w-full flex items-center gap-3 p-4 bg-slate-800 border border-slate-700 rounded-xl hover:border-violet-500/50 transition-all text-left group"
@@ -472,7 +455,7 @@ export function AcceptTeamInvitePage() {
                 <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-violet-400" />
               </Link>
 
-              {/* Option 3: Sign In (if have account) */}
+              {/* Option 2: Sign In (if have account) */}
               <button
                 onClick={handleSignInAndAccept}
                 className="w-full flex items-center gap-3 p-4 bg-slate-800 border border-slate-700 rounded-xl hover:border-cyan-500/50 transition-all text-left group"
