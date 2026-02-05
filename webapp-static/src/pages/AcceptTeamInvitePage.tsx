@@ -46,6 +46,9 @@ export function AcceptTeamInvitePage() {
 
   // Race condition prevention: ignore stale validation responses
   const validateRequestId = useRef(0);
+  
+  // React Best Practice: Track which code has been auto-accepted to prevent infinite loops
+  const autoAcceptAttemptedForCode = useRef<string | null>(null);
 
   // Format code as user types (uppercase, max 6 chars)
   const handleCodeChange = (value: string) => {
@@ -75,23 +78,10 @@ export function AcceptTeamInvitePage() {
 
       if (result.valid) {
         setInviteInfo(result);
-        // If authenticated, accept directly
-        if (isAuthenticated) {
-          setIsJoining(true);
-          setStep('joining');
-          try {
-            await acceptTeamInvite({ code: normalizedCode });
-            navigate(`/team/${result.teamId}`);
-          } catch (err: unknown) {
-            console.error('[AcceptTeamInvitePage] acceptTeamInvite error:', err);
-            const message = err instanceof Error ? err.message : 'Failed to accept invitation';
-            setError(message);
-            setIsJoining(false);
-            setStep('options');
-          }
-        } else {
-          setStep('options');
-        }
+        setStep('options');
+        // Reset auto-accept marker for new code
+        autoAcceptAttemptedForCode.current = null;
+        // Let the useEffect handle auto-accept for authenticated users
       } else {
         setError('Invalid or expired invitation code');
       }
@@ -171,29 +161,43 @@ export function AcceptTeamInvitePage() {
   // This was preventing guests from signing in from the invite page
   // Users can still navigate to /guest manually if needed
 
-  // If authenticated and we have a code, auto-accept
+  // If authenticated and we have a code, auto-accept (run ONCE per code)
+  // React Best Practice: Use ref to prevent infinite loops
   useEffect(() => {
-    if (isAuthenticated && code && inviteInfo?.valid && step === 'options') {
-      setIsJoining(true);
-      setStep('joining');
-      acceptTeamInvite({ code })
-        .then(() => {
-          if (inviteInfo?.teamId) {
-            navigate(`/team/${inviteInfo.teamId}`);
-          } else {
-            navigate('/home');
-          }
-        })
-        .catch((err) => {
-          console.error('[AcceptTeamInvitePage] acceptTeamInvite error:', err);
-          const message = err instanceof Error ? err.message : 'Failed to accept invitation';
-          setError(message);
-          setIsJoining(false);
-          setStep('options');
-        });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, code, inviteInfo?.valid, step]);
+    if (!isAuthenticated) return;
+    if (!inviteInfo?.valid) return;
+    if (step !== 'options') return;
+    if (isJoining) return;
+    if (!code) return;
+
+    // Prevent infinite retry loops - only attempt once per code
+    if (autoAcceptAttemptedForCode.current === code) return;
+    autoAcceptAttemptedForCode.current = code;
+
+    setIsJoining(true);
+    setStep('joining');
+
+    acceptTeamInvite({ code })
+      .then(() => {
+        navigate(inviteInfo?.teamId ? `/team/${inviteInfo.teamId}` : '/home');
+      })
+      .catch((err) => {
+        console.error('[AcceptTeamInvitePage] acceptTeamInvite error:', err);
+        const message = err instanceof Error ? err.message : 'Failed to accept invitation';
+
+        // Treat AlreadyMember as success - redirect anyway
+        if (message.includes('AlreadyMember') || message.includes('ConditionalCheckFailed')) {
+          navigate(inviteInfo?.teamId ? `/team/${inviteInfo.teamId}` : '/home');
+          return;
+        }
+
+        // Other errors - show but don't retry automatically
+        setError(message);
+        setIsJoining(false);
+        setStep('options');
+        // Keep autoAcceptAttemptedForCode set to prevent loop
+      });
+  }, [isAuthenticated, inviteInfo?.valid, inviteInfo?.teamId, step, isJoining, code, navigate]);
 
   // Check for code in URL query params - auto-populate and validate
   useEffect(() => {
