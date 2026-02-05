@@ -3270,6 +3270,7 @@ export async function inviteTeamMember(input: InviteTeamMemberInput): Promise<bo
 export async function checkPendingInvitations(): Promise<TeamInvitation[]> {
   const result = await getClient().graphql({
     query: CheckPendingInvitations,
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'checkPendingInvitations');
   return (result as { data: { checkPendingInvitations: TeamInvitation[] } }).data.checkPendingInvitations || [];
@@ -3283,6 +3284,7 @@ export async function checkPendingInvitations(): Promise<TeamInvitation[]> {
 export async function acceptPendingInvitations(): Promise<boolean> {
   const result = await getClient().graphql({
     query: AcceptPendingInvitations,
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'acceptPendingInvitations');
   return (result as { data: { acceptPendingInvitations: boolean } }).data.acceptPendingInvitations;
@@ -3606,6 +3608,7 @@ export async function generateTeamInvite(input: GenerateTeamInviteInput): Promis
   const result = await getClient().graphql({
     query: GenerateTeamInvite,
     variables: { input },
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'generateTeamInvite');
   const code = (result as { data: { generateTeamInvite: TeamInviteCode } }).data.generateTeamInvite;
@@ -3642,6 +3645,7 @@ export async function listTeamInviteCodes(teamId: string): Promise<TeamInviteCod
   const result = await getClient().graphql({
     query: ListTeamInviteCodes,
     variables: { teamId },
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'listTeamInviteCodes');
   return (result as { data: { listTeamInviteCodes: TeamInviteCode[] } }).data.listTeamInviteCodes || [];
@@ -3654,6 +3658,7 @@ export async function joinTeamWithCode(code: string): Promise<Membership> {
   const result = await getClient().graphql({
     query: JoinTeamWithCode,
     variables: { code },
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'joinTeamWithCode');
   const membership = (result as { data: { joinTeamWithCode: Membership } }).data.joinTeamWithCode;
@@ -3668,6 +3673,7 @@ export async function revokeTeamInvite(code: string): Promise<boolean> {
   const result = await getClient().graphql({
     query: RevokeTeamInvite,
     variables: { code },
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'revokeTeamInvite');
   return (result as { data: { revokeTeamInvite: boolean } }).data.revokeTeamInvite;
@@ -3709,6 +3715,7 @@ export async function acceptTeamInvite(input: AcceptTeamInviteInput): Promise<Me
   const result = await getClient().graphql({
     query: JoinTeamWithCode,
     variables: { code: input.code },
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'joinTeamWithCode');
   const membership = (result as { data: { joinTeamWithCode: Membership } }).data.joinTeamWithCode;
@@ -3742,6 +3749,7 @@ export async function migrateGuestToUser(guestId: string, teamId: string): Promi
   const result = await getClient().graphql({
     query: MigrateGuestToUser,
     variables: { guestId, teamId },
+    authMode: 'userPool',
   });
   extractGraphQLError(result, 'migrateGuestToUser');
   return (result as { data: { migrateGuestToUser: MigrationResult } }).data.migrateGuestToUser;

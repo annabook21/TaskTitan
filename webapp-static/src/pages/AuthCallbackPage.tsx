@@ -12,7 +12,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { Loader2 } from 'lucide-react';
-import { syncUserProfile, migrateGuestToUser, acceptTeamInvite, validateTeamInvite } from '../api/appsync';
+import {
+  syncUserProfile,
+  migrateGuestToUser,
+  acceptTeamInvite,
+  validateTeamInvite,
+  acceptPendingInvitations,
+} from '../api/appsync';
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -116,6 +122,18 @@ export function AuthCallbackPage() {
         }
       } catch (err) {
         console.error('[AuthCallbackPage] Profile sync error:', err);
+        // Don't fail - user is still authenticated
+      }
+
+      // Auto-accept pending email invitations
+      try {
+        setStatus('Checking for pending invitations...');
+        const accepted = await acceptPendingInvitations();
+        if (accepted) {
+          console.log('[AuthCallbackPage] Auto-accepted pending email invitations');
+        }
+      } catch (err) {
+        console.warn('[AuthCallbackPage] Failed to accept pending invitations:', err);
         // Don't fail - user is still authenticated
       }
 

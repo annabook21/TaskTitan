@@ -7022,8 +7022,9 @@ export function request(ctx) {
       sk: 'METADATA'
     }),
     update: {
-      expression: 'SET usageCount = usageCount + :one',
+      expression: 'SET usageCount = if_not_exists(usageCount, :zero) + :one',
       expressionValues: util.dynamodb.toMapValues({
+        ':zero': 0,
         ':one': 1
       })
     }
